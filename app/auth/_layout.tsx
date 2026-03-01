@@ -1,5 +1,4 @@
-// app/auth/_layout.tsx
-import { Stack } from 'expo-router';
+import { Stack } from "expo-router";
 
 export default function AuthLayout() {
   return (
@@ -7,6 +6,7 @@ export default function AuthLayout() {
       <Stack.Screen name="login" />
       <Stack.Screen name="signup-customer" />
       <Stack.Screen name="signup-seller" />
+      <Stack.Screen name="verify-otp" />
     </Stack>
   );
 }
