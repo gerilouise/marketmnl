@@ -1,50 +1,59 @@
-// app/(tabs)/browse.tsx
-import React, { useState, useEffect } from "react";
+import { useProducts } from "@/hooks/useProducts";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
   FlatList,
+  Image,
+  StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
+  View,
 } from "react-native";
-import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
 
-const PRODUCTS = Array.from({ length: 48 }).map((_, i) => ({
-  id: i.toString(),
-  name: ["Spicy Tuyo", "Spicy Bangus", "Spicy Tinapa", "Original Tapa"][i % 4],
-  price: 250,
-  priceDisplay: "₱250",
-  rating: 4.9,
-  category: ["Bottled", "Dried"][i % 2],
-}));
-
-const FILTERS = ["All Products", "Bottled"];
+const FILTERS = ["All", "Bottled", "Dried"];
 
 export default function BrowseScreen() {
   const params = useLocalSearchParams();
-  const [selectedFilter, setSelectedFilter] = useState("All Products");
+  const [selectedFilter, setSelectedFilter] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState("asc");
   const [showSortOptions, setShowSortOptions] = useState(false);
+
+  const { products, loading, fetchProductsByCategory, searchProducts } =
+    useProducts();
 
   // Handle category from home screen
   useEffect(() => {
     if (params.category) {
       setSelectedFilter(params.category as string);
+      fetchProductsByCategory(params.category as string);
+    } else {
+      fetchProductsByCategory("All");
     }
   }, [params.category]);
 
-  // Filter products based on selected filter and search query
-  const filteredProducts = PRODUCTS.filter(product => {
-    const matchesFilter = selectedFilter === "All Products" || product.category === selectedFilter;
-    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesSearch;
-  });
+  // Handle filter change
+  useEffect(() => {
+    fetchProductsByCategory(selectedFilter);
+  }, [selectedFilter]);
 
-  // Sort products based on sort order
-  const sortedProducts = [...filteredProducts].sort((a, b) => {
+  // Handle search
+  useEffect(() => {
+    if (searchQuery.length > 2) {
+      const delayDebounce = setTimeout(() => {
+        searchProducts(searchQuery);
+      }, 500);
+      return () => clearTimeout(delayDebounce);
+    } else if (searchQuery.length === 0) {
+      fetchProductsByCategory(selectedFilter);
+    }
+  }, [searchQuery]);
+
+  // Sort products
+  const sortedProducts = [...products].sort((a, b) => {
     if (sortOrder === "asc") {
       return a.price - b.price;
     } else {
@@ -56,40 +65,46 @@ export default function BrowseScreen() {
     setShowSortOptions(!showSortOptions);
   };
 
-  const selectSortOrder = (order) => {
+  const selectSortOrder = (order: string) => {
     setSortOrder(order);
     setShowSortOptions(false);
   };
 
-  const navigateToProduct = (productId) => {
+  const navigateToProduct = (productId: string) => {
     router.push(`/product/${productId}`);
   };
 
   const renderItem = ({ item }: any) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.card}
       onPress={() => navigateToProduct(item.id)}
     >
       {/* Image Placeholder */}
       <View style={styles.imagePlaceholder}>
-        <Ionicons name="image-outline" size={30} color="#CCC" />
+        {item.image_url ? (
+          <Image source={{ uri: item.image_url }} style={styles.productImage} />
+        ) : (
+          <Ionicons name="image-outline" size={30} color="#CCC" />
+        )}
       </View>
 
       {/* Wishlist icon */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.heartButton}
         onPress={(e) => {
           e.stopPropagation();
-          console.log('Toggle wishlist:', item.id);
+          console.log("Toggle wishlist:", item.id);
         }}
       >
         <Ionicons name="heart-outline" size={20} color="#8F796F" />
       </TouchableOpacity>
 
-      <Text style={styles.title}>{item.name}</Text>
+      <Text style={styles.title} numberOfLines={1}>
+        {item.name}
+      </Text>
 
       <View style={styles.row}>
-        <Text style={styles.price}>{item.priceDisplay}</Text>
+        <Text style={styles.price}>₱{item.price}</Text>
         <View style={styles.ratingContainer}>
           <Ionicons name="star" size={12} color="#FFD700" />
           <Text style={styles.rating}>{item.rating}</Text>
@@ -98,21 +113,35 @@ export default function BrowseScreen() {
     </TouchableOpacity>
   );
 
+  if (loading && products.length === 0) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#C35822" />
+        <Text style={styles.loadingText}>Loading products...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Search Bar with Icon */}
       <View style={styles.searchRow}>
         <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={20} color="#8F796F" style={styles.searchIcon} />
+          <Ionicons
+            name="search-outline"
+            size={20}
+            color="#8F796F"
+            style={styles.searchIcon}
+          />
           <TextInput
-            placeholder="Search..."
+            placeholder="Search products..."
             placeholderTextColor="#8F796F"
             style={styles.searchInput}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
         </View>
-        
+
         {/* Sort Button */}
         <TouchableOpacity style={styles.sortButton} onPress={toggleSort}>
           <Ionicons name="options-outline" size={20} color="#32221B" />
@@ -122,31 +151,51 @@ export default function BrowseScreen() {
       {/* Sort Options Dropdown */}
       {showSortOptions && (
         <View style={styles.sortDropdown}>
-          <TouchableOpacity 
-            style={[styles.sortOption, sortOrder === 'asc' && styles.sortOptionActive]} 
-            onPress={() => selectSortOrder('asc')}
+          <TouchableOpacity
+            style={[
+              styles.sortOption,
+              sortOrder === "asc" && styles.sortOptionActive,
+            ]}
+            onPress={() => selectSortOrder("asc")}
           >
-            <Text style={[styles.sortOptionText, sortOrder === 'asc' && styles.sortOptionTextActive]}>
+            <Text
+              style={[
+                styles.sortOptionText,
+                sortOrder === "asc" && styles.sortOptionTextActive,
+              ]}
+            >
               Price: Low to High
             </Text>
-            {sortOrder === 'asc' && <Ionicons name="checkmark" size={18} color="#C35822" />}
+            {sortOrder === "asc" && (
+              <Ionicons name="checkmark" size={18} color="#C35822" />
+            )}
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.sortOption, sortOrder === 'desc' && styles.sortOptionActive]} 
-            onPress={() => selectSortOrder('desc')}
+
+          <TouchableOpacity
+            style={[
+              styles.sortOption,
+              sortOrder === "desc" && styles.sortOptionActive,
+            ]}
+            onPress={() => selectSortOrder("desc")}
           >
-            <Text style={[styles.sortOptionText, sortOrder === 'desc' && styles.sortOptionTextActive]}>
+            <Text
+              style={[
+                styles.sortOptionText,
+                sortOrder === "desc" && styles.sortOptionTextActive,
+              ]}
+            >
               Price: High to Low
             </Text>
-            {sortOrder === 'desc' && <Ionicons name="checkmark" size={18} color="#C35822" />}
+            {sortOrder === "desc" && (
+              <Ionicons name="checkmark" size={18} color="#C35822" />
+            )}
           </TouchableOpacity>
         </View>
       )}
 
       {/* Filter Chips */}
       <View style={styles.filterRow}>
-        {FILTERS.map((filter, index) => (
+        {FILTERS.map((filter) => (
           <TouchableOpacity
             key={filter}
             style={[
@@ -168,9 +217,7 @@ export default function BrowseScreen() {
       </View>
 
       {/* Product Count */}
-      <Text style={styles.count}>
-        Showing {sortedProducts.length} products
-      </Text>
+      <Text style={styles.count}>Showing {sortedProducts.length} products</Text>
 
       {/* Product Grid */}
       <FlatList
@@ -181,6 +228,12 @@ export default function BrowseScreen() {
         columnWrapperStyle={{ justifyContent: "space-between" }}
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="cube-outline" size={60} color="#E0DAD1" />
+            <Text style={styles.emptyText}>No products found</Text>
+          </View>
+        }
       />
     </View>
   );
@@ -193,16 +246,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FBF7F2",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#8F796F",
+  },
   searchRow: {
     flexDirection: "row",
     marginBottom: 8,
-    position: 'relative',
+    position: "relative",
     zIndex: 2,
   },
   searchContainer: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#FFF",
     borderRadius: 12,
     borderWidth: 1.5,
@@ -216,7 +280,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: '#32221B',
+    color: "#32221B",
     paddingVertical: 10,
   },
   sortButton: {
@@ -231,16 +295,16 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   sortDropdown: {
-    position: 'absolute',
+    position: "absolute",
     top: 70,
     right: 16,
-    backgroundColor: '#FFF',
+    backgroundColor: "#FFF",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E0DAD1',
+    borderColor: "#E0DAD1",
     padding: 8,
     zIndex: 3,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -248,23 +312,23 @@ const styles = StyleSheet.create({
     width: 180,
   },
   sortOption: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
   },
   sortOptionActive: {
-    backgroundColor: '#FBF7F2',
+    backgroundColor: "#FBF7F2",
   },
   sortOptionText: {
     fontSize: 14,
-    color: '#32221B',
+    color: "#32221B",
   },
   sortOptionTextActive: {
-    color: '#C35822',
-    fontWeight: '500',
+    color: "#C35822",
+    fontWeight: "500",
   },
   filterRow: {
     flexDirection: "row",
@@ -306,7 +370,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
     width: "48%",
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
@@ -317,11 +381,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#F0F0F0",
     borderRadius: 12,
     marginBottom: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed',
+    borderColor: "#E0E0E0",
+    borderStyle: "dashed",
+  },
+  productImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 12,
   },
   heartButton: {
     position: "absolute",
@@ -333,7 +402,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -343,7 +412,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 6,
-    color: '#32221B',
+    color: "#32221B",
   },
   row: {
     flexDirection: "row",
@@ -367,5 +436,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#666",
     marginLeft: 2,
+  },
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: "#8F796F",
+    marginTop: 12,
   },
 });

@@ -14,7 +14,7 @@ export const useAuth = () => {
       console.log("1️⃣ Starting OTP process for:", email);
       console.log("2️⃣ Supabase URL:", supabaseUrl);
 
-      const { data, error } = await supabase.auth.signInWithOtp({
+      const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           data: {
@@ -25,32 +25,25 @@ export const useAuth = () => {
 
       if (error) {
         console.log("3️⃣❌ Supabase error:", error);
-
-        // Check for specific error types
-        if (error.message.includes("rate limit")) {
-          Alert.alert(
-            "Rate Limited",
-            "Too many attempts. Please wait a few minutes and try again.",
-          );
-        } else {
-          Alert.alert("Error", error.message);
-        }
         throw error;
       }
 
-      console.log("4️⃣✅ OTP sent successfully", data);
+      console.log("4️⃣✅ OTP sent successfully");
       setEmail(email);
       setVerificationSent(true);
 
       // Navigate to OTP verification screen
-      console.log("5️⃣ Navigating to verify-otp screen");
+      console.log("5️⃣ Navigating to verify-otp screen with:", {
+        email,
+        userType,
+      });
       router.push({
         pathname: "/auth/verify-otp",
         params: { email, userType },
       });
     } catch (error: any) {
-      console.log("❌ Error caught:", error);
-      // Don't show duplicate alerts
+      console.log("5️⃣❌ Error caught:", error);
+      Alert.alert("Error", error.message || "Failed to send verification code");
     } finally {
       setLoading(false);
     }
@@ -97,7 +90,7 @@ export const useAuth = () => {
     await sendOTP(email, userType);
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<boolean> => {
     setLoading(true);
     try {
       console.log("🔐 Logging in with:", email);
@@ -112,15 +105,67 @@ export const useAuth = () => {
       console.log("✅ Login successful:", data);
       Alert.alert("Success", "Logged in successfully!");
 
-      const userType = data.user?.user_metadata?.user_type;
-      if (userType === "seller") {
-        router.replace("/(seller)" as any);
-      } else {
-        router.replace("/(tabs)" as any);
-      }
+      return true; // Return true for success
     } catch (error: any) {
       console.log("❌ Login failed:", error);
       Alert.alert("Login Failed", error.message || "Invalid email or password");
+      return false; // Return false for failure
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signUp = async (email: string, password: string, userData: any) => {
+    setLoading(true);
+    try {
+      console.log("📝 Signing up with:", email);
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: userData.fullName,
+            phone: userData.phone,
+            user_type: userData.userType || "buyer",
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      console.log("✅ Signup successful:", data);
+
+      // Create profile in profiles table
+      if (data.user) {
+        const { error: profileError } = await supabase.from("profiles").insert([
+          {
+            id: data.user.id,
+            email: data.user.email,
+            full_name: userData.fullName,
+            phone: userData.phone,
+            user_type: userData.userType || "buyer",
+          },
+        ]);
+
+        if (profileError) {
+          console.error("Profile creation error:", profileError);
+        }
+      }
+
+      Alert.alert(
+        "Success",
+        "Account created successfully! You can now log in.",
+      );
+
+      // Navigate to login screen
+      router.replace("/auth/login");
+
+      return true;
+    } catch (error: any) {
+      console.log("❌ Signup failed:", error);
+      Alert.alert("Signup Failed", error.message);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -134,5 +179,6 @@ export const useAuth = () => {
     verifyOTP,
     resendOTP,
     login,
+    signUp,
   };
 };
