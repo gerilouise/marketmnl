@@ -22,14 +22,12 @@ export default function VerifyOTPScreen() {
   const userType = params.userType as "buyer" | "seller";
 
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  // Fix 1: Initialize with array of 6 nulls
   const inputRefs = useRef<(TextInput | null)[]>(Array(6).fill(null));
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
 
   const { loading, verifyOTP, resendOTP } = useAuth();
 
-  // Fix 2: Fix the interval typing
   useEffect(() => {
     const intervalId = setInterval(() => {
       setTimer((prev) => {
@@ -43,7 +41,7 @@ export default function VerifyOTPScreen() {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, []); // Remove dependencies to prevent multiple intervals
+  }, []);
 
   const handleOtpChange = (text: string, index: number) => {
     if (text && !/^\d+$/.test(text)) return;
@@ -86,7 +84,6 @@ export default function VerifyOTPScreen() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Fix 3: Helper function for refs
   const setInputRef = (index: number) => (ref: TextInput | null) => {
     inputRefs.current[index] = ref;
   };
@@ -118,7 +115,6 @@ export default function VerifyOTPScreen() {
             {otp.map((digit, index) => (
               <TextInput
                 key={index}
-                // Fix 4: Use the helper function for ref
                 ref={setInputRef(index)}
                 style={styles.otpInput}
                 value={digit}

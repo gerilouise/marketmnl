@@ -22,27 +22,25 @@ export default function VerifyOTPScreen() {
   const userType = params.userType as "buyer" | "seller";
 
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  // Fix: Properly type the ref array
-  const inputRefs = useRef<Array<TextInput | null>>(Array(6).fill(null));
+  const inputRefs = useRef<(TextInput | null)[]>(Array(6).fill(null));
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
 
   const { loading, verifyOTP, resendOTP } = useAuth();
 
   useEffect(() => {
-    // Fix: Use number for interval on Node.js
-    const interval = setInterval(() => {
+    const intervalId = setInterval(() => {
       setTimer((prev) => {
         if (prev <= 1) {
           setCanResend(true);
-          clearInterval(interval);
+          clearInterval(intervalId);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => clearInterval(intervalId);
   }, []);
 
   const handleOtpChange = (text: string, index: number) => {
@@ -86,8 +84,7 @@ export default function VerifyOTPScreen() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Fix: Helper function to set refs
-  const setRef = (index: number) => (ref: TextInput | null) => {
+  const setInputRef = (index: number) => (ref: TextInput | null) => {
     inputRefs.current[index] = ref;
   };
 
@@ -118,7 +115,7 @@ export default function VerifyOTPScreen() {
             {otp.map((digit, index) => (
               <TextInput
                 key={index}
-                ref={setRef(index)}
+                ref={setInputRef(index)}
                 style={styles.otpInput}
                 value={digit}
                 onChangeText={(text) => handleOtpChange(text, index)}

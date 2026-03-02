@@ -2,8 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 import "react-native-url-polyfill/auto";
 
-const supabaseUrl = "https://qlqgqmceapizsrjponxv.supabase.co";
-const supabaseAnonKey =
+// Your Supabase credentials - FIXED THE URL
+export const supabaseUrl = "https://qlqgqmceapizsrjponxv.supabase.co"; 
+export const supabaseAnonKey =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFscWdxbWNlYXppenNyanBvbnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzODMyNDQsImV4cCI6MjA4Nzk1OTI0NH0.eNu1YSouCASxJ9YUK7Edea_6AffBsrw1rzPjNeFCcT8";
 
 // Check if we're on web
