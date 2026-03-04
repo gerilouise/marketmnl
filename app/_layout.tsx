@@ -37,8 +37,6 @@ function LoadingScreen() {
         style={styles.logo}
         resizeMode="contain"
       />
-      <Text style={styles.brandName}>MarketMNL</Text>
-      <Text style={styles.brandTagline}>Preserved Filipino Foods</Text>
       <ActivityIndicator size="large" color="#C35822" style={styles.loader} />
     </View>
   );

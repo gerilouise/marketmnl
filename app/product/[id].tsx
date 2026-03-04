@@ -21,8 +21,9 @@ const PRODUCTS_DATA = {
     name: "SPICY TUYO",
     description: "Beverage that brings you Golden Nights. Aromatic, spicy and fruity. Served with a pinch of salt.",
     netWeight: "250g",
+    calories: "350 kcal per serving",
     seller: "Janjan's Kitchen",
-    sellerId: "1", // Added seller ID to link to store
+    sellerId: "1",
     rating: 4.9,
     reviews: 120,
     origin: "Cotabato City, Mindanao",
@@ -31,6 +32,22 @@ const PRODUCTS_DATA = {
     shelfLife: "6 months unopened",
     price: 250,
     category: "Bottled",
+    recipes: [
+      {
+        id: "r1",
+        name: "Spicy Tuyo Fried Rice",
+        description: "A flavorful fried rice with crispy tuyo flakes",
+        prepTime: "15 mins",
+        difficulty: "Easy",
+      },
+      {
+        id: "r2",
+        name: "Tuyo Pasta Aglio Olio",
+        description: "Classic Italian pasta with a Filipino twist",
+        prepTime: "20 mins",
+        difficulty: "Medium",
+      }
+    ],
   },
   "2": {
     id: "2",
@@ -38,8 +55,9 @@ const PRODUCTS_DATA = {
     name: "SPICY TINAPA",
     description: "Smoked fish delicacy with a spicy kick. Perfect for breakfast or as a pulutan.",
     netWeight: "200g",
+    calories: "280 kcal per serving",
     seller: "Gian's Preserved Food",
-    sellerId: "2", // Added seller ID
+    sellerId: "2",
     rating: 4.9,
     reviews: 89,
     origin: "Davao City, Mindanao",
@@ -48,6 +66,15 @@ const PRODUCTS_DATA = {
     shelfLife: "4 months unopened",
     price: 250,
     category: "Dried",
+    recipes: [
+      {
+        id: "r1",
+        name: "Tinapa Sinangag",
+        description: "Traditional garlic fried rice with smoked fish",
+        prepTime: "10 mins",
+        difficulty: "Easy",
+      }
+    ],
   },
   "3": {
     id: "3",
@@ -55,8 +82,9 @@ const PRODUCTS_DATA = {
     name: "SPICY BANGUS",
     description: "Milkfish marinated in special spices, smoked to perfection.",
     netWeight: "300g",
+    calories: "320 kcal per serving",
     seller: "Jangan's Kitchen",
-    sellerId: "1", // Same seller as product 1
+    sellerId: "1",
     rating: 4.9,
     reviews: 156,
     origin: "General Santos City, Mindanao",
@@ -65,6 +93,22 @@ const PRODUCTS_DATA = {
     shelfLife: "6 months unopened",
     price: 250,
     category: "Dried",
+    recipes: [
+      {
+        id: "r1",
+        name: "Smoked Bangus Sisig",
+        description: "Sizzling sisig made with flaked smoked bangus",
+        prepTime: "25 mins",
+        difficulty: "Medium",
+      },
+      {
+        id: "r2",
+        name: "Bangus Torta",
+        description: "Fluffy omelette with smoked fish flakes",
+        prepTime: "15 mins",
+        difficulty: "Easy",
+      }
+    ],
   },
 };
 
@@ -72,6 +116,7 @@ export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams();
   const [quantity, setQuantity] = useState(1);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
 
   // Get product data based on ID
   const product = PRODUCTS_DATA[id as keyof typeof PRODUCTS_DATA];
@@ -98,8 +143,17 @@ export default function ProductDetailsScreen() {
     router.push(`/store/${product.sellerId}`);
   };
 
+  const handleViewRecipe = (recipeId: string) => {
+    Alert.alert("Recipe", `View full recipe details`);
+    // TODO: Navigate to recipe details screen
+  };
+
   const incrementQuantity = () => setQuantity(prev => prev + 1);
   const decrementQuantity = () => setQuantity(prev => (prev > 1 ? prev - 1 : 1));
+
+  const toggleRecipe = (recipeId: string) => {
+    setExpandedRecipe(expandedRecipe === recipeId ? null : recipeId);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -154,8 +208,14 @@ export default function ProductDetailsScreen() {
           {/* Description */}
           <Text style={styles.description}>{product.description}</Text>
           
-          {/* Net Weight */}
-          <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
+          {/* Net Weight and Calories Row */}
+          <View style={styles.weightCalorieRow}>
+            <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
+            <View style={styles.calorieBadge}>
+              <Ionicons name="flame-outline" size={14} color="#C35822" />
+              <Text style={styles.calorieText}>{product.calories}</Text>
+            </View>
+          </View>
 
           {/* Divider */}
           <View style={styles.divider} />
@@ -226,6 +286,60 @@ export default function ProductDetailsScreen() {
               </View>
             </View>
           </View>
+
+          {/* Recipe Integration Section */}
+          {product.recipes && product.recipes.length > 0 && (
+            <View style={styles.recipeSection}>
+              <View style={styles.recipeHeader}>
+                <View style={styles.recipeTitleContainer}>
+                  <Ionicons name="restaurant-outline" size={20} color="#C35822" />
+                  <Text style={styles.recipeSectionTitle}>Recipe Ideas</Text>
+                </View>
+                <Text style={styles.recipeCount}>{product.recipes.length} recipes</Text>
+              </View>
+
+              {product.recipes.map((recipe) => (
+                <View key={recipe.id} style={styles.recipeCard}>
+                  <TouchableOpacity 
+                    style={styles.recipeCardHeader}
+                    onPress={() => toggleRecipe(recipe.id)}
+                  >
+                    <View style={styles.recipeInfo}>
+                      <Text style={styles.recipeName}>{recipe.name}</Text>
+                      <View style={styles.recipeMeta}>
+                        <View style={styles.recipeMetaItem}>
+                          <Ionicons name="time-outline" size={12} color="#8F796F" />
+                          <Text style={styles.recipeMetaText}>{recipe.prepTime}</Text>
+                        </View>
+                        <View style={styles.recipeMetaItem}>
+                          <Ionicons name="stats-chart-outline" size={12} color="#8F796F" />
+                          <Text style={styles.recipeMetaText}>{recipe.difficulty}</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <Ionicons 
+                      name={expandedRecipe === recipe.id ? "chevron-up" : "chevron-down"} 
+                      size={20} 
+                      color="#8F796F" 
+                    />
+                  </TouchableOpacity>
+
+                  {expandedRecipe === recipe.id && (
+                    <View style={styles.recipeExpanded}>
+                      <Text style={styles.recipeDescription}>{recipe.description}</Text>
+                      <TouchableOpacity 
+                        style={styles.viewRecipeButton}
+                        onPress={() => handleViewRecipe(recipe.id)}
+                      >
+                        <Text style={styles.viewRecipeButtonText}>View Full Recipe</Text>
+                        <Ionicons name="arrow-forward" size={16} color="#C35822" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* Bottom padding for Add to Cart button */}
           <View style={styles.bottomPadding} />
@@ -374,10 +488,31 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 4,
   },
+  weightCalorieRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
   netWeight: {
     fontSize: 14,
     color: "#8F796F",
-    marginBottom: 20,
+  },
+  calorieBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  calorieText: {
+    fontSize: 12,
+    color: "#32221B",
+    fontWeight: "500",
+    marginLeft: 4,
   },
   divider: {
     height: 1,
@@ -440,6 +575,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     borderRadius: 16,
     padding: 16,
+    marginBottom: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -471,6 +607,88 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#32221B",
     lineHeight: 20,
+  },
+  recipeSection: {
+    marginBottom: 20,
+  },
+  recipeHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  recipeTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  recipeSectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  recipeCount: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  recipeCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    overflow: "hidden",
+  },
+  recipeCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+  },
+  recipeInfo: {
+    flex: 1,
+  },
+  recipeName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 6,
+  },
+  recipeMeta: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  recipeMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  recipeMetaText: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  recipeExpanded: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  recipeDescription: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  viewRecipeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4,
+  },
+  viewRecipeButtonText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
   },
   bottomPadding: {
     height: 100,

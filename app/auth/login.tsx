@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -15,7 +15,6 @@ export default function LoginScreen() {
     }
     
     // For demo purposes, just redirect to buyer tabs
-    // In a real app, you'd validate credentials here
     router.replace('/(tabs)');
   };
 
@@ -38,7 +37,7 @@ export default function LoginScreen() {
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Logo */}
+        {/* Logo - outside white container */}
         <View style={styles.logoContainer}>
           <Image 
             source={require('@/assets/images/logo.png')}
@@ -47,13 +46,12 @@ export default function LoginScreen() {
           />
         </View>
 
-        {/* Login Title Container */}
-        <View style={styles.titleContainer}>
+        {/* Main Container - White background until Google button */}
+        <View style={styles.mainContainer}>
+          {/* Login Title */}
           <Text style={styles.title}>Login</Text>
-        </View>
 
-        <View style={styles.form}>
-          {/* Email Field with Container */}
+          {/* Email Field */}
           <View style={styles.inputWrapper}>
             <Text style={styles.label}>Email Address</Text>
             <View style={styles.inputContainer}>
@@ -70,7 +68,7 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          {/* Password Field with Container */}
+          {/* Password Field */}
           <View style={styles.inputWrapper}>
             <Text style={styles.label}>Password</Text>
             <View style={styles.inputContainer}>
@@ -112,21 +110,21 @@ export default function LoginScreen() {
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
 
-          {/* OR Divider */}
+          {/* OR Divider - Inside white container */}
           <View style={styles.orContainer}>
             <View style={styles.orLine} />
             <Text style={styles.orText}>OR CONTINUE WITH</Text>
             <View style={styles.orLine} />
           </View>
 
-          {/* Google Button */}
+          {/* Google Button - Inside white container */}
           <TouchableOpacity style={styles.googleButton}>
             <Ionicons name="logo-google" size={24} color="#000" />
             <Text style={styles.googleButtonText}>Google</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Sign Up Link */}
+        {/* Sign Up Link - Outside white container */}
         <View style={styles.signupContainer}>
           <Text style={styles.signupText}>Don't have an account? </Text>
           <TouchableOpacity onPress={() => router.push('/auth/signup-customer')}>
@@ -146,22 +144,23 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 20, 
+    paddingTop: 20,
     paddingBottom: 20,
   },
   logoContainer: {
     alignItems: 'center',
+    marginBottom: 20,
   },
   logo: {
-    width: 250, 
+    width: 250,
     height: 250,
-    marginBottom: -60,
+    marginBottom: -70,
   },
-  titleContainer: {
+  mainContainer: {
     backgroundColor: '#FFF',
     borderRadius: 20,
-    padding: 12, 
-    marginBottom: 15, 
+    padding: 20,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: '#E8E8E8',
     shadowColor: '#000',
@@ -169,24 +168,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
-    alignItems: 'center',
   },
   title: {
     fontSize: 24,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#32221B',
-    padding: 10,
-  },
-  form: {
-    width: '100%',
+    textAlign: 'center',
+    marginBottom: 20,
   },
   inputWrapper: {
-    marginBottom: 15, 
+    marginBottom: 15,
   },
   label: {
     fontSize: 14,
     color: '#32221B',
-    marginBottom: 6, 
+    marginBottom: 6,
     fontWeight: '500',
   },
   inputContainer: {
@@ -197,11 +193,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E8E8E8',
     paddingHorizontal: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
   },
   inputIcon: {
     marginRight: 8,
@@ -235,16 +226,11 @@ const styles = StyleSheet.create({
     padding: 15,
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#C35822',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
   },
   loginButtonText: {
     color: '#FFF',
-    fontSize: 18, 
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   orContainer: {
     flexDirection: 'row',
@@ -266,21 +252,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#E0DAD1',
     borderRadius: 10,
-    padding: 12, 
+    padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E0E0E0',
-    marginBottom: 20, 
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
   },
   googleButtonText: {
-    fontSize: 15, 
-    marginLeft: 8, 
+    fontSize: 15,
+    marginLeft: 8,
     color: '#32221B',
     fontWeight: '500',
   },
@@ -288,10 +268,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 10,
   },
   signupText: {
     color: '#8F796F',
-    fontSize: 13, 
+    fontSize: 13,
   },
   signupLink: {
     color: '#C35822',

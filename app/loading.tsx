@@ -1,32 +1,16 @@
 // app/loading.tsx
-import { View, Text, ActivityIndicator, StyleSheet, Image } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { useEffect } from 'react';
 import { router } from 'expo-router';
 
 export default function LoadingScreen() {
   useEffect(() => {
-    const checkAuthAndNavigate = async () => {
-      // Simulate loading for 2 seconds
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // TODO: Replace with actual auth check from Supabase
-      const isLoggedIn = false; // Change to true to test logged-in state
-      const userType = 'buyer'; // or 'seller' - this would come from user metadata
-      
-      if (!isLoggedIn) {
-        // Not logged in - go to login
-        router.replace('/auth/login');
-      } else {
-        // Logged in - go to appropriate tab based on user type
-        if (userType === 'seller') {
-          router.replace('/(seller)');
-        } else {
-          router.replace('/(tabs)');
-        }
-      }
-    };
+    // Simple 2 second delay then go to login
+    const timer = setTimeout(() => {
+      router.replace('/auth/login');
+    }, 2000);
 
-    checkAuthAndNavigate();
+    return () => clearTimeout(timer);
   }, []);
 
   return (

@@ -1,3 +1,4 @@
+// app/(tabs)/profile.tsx
 import React, { useState } from "react";
 import {
   View,
@@ -5,18 +6,18 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Image,
   Switch,
   Alert,
-  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
-export default function ProfileScreen() {
+export default function BuyerProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
-  // Mock user data - will be replaced with real data from database later
+  // Mock buyer data
   const userData = {
     name: "Ryza Mae Flores",
     email: "ryzaflores@gmail.com",
@@ -24,6 +25,11 @@ export default function ProfileScreen() {
     reviews: 12,
     wishlist: 18,
     savedAddresses: 3,
+  };
+
+  const handleEditProfile = () => {
+    Alert.alert("Edit Profile", "Navigate to edit profile screen");
+    // router.push("/edit-profile");
   };
 
   const handleLogout = () => {
@@ -38,36 +44,21 @@ export default function ProfileScreen() {
         {
           text: "Log Out",
           onPress: () => {
-            // TODO: Add actual logout logic with Supabase
-            console.log("Logged out");
-            // Navigate to login screen
             router.replace("/auth/login");
           },
           style: "destructive",
         },
-      ],
-      { cancelable: true }
+      ]
     );
-  };
-
-  const handleEditProfile = () => {
-    Alert.alert("Edit Profile", "Navigate to edit profile screen");
-    // router.push("/edit-profile");
-  };
-
-  const navigateTo = (screen: string) => {
-    // TODO: Replace with actual navigation when screens are created
-    Alert.alert("Navigate", `Going to ${screen}`);
-    // router.push(`/${screen}`);
   };
 
   const MenuItem = ({ icon, title, subtitle, onPress, rightIcon }: any) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <View style={styles.menuItemLeft}>
         <View style={styles.iconContainer}>
-          <Ionicons name={icon} size={24} color="#8F796F" />
+          <Ionicons name={icon} size={22} color="#8F796F" />
         </View>
-        <View style={styles.menuItemTextContainer}>
+        <View>
           <Text style={styles.menuItemTitle}>{title}</Text>
           {subtitle && <Text style={styles.menuItemSubtitle}>{subtitle}</Text>}
         </View>
@@ -79,84 +70,88 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
+        {/* Header with Edit button */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Profile</Text>
-          <View style={{ width: 24 }} /> {/* Empty view for balance */}
+          <TouchableOpacity onPress={handleEditProfile}>
+            <Text style={styles.editText}>Edit</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Profile Info Card */}
-        <View style={styles.profileCard}>
+        {/* Profile Section */}
+        <View style={styles.section}>
+          {/* Profile Image Placeholder */}
           <View style={styles.profileImageContainer}>
             <View style={styles.profileImagePlaceholder}>
               <Ionicons name="person" size={40} color="#8F796F" />
             </View>
-            <TouchableOpacity style={styles.editImageButton} onPress={handleEditProfile}>
+            <TouchableOpacity style={styles.cameraButton} onPress={handleEditProfile}>
               <Ionicons name="camera" size={16} color="#FFF" />
             </TouchableOpacity>
           </View>
-          
-          <Text style={styles.profileName}>{userData.name}</Text>
-          <Text style={styles.profileEmail}>{userData.email}</Text>
 
-          {/* Edit Profile Button */}
-          <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
-            <Ionicons name="pencil" size={16} color="#C35822" />
-            <Text style={styles.editProfileText}>Edit Profile</Text>
-          </TouchableOpacity>
+          {/* User Name and Email */}
+          <Text style={styles.userName}>{userData.name}</Text>
+          <Text style={styles.userEmail}>{userData.email}</Text>
 
-          {/* Stats Row */}
+          {/* Stats Row - ORDERS, REVIEWS, WISHLIST */}
           <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("orders")}>
+            <TouchableOpacity 
+              style={styles.statItem} 
+              onPress={() => router.push('/orders')}
+            >
               <Text style={styles.statNumber}>{userData.orders}</Text>
               <Text style={styles.statLabel}>Orders</Text>
             </TouchableOpacity>
             
             <View style={styles.statDivider} />
             
-            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("reviews")}>
+            <TouchableOpacity 
+              style={styles.statItem} 
+              onPress={() => Alert.alert("Reviews", "Navigate to reviews")}
+            >
               <Text style={styles.statNumber}>{userData.reviews}</Text>
               <Text style={styles.statLabel}>Reviews</Text>
             </TouchableOpacity>
             
             <View style={styles.statDivider} />
             
-            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("wishlist")}>
+            <TouchableOpacity 
+              style={styles.statItem} 
+              onPress={() => router.push('/(tabs)/wishlist')}
+            >
               <Text style={styles.statNumber}>{userData.wishlist}</Text>
               <Text style={styles.statLabel}>Wishlist</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickActionButton} onPress={() => navigateTo("orders")}>
-            <Ionicons name="bag-handle-outline" size={22} color="#C35822" />
-            <Text style={styles.quickActionText}>My Orders</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.quickActionButton} onPress={() => router.push('/chat')}>
-            <Ionicons name="chatbubble-outline" size={22} color="#C35822" />
-            <Text style={styles.quickActionText}>AI Chatbot</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Account Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           
+          {/* My Orders - with subtitle */}
+          <MenuItem
+            icon="receipt-outline"
+            title="My Orders"
+            subtitle={`${userData.orders} orders placed`}
+            onPress={() => router.push('/orders')}
+          />
+
+          {/* Shipping Address */}
           <MenuItem
             icon="location-outline"
             title="Shipping Address"
             subtitle={`${userData.savedAddresses} saved addresses`}
-            onPress={() => navigateTo("addresses")}
+            onPress={() => Alert.alert("Addresses", "Navigate to addresses")}
           />
-          
+
+          {/* My Reviews */}
           <MenuItem
             icon="star-outline"
             title="My Reviews"
             subtitle={`${userData.reviews} product reviews`}
-            onPress={() => navigateTo("reviews")}
+            onPress={() => Alert.alert("Reviews", "Navigate to reviews")}
           />
         </View>
 
@@ -164,10 +159,11 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
           
+          {/* Notifications Toggle */}
           <View style={styles.menuItem}>
             <View style={styles.menuItemLeft}>
               <View style={styles.iconContainer}>
-                <Ionicons name="notifications-outline" size={24} color="#8F796F" />
+                <Ionicons name="notifications-outline" size={22} color="#8F796F" />
               </View>
               <Text style={styles.menuItemTitle}>Notifications</Text>
             </View>
@@ -178,17 +174,30 @@ export default function ProfileScreen() {
               thumbColor="#FFF"
             />
           </View>
-          
+
+          {/* Settings */}
           <MenuItem
             icon="settings-outline"
             title="Settings"
-            onPress={() => navigateTo("settings")}
+            onPress={() => Alert.alert("Settings", "Navigate to settings")}
           />
         </View>
 
+        {/* AI Chatbot Button - Matching your home screen */}
+        <TouchableOpacity 
+          style={styles.chatButton}
+          onPress={() => Alert.alert("AI Chat", "Open AI assistant")}
+        >
+          <View style={styles.chatButtonInner}>
+            <Ionicons name="chatbubble-ellipses" size={24} color="#C35822" />
+            <Text style={styles.chatButtonText}>AI Assistant</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8F796F" />
+        </TouchableOpacity>
+
         {/* Log Out Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={24} color="#C35822" />
+          <Ionicons name="log-out-outline" size={22} color="#C35822" />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
@@ -217,76 +226,74 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#32221B",
   },
-  profileCard: {
+  editText: {
+    fontSize: 16,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  section: {
     backgroundColor: "#FFF",
     marginHorizontal: 20,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 20,
-    alignItems: "center",
+    marginBottom: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-    marginBottom: 20,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 16,
   },
   profileImageContainer: {
     position: "relative",
+    alignItems: "center",
     marginBottom: 12,
   },
   profileImagePlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#E0DAD1",
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: "#F0F0F0",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#E0DAD1",
   },
-  editImageButton: {
+  cameraButton: {
     position: "absolute",
     bottom: 0,
-    right: 0,
+    right: "35%",
     backgroundColor: "#C35822",
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
     borderColor: "#FFF",
   },
-  profileName: {
-    fontSize: 18,
+  userName: {
+    fontSize: 20,
     fontWeight: "bold",
     color: "#32221B",
+    textAlign: "center",
     marginBottom: 4,
   },
-  profileEmail: {
+  userEmail: {
     fontSize: 14,
     color: "#8F796F",
-    marginBottom: 12,
-  },
-  editProfileButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FBF8F4",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#C35822",
-  },
-  editProfileText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#C35822",
-    marginLeft: 6,
+    textAlign: "center",
+    marginBottom: 20,
   },
   statsRow: {
     flexDirection: "row",
-    width: "100%",
     justifyContent: "space-around",
+    alignItems: "center",
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
@@ -307,61 +314,16 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    height: "100%",
+    height: 30,
     backgroundColor: "#F0F0F0",
-  },
-  quickActions: {
-    flexDirection: "row",
-    marginHorizontal: 20,
-    marginBottom: 20,
-    gap: 12,
-  },
-  quickActionButton: {
-    flex: 1,
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  quickActionText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#32221B",
-    marginTop: 8,
-  },
-  section: {
-    backgroundColor: "#FFF",
-    marginHorizontal: 20,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
   },
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F5F5F5",
+    borderBottomColor: "#F0F0F0",
   },
   menuItemLeft: {
     flexDirection: "row",
@@ -369,12 +331,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconContainer: {
-    width: 32, // Fixed width for icons
+    width: 32,
     alignItems: "center",
-    marginRight: 12, // Space between icon and text
-  },
-  menuItemTextContainer: {
-    flex: 1,
+    marginRight: 12,
   },
   menuItemTitle: {
     fontSize: 15,
@@ -386,23 +345,45 @@ const styles = StyleSheet.create({
     color: "#8F796F",
     marginTop: 2,
   },
+  chatButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFF",
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#C35822",
+  },
+  chatButtonInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  chatButtonText: {
+    fontSize: 15,
+    color: "#32221B",
+    fontWeight: "500",
+  },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFF",
     marginHorizontal: 20,
-    borderRadius: 12,
+    borderRadius: 25,
     padding: 16,
     borderWidth: 1,
     borderColor: "#C35822",
     marginBottom: 20,
+    gap: 8,
   },
   logoutText: {
     fontSize: 16,
     fontWeight: "600",
     color: "#C35822",
-    marginLeft: 8,
   },
   bottomPadding: {
     height: 40,

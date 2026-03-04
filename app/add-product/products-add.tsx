@@ -23,6 +23,33 @@ export default function AddProductScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [stock, setStock] = useState("");
   const [weight, setWeight] = useState("");
+  const [calories, setCalories] = useState(""); // NEW FIELD
+
+  // Recipe fields
+  const [recipes, setRecipes] = useState([
+    { id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }
+  ]);
+
+  const addRecipe = () => {
+    setRecipes([
+      ...recipes,
+      { id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }
+    ]);
+  };
+
+  const updateRecipe = (id: string, field: string, value: string) => {
+    setRecipes(recipes.map(recipe => 
+      recipe.id === id ? { ...recipe, [field]: value } : recipe
+    ));
+  };
+
+  const removeRecipe = (id: string) => {
+    if (recipes.length > 1) {
+      setRecipes(recipes.filter(recipe => recipe.id !== id));
+    } else {
+      Alert.alert("Error", "You need at least one recipe");
+    }
+  };
 
   const handleSaveProduct = () => {
     // Validate fields
@@ -123,15 +150,30 @@ export default function AddProductScreen() {
             </View>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Net Weight <Text style={styles.required}>*</Text></Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., 250g"
-              placeholderTextColor="#8F796F"
-              value={weight}
-              onChangeText={setWeight}
-            />
+          <View style={styles.rowInputs}>
+            <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+              <Text style={styles.label}>Net Weight <Text style={styles.required}>*</Text></Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 250g"
+                placeholderTextColor="#8F796F"
+                value={weight}
+                onChangeText={setWeight}
+              />
+            </View>
+
+            {/* NEW: Calories Field - maintaining same style */}
+            <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+              <Text style={styles.label}>Calories (kcal)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 350"
+                placeholderTextColor="#8F796F"
+                value={calories}
+                onChangeText={setCalories}
+                keyboardType="numeric"
+              />
+            </View>
           </View>
         </View>
 
@@ -157,6 +199,90 @@ export default function AddProductScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+
+        {/* NEW: Recipes Section - maintaining your design */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recipes</Text>
+          
+          {recipes.map((recipe, index) => (
+            <View key={recipe.id} style={styles.recipeContainer}>
+              <View style={styles.recipeHeader}>
+                <Text style={styles.recipeTitle}>Recipe {index + 1}</Text>
+                {recipes.length > 1 && (
+                  <TouchableOpacity onPress={() => removeRecipe(recipe.id)}>
+                    <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Recipe Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., Spicy Tuyo Fried Rice"
+                  placeholderTextColor="#8F796F"
+                  value={recipe.name}
+                  onChangeText={(text) => updateRecipe(recipe.id, "name", text)}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Description</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Brief description of the recipe"
+                  placeholderTextColor="#8F796F"
+                  value={recipe.description}
+                  onChangeText={(text) => updateRecipe(recipe.id, "description", text)}
+                  multiline
+                  numberOfLines={2}
+                />
+              </View>
+
+              <View style={styles.rowInputs}>
+                <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                  <Text style={styles.label}>Prep Time</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g., 15 mins"
+                    placeholderTextColor="#8F796F"
+                    value={recipe.prepTime}
+                    onChangeText={(text) => updateRecipe(recipe.id, "prepTime", text)}
+                  />
+                </View>
+
+                <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                  <Text style={styles.label}>Difficulty</Text>
+                  <View style={styles.difficultyContainer}>
+                    {["Easy", "Medium", "Hard"].map((level) => (
+                      <TouchableOpacity
+                        key={level}
+                        style={[
+                          styles.difficultyChip,
+                          recipe.difficulty === level && styles.difficultyChipActive
+                        ]}
+                        onPress={() => updateRecipe(recipe.id, "difficulty", level)}
+                      >
+                        <Text style={[
+                          styles.difficultyChipText,
+                          recipe.difficulty === level && styles.difficultyChipTextActive
+                        ]}>
+                          {level}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
+            </View>
+          ))}
+
+          {/* Add Recipe Button - maintaining your button style */}
+          <TouchableOpacity style={styles.addRecipeButton} onPress={addRecipe}>
+            <Ionicons name="add-circle-outline" size={20} color="#C35822" />
+            <Text style={styles.addRecipeText}>Add Another Recipe</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Additional Details */}
@@ -222,7 +348,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 10,
-    backgroundColor: "#FFF",
+    backgroundColor: "#FBF8F4",
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
   },
@@ -348,6 +474,66 @@ const styles = StyleSheet.create({
   },
   categoryChipTextActive: {
     color: "#FFF",
+  },
+  // NEW STYLES - maintaining your design
+  recipeContainer: {
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  recipeHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  recipeTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  difficultyContainer: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 4,
+  },
+  difficultyChip: {
+    flex: 1,
+    paddingVertical: 8,
+    backgroundColor: "#FBF8F4",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    alignItems: "center",
+  },
+  difficultyChipActive: {
+    backgroundColor: "#C35822",
+    borderColor: "#C35822",
+  },
+  difficultyChipText: {
+    fontSize: 12,
+    color: "#8F796F",
+    fontWeight: "500",
+  },
+  difficultyChipTextActive: {
+    color: "#FFF",
+  },
+  addRecipeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    borderRadius: 10,
+    borderStyle: "dashed",
+    gap: 6,
+  },
+  addRecipeText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
   },
   bottomPadding: {
     height: 30,
