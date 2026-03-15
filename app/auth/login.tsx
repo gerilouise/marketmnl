@@ -1,21 +1,46 @@
+// app/auth/login.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-    
-    // For demo purposes, just redirect to buyer tabs
-    router.replace('/(tabs)');
+
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        Alert.alert('Login Failed', error.message);
+      } else {
+        const userType = data.user?.user_metadata?.user_type;
+        
+        if (userType === 'seller') {
+          router.replace('/(seller)/dashboard');
+        } else {
+          router.replace('/(tabs)');
+        }
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = () => {
@@ -26,8 +51,25 @@ export default function LoginScreen() {
     
     Alert.alert(
       'Reset Password',
-      `Password reset link would be sent to ${email}`,
-      [{ text: 'OK' }]
+      `Send password reset email to ${email}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.auth.resetPasswordForEmail(email);
+              if (error) {
+                Alert.alert('Error', error.message);
+              } else {
+                Alert.alert('Success', 'Password reset email sent!');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to send reset email');
+            }
+          },
+        },
+      ]
     );
   };
 
@@ -37,7 +79,7 @@ export default function LoginScreen() {
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Logo - outside white container */}
+        {/* Logo */}
         <View style={styles.logoContainer}>
           <Image 
             source={require('@/assets/images/logo.png')}
@@ -46,9 +88,8 @@ export default function LoginScreen() {
           />
         </View>
 
-        {/* Main Container - White background until Google button */}
+        {/* Main Container */}
         <View style={styles.mainContainer}>
-          {/* Login Title */}
           <Text style={styles.title}>Login</Text>
 
           {/* Email Field */}
@@ -64,6 +105,7 @@ export default function LoginScreen() {
                 placeholderTextColor="#8F796F"
                 keyboardType="email-address"
                 autoCapitalize="none"
+                editable={!loading}
               />
             </View>
           </View>
@@ -80,10 +122,12 @@ export default function LoginScreen() {
                 placeholder="Enter your password"
                 placeholderTextColor="#8F796F"
                 secureTextEntry={!showPassword}
+                editable={!loading}
               />
               <TouchableOpacity 
                 onPress={() => setShowPassword(!showPassword)}
                 style={styles.eyeIcon}
+                disabled={loading}
               >
                 <Ionicons 
                   name={showPassword ? 'eye-off-outline' : 'eye-outline'} 
@@ -98,36 +142,40 @@ export default function LoginScreen() {
           <TouchableOpacity 
             style={styles.forgotPassword} 
             onPress={handleForgotPassword}
+            disabled={loading}
           >
             <Text style={styles.forgotPasswordText}>Forgot password?</Text>
           </TouchableOpacity>
 
           {/* Login Button */}
           <TouchableOpacity 
-            style={styles.loginButton} 
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]} 
             onPress={handleLogin}
+            disabled={loading}
           >
-            <Text style={styles.loginButtonText}>Log In</Text>
+            <Text style={styles.loginButtonText}>
+              {loading ? 'Logging in...' : 'Log In'}
+            </Text>
           </TouchableOpacity>
 
-          {/* OR Divider - Inside white container */}
+          {/* OR Divider */}
           <View style={styles.orContainer}>
             <View style={styles.orLine} />
             <Text style={styles.orText}>OR CONTINUE WITH</Text>
             <View style={styles.orLine} />
           </View>
 
-          {/* Google Button - Inside white container */}
-          <TouchableOpacity style={styles.googleButton}>
+          {/* Google Button */}
+          <TouchableOpacity style={styles.googleButton} disabled={loading}>
             <Ionicons name="logo-google" size={24} color="#000" />
             <Text style={styles.googleButtonText}>Google</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Sign Up Link - Outside white container */}
+        {/* Sign Up Link */}
         <View style={styles.signupContainer}>
           <Text style={styles.signupText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={() => router.push('/auth/signup-customer')}>
+          <TouchableOpacity onPress={() => router.push('/auth/signup-customer')} disabled={loading}>
             <Text style={styles.signupLink}>Sign Up</Text>
           </TouchableOpacity>
         </View>
@@ -226,6 +274,9 @@ const styles = StyleSheet.create({
     padding: 15,
     alignItems: 'center',
     marginBottom: 20,
+  },
+  loginButtonDisabled: {
+    backgroundColor: '#FFB6A5',
   },
   loginButtonText: {
     color: '#FFF',

@@ -28,8 +28,7 @@ export default function BuyerProfileScreen() {
   };
 
   const handleEditProfile = () => {
-    Alert.alert("Edit Profile", "Navigate to edit profile screen");
-    // router.push("/edit-profile");
+    Alert.alert("Edit Profile", "This feature is coming soon!");
   };
 
   const handleLogout = () => {
@@ -98,7 +97,7 @@ export default function BuyerProfileScreen() {
           <View style={styles.statsRow}>
             <TouchableOpacity 
               style={styles.statItem} 
-              onPress={() => router.push('/orders')}
+              onPress={() => Alert.alert("Orders", "View your orders")}
             >
               <Text style={styles.statNumber}>{userData.orders}</Text>
               <Text style={styles.statLabel}>Orders</Text>
@@ -108,7 +107,7 @@ export default function BuyerProfileScreen() {
             
             <TouchableOpacity 
               style={styles.statItem} 
-              onPress={() => Alert.alert("Reviews", "Navigate to reviews")}
+              onPress={() => Alert.alert("Reviews", "View your reviews")}
             >
               <Text style={styles.statNumber}>{userData.reviews}</Text>
               <Text style={styles.statLabel}>Reviews</Text>
@@ -118,7 +117,7 @@ export default function BuyerProfileScreen() {
             
             <TouchableOpacity 
               style={styles.statItem} 
-              onPress={() => router.push('/(tabs)/wishlist')}
+              onPress={() => Alert.alert("Wishlist", "View your wishlist")}
             >
               <Text style={styles.statNumber}>{userData.wishlist}</Text>
               <Text style={styles.statLabel}>Wishlist</Text>
@@ -130,12 +129,12 @@ export default function BuyerProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           
-          {/* My Orders - with subtitle */}
+          {/* My Orders */}
           <MenuItem
             icon="receipt-outline"
             title="My Orders"
             subtitle={`${userData.orders} orders placed`}
-            onPress={() => router.push('/orders')}
+            onPress={() => Alert.alert("My Orders", "Coming soon!")}
           />
 
           {/* Shipping Address */}
@@ -143,7 +142,7 @@ export default function BuyerProfileScreen() {
             icon="location-outline"
             title="Shipping Address"
             subtitle={`${userData.savedAddresses} saved addresses`}
-            onPress={() => Alert.alert("Addresses", "Navigate to addresses")}
+            onPress={() => Alert.alert("Shipping Address", "Coming soon!")}
           />
 
           {/* My Reviews */}
@@ -151,7 +150,7 @@ export default function BuyerProfileScreen() {
             icon="star-outline"
             title="My Reviews"
             subtitle={`${userData.reviews} product reviews`}
-            onPress={() => Alert.alert("Reviews", "Navigate to reviews")}
+            onPress={() => Alert.alert("My Reviews", "Coming soon!")}
           />
         </View>
 
@@ -179,21 +178,10 @@ export default function BuyerProfileScreen() {
           <MenuItem
             icon="settings-outline"
             title="Settings"
-            onPress={() => Alert.alert("Settings", "Navigate to settings")}
+            subtitle="App preferences"
+            onPress={() => Alert.alert("Settings", "Coming soon!")}
           />
         </View>
-
-        {/* AI Chatbot Button - Matching your home screen */}
-        <TouchableOpacity 
-          style={styles.chatButton}
-          onPress={() => Alert.alert("AI Chat", "Open AI assistant")}
-        >
-          <View style={styles.chatButtonInner}>
-            <Ionicons name="chatbubble-ellipses" size={24} color="#C35822" />
-            <Text style={styles.chatButtonText}>AI Assistant</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#8F796F" />
-        </TouchableOpacity>
 
         {/* Log Out Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -344,28 +332,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#8F796F",
     marginTop: 2,
-  },
-  chatButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#FFF",
-    marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#C35822",
-  },
-  chatButtonInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  chatButtonText: {
-    fontSize: 15,
-    color: "#32221B",
-    fontWeight: "500",
   },
   logoutButton: {
     flexDirection: "row",

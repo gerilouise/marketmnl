@@ -1,7 +1,9 @@
+// app/auth/signup-customer.tsx
 import { Image, View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 export default function SignupCustomerScreen() {
   const [userType, setUserType] = useState('buyer');
@@ -11,23 +13,64 @@ export default function SignupCustomerScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
+    // Validate form
+    if (!fullName || !email || !phone || !password) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    if (password.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters');
+      return;
+    }
+
     if (!agreeTerms) {
       Alert.alert('Error', 'Please agree to the Terms of Service and Privacy Policy');
       return;
     }
-    
-    Alert.alert(
-      'Success!', 
-      'Your account has been created! You can now log in.',
-      [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/auth/login')
-        }
-      ]
-    );
+
+    setLoading(true);
+
+    try {
+      console.log('Attempting signup with:', { email, fullName, phone });
+      
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            phone: phone.trim(),
+            user_type: 'buyer',
+          },
+        },
+      });
+
+      console.log('Supabase response:', { data, error });
+
+      if (error) {
+        Alert.alert('Signup Failed', error.message);
+      } else {
+        Alert.alert(
+          'Success!', 
+          'Please check your email to verify your account before logging in.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/auth/login')
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Unexpected error:', error);
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -50,6 +93,7 @@ export default function SignupCustomerScreen() {
           <TouchableOpacity 
             style={[styles.userTypeButton, userType === 'buyer' && styles.userTypeActive]}
             onPress={() => setUserType('buyer')}
+            disabled={loading}
           >
             <Ionicons 
               name="cart-outline" 
@@ -65,6 +109,7 @@ export default function SignupCustomerScreen() {
           <TouchableOpacity 
             style={[styles.userTypeButton, userType === 'seller' && styles.userTypeActive]}
             onPress={() => router.push('/auth/signup-seller')}
+            disabled={loading}
           >
             <Ionicons 
               name="storefront-outline" 
@@ -92,6 +137,7 @@ export default function SignupCustomerScreen() {
                   onChangeText={setFullName}
                   placeholder="Juan Dela Cruz"
                   placeholderTextColor="#8F796F"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -109,6 +155,7 @@ export default function SignupCustomerScreen() {
                   placeholderTextColor="#8F796F"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -125,6 +172,7 @@ export default function SignupCustomerScreen() {
                   placeholder="+63 906 561 6297"
                   placeholderTextColor="#8F796F"
                   keyboardType="phone-pad"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -141,10 +189,12 @@ export default function SignupCustomerScreen() {
                   placeholder="Create a password"
                   placeholderTextColor="#8F796F"
                   secureTextEntry={!showPassword}
+                  editable={!loading}
                 />
                 <TouchableOpacity 
                   onPress={() => setShowPassword(!showPassword)}
                   style={styles.eyeIcon}
+                  disabled={loading}
                 >
                   <Ionicons 
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'} 
@@ -162,6 +212,7 @@ export default function SignupCustomerScreen() {
             <TouchableOpacity 
               style={styles.termsContainer}
               onPress={() => setAgreeTerms(!agreeTerms)}
+              disabled={loading}
             >
               <View style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}>
                 {agreeTerms && <Ionicons name="checkmark" size={16} color="#FFF" />}
@@ -186,19 +237,21 @@ export default function SignupCustomerScreen() {
 
             {/* Create Account Button */}
             <TouchableOpacity 
-              style={[styles.signupButton, !agreeTerms && styles.signupButtonDisabled]} 
+              style={[styles.signupButton, (!agreeTerms || loading) && styles.signupButtonDisabled]} 
               onPress={handleSignup}
-              disabled={!agreeTerms}
+              disabled={!agreeTerms || loading}
             >
-              <Text style={styles.signupButtonText}>Create Account</Text>
+              <Text style={styles.signupButtonText}>
+                {loading ? 'Creating Account...' : 'Create Account'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
         
-        {/* Login Link - Outside form container */}
+        {/* Login Link */}
         <View style={styles.loginContainer}>
           <Text style={styles.loginText}>Already have an account? </Text>
-          <TouchableOpacity onPress={() => router.push('/auth/login')}>
+          <TouchableOpacity onPress={() => router.push('/auth/login')} disabled={loading}>
             <Text style={styles.loginLink}>Log In</Text>
           </TouchableOpacity>
         </View>
@@ -208,6 +261,7 @@ export default function SignupCustomerScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Keep your existing styles here - they're the same
   container: {
     flex: 1,
     backgroundColor: '#FBF8F4',

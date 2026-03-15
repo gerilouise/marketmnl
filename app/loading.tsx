@@ -1,5 +1,4 @@
-// app/loading.tsx
-import { View, ActivityIndicator, StyleSheet, Image } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { useEffect } from 'react';
 import { router } from 'expo-router';
 
@@ -20,6 +19,7 @@ export default function LoadingScreen() {
         style={styles.logo}
         resizeMode="contain"
       />
+      <Text style={styles.tagline}>Taste of Home, Preserved for You</Text>
       <ActivityIndicator size="large" color="#C35822" style={styles.loader} />
     </View>
   );
@@ -36,9 +36,18 @@ const styles = StyleSheet.create({
   logo: {
     width: 250,
     height: 250,
-    marginBottom: 20,
+    marginBottom: 10,
+  },
+  tagline: {
+    fontSize: 16,
+    color: '#8F796F',
+    textAlign: 'center',
+    marginBottom: 30,
+    fontStyle: 'italic',
+    letterSpacing: 0.5,
+    fontWeight: '500',
   },
   loader: {
-    marginTop: 20,
+    marginTop: 10,
   },
 });

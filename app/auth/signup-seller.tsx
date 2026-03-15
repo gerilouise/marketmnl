@@ -1,7 +1,9 @@
+// app/auth/signup-seller.tsx
 import { Image, View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 export default function SignupSellerScreen() {
   const [fullName, setFullName] = useState('');
@@ -12,23 +14,66 @@ export default function SignupSellerScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeSellerAgreement, setAgreeSellerAgreement] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSignup = () => {
-    if (!agreeTerms || !agreeSellerAgreement) {
-      Alert.alert('Error', 'Please agree to all terms');
-      return;
+  const validateForm = () => {
+    if (!fullName || !storeName || !email || !phone || !password) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return false;
     }
-    
-    Alert.alert(
-      'Success!', 
-      'Your seller account has been created! You can now log in.',
-      [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/auth/login')
-        }
-      ]
-    );
+    if (password.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters');
+      return false;
+    }
+    if (!agreeTerms) {
+      Alert.alert('Error', 'Please agree to the Terms of Service and Privacy Policy');
+      return false;
+    }
+    if (!agreeSellerAgreement) {
+      Alert.alert('Error', 'Please agree to the Seller Agreement');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSignup = async () => {
+    if (!validateForm()) return;
+
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            phone: phone,
+            store_name: storeName,
+            user_type: 'seller',
+          },
+        },
+      });
+
+      if (error) {
+        Alert.alert('Signup Failed', error.message);
+      } else {
+        Alert.alert(
+          'Success!', 
+          'Your seller account has been created! Please check your email to verify your account before logging in.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/auth/login')
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const allAgreed = agreeTerms && agreeSellerAgreement;
@@ -53,6 +98,7 @@ export default function SignupSellerScreen() {
           <TouchableOpacity 
             style={[styles.userTypeButton]}
             onPress={() => router.push('/auth/signup-customer')}
+            disabled={loading}
           >
             <Ionicons 
               name="cart-outline" 
@@ -65,6 +111,7 @@ export default function SignupSellerScreen() {
           
           <TouchableOpacity 
             style={[styles.userTypeButton, styles.userTypeActive]}
+            disabled={loading}
           >
             <Ionicons 
               name="storefront-outline" 
@@ -90,6 +137,7 @@ export default function SignupSellerScreen() {
                   onChangeText={setFullName}
                   placeholder="Juan Dela Cruz"
                   placeholderTextColor="#8F796F"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -105,6 +153,7 @@ export default function SignupSellerScreen() {
                   onChangeText={setStoreName}
                   placeholder="Your Store Name"
                   placeholderTextColor="#8F796F"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -122,6 +171,7 @@ export default function SignupSellerScreen() {
                   placeholderTextColor="#8F796F"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -138,6 +188,7 @@ export default function SignupSellerScreen() {
                   placeholder="+63 906 561 8297"
                   placeholderTextColor="#8F796F"
                   keyboardType="phone-pad"
+                  editable={!loading}
                 />
               </View>
             </View>
@@ -154,10 +205,12 @@ export default function SignupSellerScreen() {
                   placeholder="Create a password"
                   placeholderTextColor="#8F796F"
                   secureTextEntry={!showPassword}
+                  editable={!loading}
                 />
                 <TouchableOpacity 
                   onPress={() => setShowPassword(!showPassword)}
                   style={styles.eyeIcon}
+                  disabled={loading}
                 >
                   <Ionicons 
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'} 
@@ -175,6 +228,7 @@ export default function SignupSellerScreen() {
             <TouchableOpacity 
               style={styles.termsContainer}
               onPress={() => setAgreeTerms(!agreeTerms)}
+              disabled={loading}
             >
               <View style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}>
                 {agreeTerms && <Ionicons name="checkmark" size={16} color="#FFF" />}
@@ -201,6 +255,7 @@ export default function SignupSellerScreen() {
             <TouchableOpacity 
               style={styles.termsContainer}
               onPress={() => setAgreeSellerAgreement(!agreeSellerAgreement)}
+              disabled={loading}
             >
               <View style={[styles.checkbox, agreeSellerAgreement && styles.checkboxChecked]}>
                 {agreeSellerAgreement && <Ionicons name="checkmark" size={16} color="#FFF" />}
@@ -218,11 +273,13 @@ export default function SignupSellerScreen() {
 
             {/* Create Account Button */}
             <TouchableOpacity 
-              style={[styles.signupButton, !allAgreed && styles.signupButtonDisabled]} 
+              style={[styles.signupButton, (!allAgreed || loading) && styles.signupButtonDisabled]} 
               onPress={handleSignup}
-              disabled={!allAgreed}
+              disabled={!allAgreed || loading}
             >
-              <Text style={styles.signupButtonText}>Create Seller Account</Text>
+              <Text style={styles.signupButtonText}>
+                {loading ? 'Creating Account...' : 'Create Seller Account'}
+              </Text>
             </TouchableOpacity>
 
             {/* Note about seller agreement */}
@@ -232,10 +289,10 @@ export default function SignupSellerScreen() {
           </View>
         </View>
         
-        {/* Login Link - Outside form container */}
+        {/* Login Link */}
         <View style={styles.loginContainer}>
           <Text style={styles.loginText}>Already have an account? </Text>
-          <TouchableOpacity onPress={() => router.push('/auth/login')}>
+          <TouchableOpacity onPress={() => router.push('/auth/login')} disabled={loading}>
             <Text style={styles.loginLink}>Log In</Text>
           </TouchableOpacity>
         </View>

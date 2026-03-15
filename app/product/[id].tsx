@@ -48,6 +48,33 @@ const PRODUCTS_DATA = {
         difficulty: "Medium",
       }
     ],
+    // Sample reviews for this product
+    productReviews: [
+      {
+        id: "rev1",
+        userName: "Juan Dela Cruz",
+        userInitials: "JD",
+        rating: 5,
+        date: "March 3, 2026",
+        comment: "Authentic taste! Just like how my lola makes it. Will definitely order again.",
+      },
+      {
+        id: "rev2",
+        userName: "Maria Santos",
+        userInitials: "MS",
+        rating: 4,
+        date: "February 28, 2026",
+        comment: "Good quality and fast shipping. The packaging was secure.",
+      },
+      {
+        id: "rev3",
+        userName: "Pedro Reyes",
+        userInitials: "PR",
+        rating: 5,
+        date: "February 15, 2026",
+        comment: "Perfect for breakfast! Already ordered twice.",
+      },
+    ],
   },
   "2": {
     id: "2",
@@ -74,6 +101,16 @@ const PRODUCTS_DATA = {
         prepTime: "10 mins",
         difficulty: "Easy",
       }
+    ],
+    productReviews: [
+      {
+        id: "rev1",
+        userName: "Ana Lopez",
+        userInitials: "AL",
+        rating: 5,
+        date: "February 20, 2026",
+        comment: "Best tinapa I've tried! Will order again.",
+      },
     ],
   },
   "3": {
@@ -109,6 +146,24 @@ const PRODUCTS_DATA = {
         difficulty: "Easy",
       }
     ],
+    productReviews: [
+      {
+        id: "rev1",
+        userName: "Carla Mercado",
+        userInitials: "CM",
+        rating: 5,
+        date: "March 1, 2026",
+        comment: "Amazing quality! The spiciness is just right.",
+      },
+      {
+        id: "rev2",
+        userName: "Ben Torres",
+        userInitials: "BT",
+        rating: 4,
+        date: "February 25, 2026",
+        comment: "Very tasty. Will buy again.",
+      },
+    ],
   },
 };
 
@@ -117,6 +172,7 @@ export default function ProductDetailsScreen() {
   const [quantity, setQuantity] = useState(1);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
+  const [showAllReviews, setShowAllReviews] = useState(false);
 
   // Get product data based on ID
   const product = PRODUCTS_DATA[id as keyof typeof PRODUCTS_DATA];
@@ -136,7 +192,6 @@ export default function ProductDetailsScreen() {
 
   const handleAddToCart = () => {
     Alert.alert("Added to Cart", `${quantity} x ${product.name} added to your cart`);
-    // TODO: Add actual cart logic with database
   };
 
   const navigateToStore = () => {
@@ -145,7 +200,10 @@ export default function ProductDetailsScreen() {
 
   const handleViewRecipe = (recipeId: string) => {
     Alert.alert("Recipe", `View full recipe details`);
-    // TODO: Navigate to recipe details screen
+  };
+
+  const handleWriteReview = () => {
+    Alert.alert("Write Review", "This feature will be available soon!");
   };
 
   const incrementQuantity = () => setQuantity(prev => prev + 1);
@@ -154,6 +212,26 @@ export default function ProductDetailsScreen() {
   const toggleRecipe = (recipeId: string) => {
     setExpandedRecipe(expandedRecipe === recipeId ? null : recipeId);
   };
+
+  const renderStars = (rating: number) => {
+    return (
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Ionicons
+            key={star}
+            name={star <= rating ? "star" : "star-outline"}
+            size={14}
+            color="#FFD700"
+          />
+        ))}
+      </View>
+    );
+  };
+
+  // Get displayed reviews (3 initially, all if showAllReviews is true)
+  const displayedReviews = showAllReviews 
+    ? product.productReviews 
+    : product.productReviews?.slice(0, 3);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -338,6 +416,64 @@ export default function ProductDetailsScreen() {
                   )}
                 </View>
               ))}
+            </View>
+          )}
+
+          {/* Reviews Section */}
+          {product.productReviews && product.productReviews.length > 0 && (
+            <View style={styles.reviewsSection}>
+              <View style={styles.reviewsHeader}>
+                <View style={styles.reviewsTitleContainer}>
+                  <Ionicons name="star" size={20} color="#FFD700" />
+                  <Text style={styles.reviewsTitle}>Customer Reviews</Text>
+                </View>
+                <Text style={styles.reviewsCount}>{product.reviews} reviews</Text>
+              </View>
+
+              {/* Write Review Button */}
+              <TouchableOpacity 
+                style={styles.writeReviewButton}
+                onPress={handleWriteReview}
+              >
+                <Ionicons name="create-outline" size={18} color="#C35822" />
+                <Text style={styles.writeReviewText}>Write a Review</Text>
+              </TouchableOpacity>
+
+              {/* Review List */}
+              {displayedReviews.map((review) => (
+                <View key={review.id} style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewerInfo}>
+                      <View style={styles.reviewerAvatar}>
+                        <Text style={styles.reviewerInitials}>{review.userInitials}</Text>
+                      </View>
+                      <View>
+                        <Text style={styles.reviewerName}>{review.userName}</Text>
+                        <Text style={styles.reviewDate}>{review.date}</Text>
+                      </View>
+                    </View>
+                    {renderStars(review.rating)}
+                  </View>
+                  <Text style={styles.reviewComment}>{review.comment}</Text>
+                </View>
+              ))}
+
+              {/* View All / Show Less Button */}
+              {product.productReviews.length > 3 && (
+                <TouchableOpacity 
+                  style={styles.viewAllButton}
+                  onPress={() => setShowAllReviews(!showAllReviews)}
+                >
+                  <Text style={styles.viewAllText}>
+                    {showAllReviews ? "Show Less" : `View All ${product.reviews} Reviews`}
+                  </Text>
+                  <Ionicons 
+                    name={showAllReviews ? "chevron-up" : "chevron-down"} 
+                    size={16} 
+                    color="#C35822" 
+                  />
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -686,6 +822,112 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   viewRecipeButtonText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  
+  // Reviews Section Styles
+  reviewsSection: {
+    marginBottom: 20,
+  },
+  reviewsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  reviewsTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  reviewsTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  reviewsCount: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  writeReviewButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    marginBottom: 16,
+    gap: 6,
+  },
+  writeReviewText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  reviewCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 8,
+  },
+  reviewerInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  reviewerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E0DAD1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reviewerInitials: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  reviewerName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 2,
+  },
+  reviewDate: {
+    fontSize: 11,
+    color: "#8F796F",
+  },
+  starsContainer: {
+    flexDirection: "row",
+    gap: 2,
+  },
+  reviewComment: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 20,
+  },
+  viewAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+    gap: 4,
+  },
+  viewAllText: {
     fontSize: 14,
     color: "#C35822",
     fontWeight: "500",
