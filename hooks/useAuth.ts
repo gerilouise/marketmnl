@@ -8,51 +8,100 @@ export const useAuth = () => {
   const [verificationSent, setVerificationSent] = useState(false);
   const [email, setEmail] = useState("");
 
-  const sendOTP = async (email: string, userType: "buyer" | "seller") => {
+  // ============================================
+  // METHOD 1: Send OTP for email verification
+  // ============================================
+  const sendOTP = async (
+    email: string,
+    userType: "buyer" | "seller",
+    userData?: any,
+  ) => {
+    console.log("========== SEND OTP CALLED ==========");
+    console.log("Setting loading to true");
     setLoading(true);
+
     try {
       console.log("1️⃣ Starting OTP process for:", email);
       console.log("2️⃣ Supabase URL:", supabaseUrl);
+      console.log("3️⃣ User type:", userType);
+      console.log("4️⃣ User data:", userData);
+
+      // Prepare metadata based on user type
+      const metadata: any = {
+        user_type: userType,
+        full_name: userData?.fullName || "",
+        phone: userData?.phone || "",
+      };
+
+      // Add store name if seller
+      if (userType === "seller" && userData?.storeName) {
+        metadata.store_name = userData.storeName;
+      }
+
+      console.log("5️⃣ Metadata being sent:", metadata);
+      console.log("6️⃣ Calling supabase.auth.signInWithOtp...");
 
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          data: {
-            user_type: userType,
-          },
+          data: metadata,
         },
       });
 
       if (error) {
-        console.log("3️⃣❌ Supabase error:", error);
+        console.log("7️⃣❌ Supabase error:", error);
         throw error;
       }
 
-      console.log("4️⃣✅ OTP sent successfully");
+      console.log("8️⃣✅ OTP sent successfully");
       setEmail(email);
       setVerificationSent(true);
 
-      // Navigate to OTP verification screen
-      console.log("5️⃣ Navigating to verify-otp screen with:", {
+      // Navigate to OTP verification screen with ALL user data
+      console.log("9️⃣ Navigating to verify-otp screen");
+
+      // Prepare params based on user type
+      const params: any = {
         email,
         userType,
-      });
+        fullName: userData?.fullName || "",
+        phone: userData?.phone || "",
+      };
+
+      // Add seller-specific data
+      if (userType === "seller") {
+        params.storeName = userData?.storeName || "";
+        params.storeDescription = userData?.storeDescription || "";
+      }
+
+      console.log("🔟 Navigation params:", params);
+
       router.push({
         pathname: "/auth/verify-otp",
-        params: { email, userType },
+        params: params,
       });
+
+      console.log("1️⃣1️⃣ Navigation complete");
     } catch (error: any) {
-      console.log("5️⃣❌ Error caught:", error);
+      console.log("❌❌❌ ERROR CAUGHT ❌❌❌");
+      console.log("Error:", error);
+      console.log("Error message:", error.message);
+      console.log("Error status:", error.status);
       Alert.alert("Error", error.message || "Failed to send verification code");
     } finally {
+      console.log("Setting loading to false");
       setLoading(false);
     }
   };
 
-  const verifyOTP = async (otp: string) => {
+  // ============================================
+  // METHOD 2: Verify OTP and create account
+  // ============================================
+  const verifyOTP = async (otp: string, userData?: any) => {
     setLoading(true);
     try {
       console.log("🔐 Verifying OTP for:", email);
+      console.log("👤 User data:", userData);
 
       const { data, error } = await supabase.auth.verifyOtp({
         email,
@@ -63,9 +112,17 @@ export const useAuth = () => {
       if (error) throw error;
 
       console.log("✅ Verification successful:", data);
+
+      // Create profile in database after successful verification
+      if (data.user && userData) {
+        await createUserProfile(data.user, userData);
+      }
+
       Alert.alert("Success", "Email verified successfully!");
 
-      const userType = data.user?.user_metadata?.user_type;
+      // Redirect based on user type
+      const userType =
+        data.user?.user_metadata?.user_type || userData?.userType;
       if (userType === "seller") {
         router.replace("/(seller)" as any);
       } else {
@@ -82,14 +139,65 @@ export const useAuth = () => {
     }
   };
 
-  const resendOTP = async (userType: "buyer" | "seller") => {
+  // ============================================
+  // Helper: Create user profile in database
+  // ============================================
+  const createUserProfile = async (user: any, userData: any) => {
+    try {
+      console.log("📝 Creating profile for user:", user.id);
+
+      // Insert into profiles table
+      const { error: profileError } = await supabase.from("profiles").insert([
+        {
+          id: user.id,
+          email: user.email,
+          full_name: userData.fullName,
+          phone: userData.phone,
+          user_type: userData.userType,
+        },
+      ]);
+
+      if (profileError) {
+        console.error("❌ Profile creation error:", profileError);
+        throw profileError;
+      }
+
+      // If seller, create seller profile
+      if (userData.userType === "seller" && userData.storeName) {
+        const { error: sellerError } = await supabase.from("sellers").insert([
+          {
+            id: user.id,
+            store_name: userData.storeName,
+            store_description: userData.storeDescription || "",
+          },
+        ]);
+
+        if (sellerError) {
+          console.error("❌ Seller creation error:", sellerError);
+        }
+      }
+
+      console.log("✅ Profile created successfully");
+    } catch (error: any) {
+      console.error("❌ Error creating profile:", error);
+      Alert.alert("Profile Error", "Failed to create user profile");
+    }
+  };
+
+  // ============================================
+  // METHOD 3: Resend OTP
+  // ============================================
+  const resendOTP = async (userType: "buyer" | "seller", userData?: any) => {
     if (!email) {
       Alert.alert("Error", "No email address found");
       return;
     }
-    await sendOTP(email, userType);
+    await sendOTP(email, userType, userData);
   };
 
+  // ============================================
+  // METHOD 4: Traditional Login with Password
+  // ============================================
   const login = async (email: string, password: string): Promise<boolean> => {
     setLoading(true);
     try {
@@ -105,16 +213,29 @@ export const useAuth = () => {
       console.log("✅ Login successful:", data);
       Alert.alert("Success", "Logged in successfully!");
 
-      return true; // Return true for success
+      // Get user type from metadata
+      const userType = data.user?.user_metadata?.user_type;
+
+      // Redirect based on user type
+      if (userType === "seller") {
+        router.replace("/(seller)" as any);
+      } else {
+        router.replace("/(tabs)" as any);
+      }
+
+      return true;
     } catch (error: any) {
       console.log("❌ Login failed:", error);
       Alert.alert("Login Failed", error.message || "Invalid email or password");
-      return false; // Return false for failure
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
+  // ============================================
+  // METHOD 5: Traditional Signup with Password
+  // ============================================
   const signUp = async (email: string, password: string, userData: any) => {
     setLoading(true);
     try {
@@ -138,28 +259,16 @@ export const useAuth = () => {
 
       // Create profile in profiles table
       if (data.user) {
-        const { error: profileError } = await supabase.from("profiles").insert([
-          {
-            id: data.user.id,
-            email: data.user.email,
-            full_name: userData.fullName,
-            phone: userData.phone,
-            user_type: userData.userType || "buyer",
-          },
-        ]);
-
-        if (profileError) {
-          console.error("Profile creation error:", profileError);
-        }
+        await createUserProfile(data.user, userData);
       }
 
       Alert.alert(
         "Success",
-        "Account created successfully! You can now log in.",
+        "Account created successfully! Please check your email for verification.",
       );
 
       // Navigate to login screen
-      router.replace("/auth/login");
+      router.replace("/auth/login" as any);
 
       return true;
     } catch (error: any) {

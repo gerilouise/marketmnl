@@ -3,45 +3,51 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function VerifyOTPScreen() {
   const params = useLocalSearchParams();
   const email = params.email as string;
-  const userType = params.userType as "buyer" | "seller";
+  const userType = params.userType as string;
+  const fullName = params.fullName as string;
+  const phone = params.phone as string;
+  const storeName = params.storeName as string | undefined;
+  const storeDescription = params.storeDescription as string | undefined;
 
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const inputRefs = useRef<(TextInput | null)[]>(Array(6).fill(null));
+  // Changed from 6 to 8 digits
+  const [otp, setOtp] = useState(["", "", "", "", "", "", "", ""]);
+  const inputRefs = useRef<(TextInput | null)[]>([]);
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
 
   const { loading, verifyOTP, resendOTP } = useAuth();
 
+  // Timer for resend button
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          setCanResend(true);
-          clearInterval(intervalId);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(intervalId);
-  }, []);
+    if (timer > 0) {
+      const interval = setInterval(() => {
+        setTimer((prev) => {
+          if (prev <= 1) {
+            setCanResend(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [timer]);
 
   const handleOtpChange = (text: string, index: number) => {
     if (text && !/^\d+$/.test(text)) return;
@@ -50,7 +56,8 @@ export default function VerifyOTPScreen() {
     newOtp[index] = text;
     setOtp(newOtp);
 
-    if (text && index < 5) {
+    // Auto-focus next input - changed from 5 to 7 for 8 digits
+    if (text && index < 7) {
       inputRefs.current[index + 1]?.focus();
     }
   };
@@ -63,18 +70,33 @@ export default function VerifyOTPScreen() {
 
   const handleVerify = async () => {
     const otpString = otp.join("");
-    if (otpString.length === 6) {
-      await verifyOTP(otpString);
+    // Changed from 6 to 8
+    if (otpString.length === 8) {
+      // Prepare user data based on type
+      const userData = {
+        fullName,
+        phone,
+        userType,
+        ...(userType === "seller" && { storeName, storeDescription }),
+      };
+      await verifyOTP(otpString, userData);
     } else {
-      Alert.alert("Error", "Please enter the 6-digit verification code");
+      // Updated error message
+      Alert.alert("Error", "Please enter the 8-digit verification code");
     }
   };
 
   const handleResend = async () => {
-    await resendOTP(userType);
+    const userData = {
+      fullName,
+      phone,
+      ...(userType === "seller" && { storeName, storeDescription }),
+    };
+    await resendOTP(userType as "buyer" | "seller", userData);
     setTimer(60);
     setCanResend(false);
-    setOtp(["", "", "", "", "", ""]);
+    // Reset to 8 empty strings
+    setOtp(["", "", "", "", "", "", "", ""]);
     inputRefs.current[0]?.focus();
   };
 
@@ -84,10 +106,6 @@ export default function VerifyOTPScreen() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const setInputRef = (index: number) => (ref: TextInput | null) => {
-    inputRefs.current[index] = ref;
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -95,27 +113,30 @@ export default function VerifyOTPScreen() {
         style={styles.container}
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
+          {/* Back button */}
           <TouchableOpacity
-            style={styles.backButton}
             onPress={() => router.back()}
+            style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
 
+          {/* Header */}
           <View style={styles.header}>
             <Ionicons name="mail-outline" size={60} color="#C35822" />
             <Text style={styles.title}>Verify Your Email</Text>
             <Text style={styles.subtitle}>
-              We've sent a 6-digit verification code to
+              We've sent an 8-digit verification code to
             </Text>
             <Text style={styles.email}>{email}</Text>
           </View>
 
+          {/* OTP Input Boxes - 8 boxes */}
           <View style={styles.otpContainer}>
             {otp.map((digit, index) => (
               <TextInput
                 key={index}
-                ref={setInputRef(index)}
+                ref={(ref) => (inputRefs.current[index] = ref)}
                 style={styles.otpInput}
                 value={digit}
                 onChangeText={(text) => handleOtpChange(text, index)}
@@ -128,6 +149,7 @@ export default function VerifyOTPScreen() {
             ))}
           </View>
 
+          {/* Timer / Resend */}
           {!canResend ? (
             <Text style={styles.timerText}>
               Resend code in {formatTime(timer)}
@@ -138,24 +160,27 @@ export default function VerifyOTPScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Verify Button */}
           <TouchableOpacity
             style={[
               styles.verifyButton,
-              (otp.join("").length !== 6 || loading) &&
+              (otp.join("").length !== 8 || loading) &&
                 styles.verifyButtonDisabled,
             ]}
             onPress={handleVerify}
-            disabled={otp.join("").length !== 6 || loading}
+            disabled={otp.join("").length !== 8 || loading}
           >
             {loading ? (
               <ActivityIndicator color="#FFF" />
             ) : (
-              <Text style={styles.verifyButtonText}>Verify Email</Text>
+              <Text style={styles.verifyButtonText}>
+                Verify & Create Account
+              </Text>
             )}
           </TouchableOpacity>
 
           <Text style={styles.helpText}>
-            Didn't receive the code? Check your spam folder or try again.
+            Didn't receive the code? Check your spam folder.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -182,11 +207,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
   header: {
     alignItems: "center",
@@ -216,21 +236,16 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   otpInput: {
-    width: 45,
-    height: 55,
+    width: 40, // Slightly smaller to fit 8 boxes
+    height: 50,
     backgroundColor: "#FFF",
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "#E0DAD1",
     textAlign: "center",
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "600",
     color: "#32221B",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
   timerText: {
     textAlign: "center",
@@ -247,18 +262,13 @@ const styles = StyleSheet.create({
   },
   verifyButton: {
     backgroundColor: "#C35822",
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 16,
     alignItems: "center",
     marginBottom: 16,
-    shadowColor: "#C35822",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
   },
   verifyButtonDisabled: {
-    backgroundColor: "#FFB6A5",
+    backgroundColor: "#E0DAD1",
   },
   verifyButtonText: {
     color: "#FFF",
@@ -269,6 +279,5 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 12,
     color: "#8F796F",
-    marginTop: 16,
   },
 });
