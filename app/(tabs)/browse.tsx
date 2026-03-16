@@ -1,4 +1,4 @@
-import { useProducts } from "@/hooks/useProducts";
+import { useFirebaseProducts } from "@/hooks/useFirebaseProducts";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -23,7 +23,7 @@ export default function BrowseScreen() {
   const [showSortOptions, setShowSortOptions] = useState(false);
 
   const { products, loading, fetchProductsByCategory, searchProducts } =
-    useProducts();
+    useFirebaseProducts();
 
   // Handle category from home screen
   useEffect(() => {
@@ -81,8 +81,8 @@ export default function BrowseScreen() {
     >
       {/* Image Placeholder */}
       <View style={styles.imagePlaceholder}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.productImage} />
+        {item.imageUrl ? (
+          <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
         ) : (
           <Ionicons name="image-outline" size={30} color="#CCC" />
         )}
@@ -239,6 +239,7 @@ export default function BrowseScreen() {
   );
 }
 
+// Copy the styles from your existing browse.tsx - they remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,

@@ -1,4 +1,5 @@
-import { useAuth } from "@/hooks/useAuth";
+// app/auth/login.tsx
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useState } from "react";
@@ -22,10 +23,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  const { loading, login } = useAuth();
+  const { loading, login, resetPassword } = useFirebaseAuth();
 
   const handleLogin = async () => {
-    // Validate inputs
     if (!email || !password) {
       Alert.alert("Error", "Please fill in all fields");
       return;
@@ -37,13 +37,7 @@ export default function LoginScreen() {
       return;
     }
 
-    // Call login function from useAuth
-    const success = await login(email, password);
-
-    // If login successful, navigate to browse
-    if (success) {
-      router.replace("/(tabs)/browse");
-    }
+    await login(email, password);
   };
 
   const handleForgotPassword = () => {
@@ -52,24 +46,19 @@ export default function LoginScreen() {
       return;
     }
 
-    Alert.alert(
-      "Reset Password",
-      `Password reset link will be sent to ${email}`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Send",
-          onPress: () => {
-            // TODO: Implement password reset
-            Alert.alert("Success", "Password reset email sent!");
-          },
+    Alert.alert("Reset Password", `Send password reset link to ${email}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Send",
+        onPress: async () => {
+          await resetPassword(email);
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const handleBrowseAsGuest = () => {
-    router.replace("/(tabs)/browse");
+    router.replace("/(tabs)");
   };
 
   return (
@@ -82,7 +71,6 @@ export default function LoginScreen() {
           contentContainerStyle={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo */}
           <View style={styles.logoContainer}>
             <Image
               source={require("@/assets/images/logo.png")}
@@ -91,15 +79,12 @@ export default function LoginScreen() {
             />
           </View>
 
-          {/* Login Title */}
           <View style={styles.titleContainer}>
             <Text style={styles.title}>Welcome Back!</Text>
             <Text style={styles.subtitle}>Sign in to continue</Text>
           </View>
 
-          {/* Form */}
           <View style={styles.formContainer}>
-            {/* Email Field */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Email Address</Text>
               <View style={styles.inputContainer}>
@@ -122,7 +107,6 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            {/* Password Field */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Password</Text>
               <View style={styles.inputContainer}>
@@ -154,7 +138,6 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            {/* Forgot Password */}
             <TouchableOpacity
               style={styles.forgotPassword}
               onPress={handleForgotPassword}
@@ -163,7 +146,6 @@ export default function LoginScreen() {
               <Text style={styles.forgotPasswordText}>Forgot password?</Text>
             </TouchableOpacity>
 
-            {/* Login Button */}
             <TouchableOpacity
               style={[
                 styles.loginButton,
@@ -179,7 +161,6 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Browse as Guest Button */}
             <TouchableOpacity
               style={styles.guestButton}
               onPress={handleBrowseAsGuest}
@@ -188,14 +169,12 @@ export default function LoginScreen() {
               <Text style={styles.guestButtonText}>Browse as Guest</Text>
             </TouchableOpacity>
 
-            {/* OR Divider */}
             <View style={styles.orContainer}>
               <View style={styles.orLine} />
               <Text style={styles.orText}>OR</Text>
               <View style={styles.orLine} />
             </View>
 
-            {/* Social Login Buttons */}
             <View style={styles.socialContainer}>
               <TouchableOpacity
                 style={styles.socialButton}
@@ -225,7 +204,6 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          {/* Sign Up Link */}
           <View style={styles.signupContainer}>
             <Text style={styles.signupText}>Don't have an account? </Text>
             <TouchableOpacity

@@ -1,5 +1,5 @@
 // app/auth/signup-seller.tsx
-import { useAuth } from "@/hooks/useAuth";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
@@ -16,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SignupSellerScreen() {
   const [fullName, setFullName] = useState("");
@@ -29,7 +30,7 @@ export default function SignupSellerScreen() {
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeSellerAgreement, setAgreeSellerAgreement] = useState(false);
 
-  const { loading, sendOTP } = useAuth();
+  const { loading, signUp } = useFirebaseAuth();
 
   const validateForm = () => {
     if (
@@ -44,8 +45,8 @@ export default function SignupSellerScreen() {
       return false;
     }
 
-    if (password.length < 8) {
-      Alert.alert("Error", "Password must be at least 8 characters");
+    if (password.length < 6) {
+      Alert.alert("Error", "Password must be at least 6 characters");
       return false;
     }
 
@@ -68,339 +69,319 @@ export default function SignupSellerScreen() {
     return true;
   };
 
-  const handleSignup = () => {
-    console.log("========== SIGNUP BUTTON CLICKED ==========");
-    console.log("1️⃣ Validating form...");
-
-    if (!validateForm()) {
-      console.log("❌ Form validation failed");
-      return;
-    }
-
-    console.log("✅ Form validation passed");
-    console.log("2️⃣ Preparing user data...");
+  const handleSignup = async () => {
+    if (!validateForm()) return;
 
     const userData = {
       fullName,
       phone,
       storeName,
-      storeDescription: "",
-      userType: "seller",
+      userType: "seller" as const,
     };
 
-    console.log("User data:", userData);
-    console.log("3️⃣ Calling sendOTP function...");
+    const success = await signUp(email, password, userData);
 
-    // Send OTP to email
-    sendOTP(email, "seller", userData);
+    if (success) {
+      router.replace("/auth/login");
+    }
   };
 
   const allAgreed = agreeTerms && agreeSellerAgreement;
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={styles.container}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Logo */}
-        <View style={styles.logoContainer}>
-          <Image
-            source={require("@/assets/images/logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </View>
-
-        {/* User Type Toggle with Icons */}
-        <View style={styles.userTypeContainer}>
-          <TouchableOpacity
-            style={[styles.userTypeButton]}
-            onPress={() => router.push("/auth/signup-customer")}
-          >
-            <Ionicons
-              name="cart-outline"
-              size={20}
-              color="#8F796F"
-              style={styles.userTypeIcon}
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.container}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.logoContainer}>
+            <Image
+              source={require("@/assets/images/logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
             />
-            <Text style={[styles.userTypeText]}>Buyer</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.userTypeButton, styles.userTypeActive]}
-          >
-            <Ionicons
-              name="storefront-outline"
-              size={20}
-              color="#32221B"
-              style={styles.userTypeIcon}
-            />
-            <Text style={[styles.userTypeText, styles.userTypeTextActive]}>
-              Seller
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Form Container */}
-        <View style={styles.formContainer}>
-          <View style={styles.form}>
-            {/* Full Name */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Full Name</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="person-outline"
-                  size={20}
-                  color="#8F796F"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="Juan Dela Cruz"
-                  placeholderTextColor="#8F796F"
-                  editable={!loading}
-                />
-              </View>
-            </View>
-
-            {/* Store Name - Special for sellers */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Store Name</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="business-outline"
-                  size={20}
-                  color="#8F796F"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={storeName}
-                  onChangeText={setStoreName}
-                  placeholder="Your Store Name"
-                  placeholderTextColor="#8F796F"
-                  editable={!loading}
-                />
-              </View>
-            </View>
-
-            {/* Email */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Email Address</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="mail-outline"
-                  size={20}
-                  color="#8F796F"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="juan@email.com"
-                  placeholderTextColor="#8F796F"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  editable={!loading}
-                />
-              </View>
-            </View>
-
-            {/* Phone Number */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Phone Number</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="call-outline"
-                  size={20}
-                  color="#8F796F"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={phone}
-                  onChangeText={setPhone}
-                  placeholder="+63 906 561 8297"
-                  placeholderTextColor="#8F796F"
-                  keyboardType="phone-pad"
-                  editable={!loading}
-                />
-              </View>
-            </View>
-
-            {/* Password */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Password</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={20}
-                  color="#8F796F"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Create a password"
-                  placeholderTextColor="#8F796F"
-                  secureTextEntry={!showPassword}
-                  editable={!loading}
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeIcon}
-                >
-                  <Ionicons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
-                    color="#8F796F"
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Confirm Password */}
-            <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Confirm Password</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={20}
-                  color="#8F796F"
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  placeholder="Confirm your password"
-                  placeholderTextColor="#8F796F"
-                  secureTextEntry={!showConfirmPassword}
-                  editable={!loading}
-                />
-                <TouchableOpacity
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                  style={styles.eyeIcon}
-                >
-                  <Ionicons
-                    name={
-                      showConfirmPassword ? "eye-off-outline" : "eye-outline"
-                    }
-                    size={20}
-                    color="#8F796F"
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Note about verification - KEPT THE OTP NOTE */}
-            <View style={styles.noteContainer}>
-              <Ionicons
-                name="information-circle-outline"
-                size={20}
-                color="#C35822"
-              />
-              <Text style={styles.noteText}>
-                We'll send a verification code to your email
-              </Text>
-            </View>
-
-            {/* Terms of Service Agreement */}
-            <TouchableOpacity
-              style={styles.termsContainer}
-              onPress={() => setAgreeTerms(!agreeTerms)}
-              disabled={loading}
-            >
-              <View
-                style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}
-              >
-                {agreeTerms && (
-                  <Ionicons name="checkmark" size={16} color="#FFF" />
-                )}
-              </View>
-              <Text style={styles.termsText}>
-                I agree to the{" "}
-                <Text
-                  style={styles.termsLink}
-                  onPress={() => router.push("/legal/terms-of-service")}
-                >
-                  Terms of Service
-                </Text>{" "}
-                and{" "}
-                <Text
-                  style={styles.termsLink}
-                  onPress={() => router.push("/legal/privacy-policy")}
-                >
-                  Privacy Policy
-                </Text>
-              </Text>
-            </TouchableOpacity>
-
-            {/* Seller Agreement */}
-            <TouchableOpacity
-              style={styles.termsContainer}
-              onPress={() => setAgreeSellerAgreement(!agreeSellerAgreement)}
-              disabled={loading}
-            >
-              <View
-                style={[
-                  styles.checkbox,
-                  agreeSellerAgreement && styles.checkboxChecked,
-                ]}
-              >
-                {agreeSellerAgreement && (
-                  <Ionicons name="checkmark" size={16} color="#FFF" />
-                )}
-              </View>
-              <Text style={styles.termsText}>
-                I have read and agree to the{" "}
-                <Text
-                  style={styles.termsLink}
-                  onPress={() => router.push("/legal/seller-agreement")}
-                >
-                  Seller Agreement
-                </Text>
-              </Text>
-            </TouchableOpacity>
-
-            {/* Create Account Button - Still uses OTP flow */}
-            <TouchableOpacity
-              style={[
-                styles.signupButton,
-                (!allAgreed || loading) && styles.signupButtonDisabled,
-              ]}
-              onPress={handleSignup}
-              disabled={!allAgreed || loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <Text style={styles.signupButtonText}>Continue</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Note about seller agreement */}
-            <Text style={styles.footerNote}>
-              By creating a seller account, you enter into a legally binding
-              agreement with MarketMNL.
-            </Text>
           </View>
-        </View>
 
-        {/* Login Link */}
-        <View style={styles.loginContainer}>
-          <Text style={styles.loginText}>Already have an account? </Text>
-          <TouchableOpacity onPress={() => router.push("/auth/login")}>
-            <Text style={styles.loginLink}>Log In</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <View style={styles.userTypeContainer}>
+            <TouchableOpacity
+              style={[styles.userTypeButton]}
+              onPress={() => router.push("/auth/signup-customer")}
+            >
+              <Ionicons
+                name="cart-outline"
+                size={20}
+                color="#8F796F"
+                style={styles.userTypeIcon}
+              />
+              <Text style={[styles.userTypeText]}>Buyer</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.userTypeButton, styles.userTypeActive]}
+            >
+              <Ionicons
+                name="storefront-outline"
+                size={20}
+                color="#32221B"
+                style={styles.userTypeIcon}
+              />
+              <Text style={[styles.userTypeText, styles.userTypeTextActive]}>
+                Seller
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.formContainer}>
+            <View style={styles.form}>
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Full Name</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons
+                    name="person-outline"
+                    size={20}
+                    color="#8F796F"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={fullName}
+                    onChangeText={setFullName}
+                    placeholder="Juan Dela Cruz"
+                    placeholderTextColor="#8F796F"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Store Name</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons
+                    name="business-outline"
+                    size={20}
+                    color="#8F796F"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={storeName}
+                    onChangeText={setStoreName}
+                    placeholder="Your Store Name"
+                    placeholderTextColor="#8F796F"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Email Address</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons
+                    name="mail-outline"
+                    size={20}
+                    color="#8F796F"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="juan@email.com"
+                    placeholderTextColor="#8F796F"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Phone Number</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons
+                    name="call-outline"
+                    size={20}
+                    color="#8F796F"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={phone}
+                    onChangeText={setPhone}
+                    placeholder="+63 906 561 8297"
+                    placeholderTextColor="#8F796F"
+                    keyboardType="phone-pad"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Password</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={20}
+                    color="#8F796F"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Create a password"
+                    placeholderTextColor="#8F796F"
+                    secureTextEntry={!showPassword}
+                    editable={!loading}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={styles.eyeIcon}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off-outline" : "eye-outline"}
+                      size={20}
+                      color="#8F796F"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Confirm Password</Text>
+                <View style={styles.inputContainer}>
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={20}
+                    color="#8F796F"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Confirm your password"
+                    placeholderTextColor="#8F796F"
+                    secureTextEntry={!showConfirmPassword}
+                    editable={!loading}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    style={styles.eyeIcon}
+                  >
+                    <Ionicons
+                      name={
+                        showConfirmPassword ? "eye-off-outline" : "eye-outline"
+                      }
+                      size={20}
+                      color="#8F796F"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.noteContainer}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={20}
+                  color="#C35822"
+                />
+                <Text style={styles.noteText}>
+                  We'll send a verification link to your email
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.termsContainer}
+                onPress={() => setAgreeTerms(!agreeTerms)}
+                disabled={loading}
+              >
+                <View
+                  style={[
+                    styles.checkbox,
+                    agreeTerms && styles.checkboxChecked,
+                  ]}
+                >
+                  {agreeTerms && (
+                    <Ionicons name="checkmark" size={16} color="#FFF" />
+                  )}
+                </View>
+                <Text style={styles.termsText}>
+                  I agree to the{" "}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => router.push("/legal/terms-of-service")}
+                  >
+                    Terms of Service
+                  </Text>{" "}
+                  and{" "}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => router.push("/legal/privacy-policy")}
+                  >
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.termsContainer}
+                onPress={() => setAgreeSellerAgreement(!agreeSellerAgreement)}
+                disabled={loading}
+              >
+                <View
+                  style={[
+                    styles.checkbox,
+                    agreeSellerAgreement && styles.checkboxChecked,
+                  ]}
+                >
+                  {agreeSellerAgreement && (
+                    <Ionicons name="checkmark" size={16} color="#FFF" />
+                  )}
+                </View>
+                <Text style={styles.termsText}>
+                  I have read and agree to the{" "}
+                  <Text
+                    style={styles.termsLink}
+                    onPress={() => router.push("/legal/seller-agreement")}
+                  >
+                    Seller Agreement
+                  </Text>
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.signupButton,
+                  (!allAgreed || loading) && styles.signupButtonDisabled,
+                ]}
+                onPress={handleSignup}
+                disabled={!allAgreed || loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.signupButtonText}>Create Account</Text>
+                )}
+              </TouchableOpacity>
+
+              <Text style={styles.footerNote}>
+                By creating a seller account, you enter into a legally binding
+                agreement with MarketMNL.
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.loginContainer}>
+            <Text style={styles.loginText}>Already have an account? </Text>
+            <TouchableOpacity onPress={() => router.push("/auth/login")}>
+              <Text style={styles.loginLink}>Log In</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

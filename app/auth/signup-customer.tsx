@@ -1,4 +1,5 @@
-import { useAuth } from "@/hooks/useAuth";
+// app/auth/signup-customer.tsx
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
@@ -18,7 +19,6 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SignupCustomerScreen() {
-  const [userType] = useState("buyer");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -28,7 +28,7 @@ export default function SignupCustomerScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
 
-  const { loading, signUp } = useAuth();
+  const { loading, signUp } = useFirebaseAuth();
 
   const validateForm = () => {
     if (!fullName || !email || !phone || !password || !confirmPassword) {
@@ -36,8 +36,8 @@ export default function SignupCustomerScreen() {
       return false;
     }
 
-    if (password.length < 8) {
-      Alert.alert("Error", "Password must be at least 8 characters");
+    if (password.length < 6) {
+      Alert.alert("Error", "Password must be at least 6 characters");
       return false;
     }
 
@@ -69,13 +69,12 @@ export default function SignupCustomerScreen() {
     const userData = {
       fullName,
       phone,
-      userType: "buyer",
+      userType: "buyer" as const,
     };
 
     const success = await signUp(email, password, userData);
 
     if (success) {
-      // Navigate to login after successful signup
       router.replace("/auth/login");
     }
   };
@@ -90,7 +89,6 @@ export default function SignupCustomerScreen() {
           contentContainerStyle={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo */}
           <View style={styles.logoContainer}>
             <Image
               source={require("@/assets/images/logo.png")}
@@ -99,14 +97,9 @@ export default function SignupCustomerScreen() {
             />
           </View>
 
-          {/* User Type Toggle */}
           <View style={styles.userTypeContainer}>
             <TouchableOpacity
-              style={[
-                styles.userTypeButton,
-                userType === "buyer" && styles.userTypeActive,
-              ]}
-              onPress={() => {}}
+              style={[styles.userTypeButton, styles.userTypeActive]}
             >
               <Ionicons
                 name="cart-outline"
@@ -133,11 +126,9 @@ export default function SignupCustomerScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Form Container */}
           <View style={styles.formContainer}>
             <Text style={styles.formTitle}>Create Account</Text>
 
-            {/* Full Name */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Full Name</Text>
               <View style={styles.inputContainer}>
@@ -158,7 +149,6 @@ export default function SignupCustomerScreen() {
               </View>
             </View>
 
-            {/* Email */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Email Address</Text>
               <View style={styles.inputContainer}>
@@ -181,7 +171,6 @@ export default function SignupCustomerScreen() {
               </View>
             </View>
 
-            {/* Phone Number */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Phone Number</Text>
               <View style={styles.inputContainer}>
@@ -203,7 +192,6 @@ export default function SignupCustomerScreen() {
               </View>
             </View>
 
-            {/* Password */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Password</Text>
               <View style={styles.inputContainer}>
@@ -235,7 +223,6 @@ export default function SignupCustomerScreen() {
               </View>
             </View>
 
-            {/* Confirm Password */}
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Confirm Password</Text>
               <View style={styles.inputContainer}>
@@ -269,7 +256,17 @@ export default function SignupCustomerScreen() {
               </View>
             </View>
 
-            {/* Terms Agreement */}
+            <View style={styles.noteContainer}>
+              <Ionicons
+                name="information-circle-outline"
+                size={20}
+                color="#C35822"
+              />
+              <Text style={styles.noteText}>
+                We'll send a verification link to your email
+              </Text>
+            </View>
+
             <TouchableOpacity
               style={styles.termsContainer}
               onPress={() => setAgreeTerms(!agreeTerms)}
@@ -300,7 +297,6 @@ export default function SignupCustomerScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* Sign Up Button */}
             <TouchableOpacity
               style={[
                 styles.signupButton,
@@ -317,7 +313,6 @@ export default function SignupCustomerScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Login Link */}
           <View style={styles.loginContainer}>
             <Text style={styles.loginText}>Already have an account? </Text>
             <TouchableOpacity onPress={() => router.push("/auth/login")}>
@@ -431,6 +426,20 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 12,
     top: 14,
+  },
+  noteContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF3E0",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 20,
+  },
+  noteText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 13,
+    color: "#C35822",
   },
   termsContainer: {
     flexDirection: "row",

@@ -1,32 +1,31 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Switch,
-  Alert,
-  Image,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+// app/(tabs)/profile.tsx
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
+import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const { profile, addresses, loading, fetchProfile } = useFirebaseProfile();
+  const { logout } = useFirebaseAuth();
 
-  // Mock user data - will be replaced with real data from database later
-  const userData = {
-    name: "Ryza Mae Flores",
-    email: "ryzaflores@gmail.com",
-    orders: 12,
-    reviews: 12,
-    wishlist: 18,
-    savedAddresses: 3,
-  };
+  useEffect(() => {
+    fetchProfile();
+  }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Alert.alert(
       "Log Out",
       "Are you sure you want to log out?",
@@ -37,28 +36,40 @@ export default function ProfileScreen() {
         },
         {
           text: "Log Out",
-          onPress: () => {
-            // TODO: Add actual logout logic with Supabase
-            console.log("Logged out");
-            // Navigate to login screen
-            router.replace("/auth/login");
+          onPress: async () => {
+            await logout();
           },
           style: "destructive",
         },
       ],
-      { cancelable: true }
+      { cancelable: true },
     );
   };
 
   const handleEditProfile = () => {
-    Alert.alert("Edit Profile", "Navigate to edit profile screen");
-    // router.push("/edit-profile");
+    router.push("/(tabs)/edit-profile");
   };
 
   const navigateTo = (screen: string) => {
-    // TODO: Replace with actual navigation when screens are created
-    Alert.alert("Navigate", `Going to ${screen}`);
-    // router.push(`/${screen}`);
+    switch (screen) {
+      case "addresses":
+        router.push("/(tabs)/addresses");
+        break;
+      case "orders":
+        Alert.alert("Coming Soon", "Orders screen will be available soon!");
+        break;
+      case "reviews":
+        Alert.alert("Coming Soon", "Reviews screen will be available soon!");
+        break;
+      case "wishlist":
+        router.push("/(tabs)/wishlist");
+        break;
+      case "settings":
+        Alert.alert("Coming Soon", "Settings screen will be available soon!");
+        break;
+      default:
+        Alert.alert("Navigate", `Going to ${screen}`);
+    }
   };
 
   const MenuItem = ({ icon, title, subtitle, onPress, rightIcon }: any) => (
@@ -72,102 +83,179 @@ export default function ProfileScreen() {
           {subtitle && <Text style={styles.menuItemSubtitle}>{subtitle}</Text>}
         </View>
       </View>
-      {rightIcon || <Ionicons name="chevron-forward" size={20} color="#8F796F" />}
+      {rightIcon || (
+        <Ionicons name="chevron-forward" size={20} color="#8F796F" />
+      )}
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#C35822" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    );
+  }
+
+  const defaultAddress = addresses?.find((addr) => addr.isDefault);
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Profile</Text>
-          <View style={{ width: 24 }} /> {/* Empty view for balance */}
+          <View style={{ width: 24 }} />
         </View>
 
-        {/* Profile Info Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileImageContainer}>
             <View style={styles.profileImagePlaceholder}>
               <Ionicons name="person" size={40} color="#8F796F" />
             </View>
-            <TouchableOpacity style={styles.editImageButton} onPress={handleEditProfile}>
+            <TouchableOpacity
+              style={styles.editImageButton}
+              onPress={handleEditProfile}
+            >
               <Ionicons name="camera" size={16} color="#FFF" />
             </TouchableOpacity>
           </View>
-          
-          <Text style={styles.profileName}>{userData.name}</Text>
-          <Text style={styles.profileEmail}>{userData.email}</Text>
 
-          {/* Edit Profile Button */}
-          <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
+          <Text style={styles.profileName}>{profile?.fullName || "User"}</Text>
+          <Text style={styles.profileEmail}>
+            {profile?.email || "No email"}
+          </Text>
+
+          {profile?.age && (
+            <Text style={styles.profileAge}>Age: {profile.age}</Text>
+          )}
+          {profile?.birthdate && (
+            <Text style={styles.profileBirthdate}>
+              Born: {new Date(profile.birthdate).toLocaleDateString()}
+            </Text>
+          )}
+
+          <TouchableOpacity
+            style={styles.editProfileButton}
+            onPress={handleEditProfile}
+          >
             <Ionicons name="pencil" size={16} color="#C35822" />
             <Text style={styles.editProfileText}>Edit Profile</Text>
           </TouchableOpacity>
 
-          {/* Stats Row */}
           <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("orders")}>
-              <Text style={styles.statNumber}>{userData.orders}</Text>
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => navigateTo("orders")}
+            >
+              <Text style={styles.statNumber}>{profile?.ordersCount || 0}</Text>
               <Text style={styles.statLabel}>Orders</Text>
             </TouchableOpacity>
-            
+
             <View style={styles.statDivider} />
-            
-            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("reviews")}>
-              <Text style={styles.statNumber}>{userData.reviews}</Text>
+
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => navigateTo("reviews")}
+            >
+              <Text style={styles.statNumber}>
+                {profile?.reviewsCount || 0}
+              </Text>
               <Text style={styles.statLabel}>Reviews</Text>
             </TouchableOpacity>
-            
+
             <View style={styles.statDivider} />
-            
-            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("wishlist")}>
-              <Text style={styles.statNumber}>{userData.wishlist}</Text>
+
+            <TouchableOpacity
+              style={styles.statItem}
+              onPress={() => navigateTo("wishlist")}
+            >
+              <Text style={styles.statNumber}>
+                {profile?.wishlistCount || 0}
+              </Text>
               <Text style={styles.statLabel}>Wishlist</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Quick Actions */}
+        {defaultAddress && (
+          <TouchableOpacity
+            style={styles.defaultAddressCard}
+            onPress={() => navigateTo("addresses")}
+          >
+            <View style={styles.defaultAddressHeader}>
+              <Ionicons name="location" size={20} color="#C35822" />
+              <Text style={styles.defaultAddressTitle}>Default Address</Text>
+            </View>
+            <Text style={styles.defaultAddressName}>
+              {defaultAddress.fullName}
+            </Text>
+            <Text style={styles.defaultAddressPhone}>
+              {defaultAddress.phone}
+            </Text>
+            <Text style={styles.defaultAddressText}>
+              {defaultAddress.street}, {defaultAddress.barangay},{" "}
+              {defaultAddress.city}, {defaultAddress.province}{" "}
+              {defaultAddress.zipCode}
+            </Text>
+            <View style={styles.defaultAddressFooter}>
+              <Text style={styles.defaultAddressLabel}>
+                {defaultAddress.label}
+              </Text>
+              <TouchableOpacity onPress={() => navigateTo("addresses")}>
+                <Text style={styles.manageAddressText}>Manage Addresses</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        )}
+
         <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickActionButton} onPress={() => navigateTo("orders")}>
+          <TouchableOpacity
+            style={styles.quickActionButton}
+            onPress={() => navigateTo("orders")}
+          >
             <Ionicons name="bag-handle-outline" size={22} color="#C35822" />
             <Text style={styles.quickActionText}>My Orders</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.quickActionButton} onPress={() => router.push('/chat')}>
+
+          <TouchableOpacity
+            style={styles.quickActionButton}
+            onPress={() => router.push("/chat")}
+          >
             <Ionicons name="chatbubble-outline" size={22} color="#C35822" />
             <Text style={styles.quickActionText}>AI Chatbot</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Account Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
-          
+
           <MenuItem
             icon="location-outline"
             title="Shipping Address"
-            subtitle={`${userData.savedAddresses} saved addresses`}
+            subtitle={`${profile?.addressesCount || 0} saved addresses`}
             onPress={() => navigateTo("addresses")}
           />
-          
+
           <MenuItem
             icon="star-outline"
             title="My Reviews"
-            subtitle={`${userData.reviews} product reviews`}
+            subtitle={`${profile?.reviewsCount || 0} product reviews`}
             onPress={() => navigateTo("reviews")}
           />
         </View>
 
-        {/* Preferences Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
-          
+
           <View style={styles.menuItem}>
             <View style={styles.menuItemLeft}>
               <View style={styles.iconContainer}>
-                <Ionicons name="notifications-outline" size={24} color="#8F796F" />
+                <Ionicons
+                  name="notifications-outline"
+                  size={24}
+                  color="#8F796F"
+                />
               </View>
               <Text style={styles.menuItemTitle}>Notifications</Text>
             </View>
@@ -178,7 +266,7 @@ export default function ProfileScreen() {
               thumbColor="#FFF"
             />
           </View>
-          
+
           <MenuItem
             icon="settings-outline"
             title="Settings"
@@ -186,13 +274,11 @@ export default function ProfileScreen() {
           />
         </View>
 
-        {/* Log Out Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={24} color="#C35822" />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
-        {/* Bottom Padding */}
         <View style={styles.bottomPadding} />
       </ScrollView>
     </SafeAreaView>
@@ -203,6 +289,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FBF8F4",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FBF8F4",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#8F796F",
   },
   header: {
     flexDirection: "row",
@@ -264,6 +361,16 @@ const styles = StyleSheet.create({
   profileEmail: {
     fontSize: 14,
     color: "#8F796F",
+    marginBottom: 4,
+  },
+  profileAge: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginBottom: 2,
+  },
+  profileBirthdate: {
+    fontSize: 14,
+    color: "#8F796F",
     marginBottom: 12,
   },
   editProfileButton: {
@@ -309,6 +416,68 @@ const styles = StyleSheet.create({
     width: 1,
     height: "100%",
     backgroundColor: "#F0F0F0",
+  },
+  defaultAddressCard: {
+    backgroundColor: "#FFF",
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  defaultAddressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  defaultAddressTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#C35822",
+    marginLeft: 8,
+  },
+  defaultAddressName: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#32221B",
+    marginBottom: 2,
+  },
+  defaultAddressPhone: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginBottom: 4,
+  },
+  defaultAddressText: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  defaultAddressFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  defaultAddressLabel: {
+    fontSize: 12,
+    color: "#8F796F",
+    fontWeight: "500",
+    backgroundColor: "#F0F0F0",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  manageAddressText: {
+    color: "#C35822",
+    fontSize: 12,
+    fontWeight: "500",
   },
   quickActions: {
     flexDirection: "row",
@@ -369,9 +538,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconContainer: {
-    width: 32, // Fixed width for icons
+    width: 32,
     alignItems: "center",
-    marginRight: 12, // Space between icon and text
+    marginRight: 12,
   },
   menuItemTextContainer: {
     flex: 1,

@@ -1,7 +1,7 @@
-import { useProducts } from "@/hooks/useProducts";
+import { useFirebaseProducts } from "@/hooks/useFirebaseProducts";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,7 +23,11 @@ export default function SellerProductsManageScreen() {
   const [stock, setStock] = useState("");
 
   const { products, loading, addProduct, deleteProduct, fetchProducts } =
-    useProducts();
+    useFirebaseProducts();
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
 
   const handleAddProduct = async () => {
     if (!name || !price || !stock) {
@@ -33,12 +37,12 @@ export default function SellerProductsManageScreen() {
 
     const newProduct = {
       name,
-      description,
+      description: description || `${name} - Authentic Filipino delicacy`,
       price: parseFloat(price),
       category,
-      stock_quantity: parseInt(stock),
-      image_url: null,
-      seller_id: "", // Will be set by the hook
+      stockQuantity: parseInt(stock),
+      imageUrl: null,
+      sellerId: "", // Will be set by the hook
     };
 
     const success = await addProduct(newProduct);
@@ -48,13 +52,11 @@ export default function SellerProductsManageScreen() {
       setDescription("");
       setPrice("");
       setStock("");
-      // Refresh the product list
       await fetchProducts();
     }
   };
 
   const handleGoBack = () => {
-    // Navigate directly back to the products screen
     router.push("/(seller)/products");
   };
 
@@ -63,7 +65,8 @@ export default function SellerProductsManageScreen() {
       <View style={styles.productInfo}>
         <Text style={styles.productName}>{item.name}</Text>
         <Text style={styles.productPrice}>₱{item.price}</Text>
-        <Text style={styles.productStock}>Stock: {item.stock_quantity}</Text>
+        <Text style={styles.productStock}>Stock: {item.stockQuantity}</Text>
+        <Text style={styles.productCategory}>Category: {item.category}</Text>
       </View>
       <View style={styles.productActions}>
         <TouchableOpacity
@@ -247,6 +250,8 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     fontSize: 14,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
   },
   categoryRow: {
     flexDirection: "row",
@@ -259,12 +264,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#F5F0EB",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
   },
   categoryActive: {
     backgroundColor: "#C35822",
+    borderColor: "#C35822",
   },
   categoryText: {
     color: "#8F796F",
+    fontWeight: "500",
   },
   categoryTextActive: {
     color: "#FFF",
@@ -319,6 +328,11 @@ const styles = StyleSheet.create({
   productStock: {
     fontSize: 12,
     color: "#8F796F",
+  },
+  productCategory: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 2,
   },
   productActions: {
     flexDirection: "row",
