@@ -1,18 +1,17 @@
 // app/(seller)/products.tsx
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  FlatList,
-  Alert,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import React, { useState } from "react";
+import {
+  Alert,
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 // Mock products data
 const PRODUCTS_DATA = [
@@ -22,7 +21,7 @@ const PRODUCTS_DATA = [
     description: "Bottled Spicy Tuyo",
     rating: 4.8,
     reviews: 234,
-    price: 250.00,
+    price: 250.0,
     category: "All",
     image: null,
   },
@@ -32,7 +31,7 @@ const PRODUCTS_DATA = [
     description: "Bottled Pastil",
     rating: 4.6,
     reviews: 156,
-    price: 250.00,
+    price: 250.0,
     category: "Specials",
     image: null,
   },
@@ -42,7 +41,7 @@ const PRODUCTS_DATA = [
     description: "Bottled Spicy Pastil Flakes",
     rating: 4.7,
     reviews: 170,
-    price: 250.00,
+    price: 250.0,
     category: "Seafood",
     image: null,
   },
@@ -54,12 +53,13 @@ export default function SellerProductsScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [products, setProducts] = useState(PRODUCTS_DATA);
 
-  const filteredProducts = products.filter(product => 
-    selectedCategory === "All" ? true : product.category === selectedCategory
+  const filteredProducts = products.filter((product) =>
+    selectedCategory === "All" ? true : product.category === selectedCategory,
   );
 
+  // FIXED: Correct path to product-manage.tsx
   const handleAddProduct = () => {
-    router.push("/seller/products-add");
+    router.push("/(seller)/product-manage");
   };
 
   const handleEditProduct = (productId: string) => {
@@ -77,14 +77,14 @@ export default function SellerProductsScreen() {
           text: "Delete",
           style: "destructive",
           onPress: () => {
-            setProducts(prev => prev.filter(p => p.id !== productId));
+            setProducts((prev) => prev.filter((p) => p.id !== productId));
           },
         },
-      ]
+      ],
     );
   };
 
-  const renderProductItem = ({ item }: { item: typeof PRODUCTS_DATA[0] }) => (
+  const renderProductItem = ({ item }: { item: (typeof PRODUCTS_DATA)[0] }) => (
     <View style={styles.productCard}>
       {/* Product Image Placeholder */}
       <View style={styles.productImagePlaceholder}>
@@ -95,7 +95,7 @@ export default function SellerProductsScreen() {
       <View style={styles.productDetails}>
         <Text style={styles.productName}>{item.name}</Text>
         <Text style={styles.productDescription}>{item.description}</Text>
-        
+
         {/* Rating */}
         <View style={styles.ratingContainer}>
           <Ionicons name="star" size={14} color="#FFD700" />
@@ -109,14 +109,14 @@ export default function SellerProductsScreen() {
 
       {/* Action Buttons - Bottom Right */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.editButton}
           onPress={() => handleEditProduct(item.id)}
         >
           <Ionicons name="create-outline" size={18} color="#FFF" />
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.deleteButton}
           onPress={() => handleDeleteProduct(item.id)}
         >
@@ -137,8 +137,8 @@ export default function SellerProductsScreen() {
       </View>
 
       {/* Category Filters */}
-      <ScrollView 
-        horizontal 
+      <ScrollView
+        horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.categoriesScroll}
         contentContainerStyle={styles.categoriesScrollContent}
@@ -149,14 +149,17 @@ export default function SellerProductsScreen() {
               key={category}
               style={[
                 styles.categoryChip,
-                selectedCategory === category && styles.categoryChipActive
+                selectedCategory === category && styles.categoryChipActive,
               ]}
               onPress={() => setSelectedCategory(category)}
             >
-              <Text style={[
-                styles.categoryChipText,
-                selectedCategory === category && styles.categoryChipTextActive
-              ]}>
+              <Text
+                style={[
+                  styles.categoryChipText,
+                  selectedCategory === category &&
+                    styles.categoryChipTextActive,
+                ]}
+              >
                 {category}
               </Text>
             </TouchableOpacity>
