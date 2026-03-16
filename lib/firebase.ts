@@ -4,8 +4,7 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-// Your Firebase configuration (GET THIS FROM FIREBASE CONSOLE)
-// Go to Firebase Console > Project Settings > Your apps > Firebase SDK snippet
+// Your Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyCL-l3C7tWYyhbQWVcJIL-SnmbV69JpaEw",
   authDomain: "marketmnl.firebaseapp.com",
@@ -22,6 +21,21 @@ if (!getApps().length) {
 } else {
   app = getApp();
 }
+
+// Action code settings for email link
+export const actionCodeSettings = {
+  // URL you want to redirect back to. The domain must be in Firebase authorized domains.
+  url: "https://marketmnl.page.link/verify",
+  handleCodeInApp: true,
+  iOS: {
+    bundleId: "com.yourcompany.marketmnl",
+  },
+  android: {
+    packageName: "com.yourcompany.marketmnl",
+    installApp: true,
+    minimumVersion: "12",
+  },
+};
 
 // Initialize services
 export const auth = getAuth(app);

@@ -1,14 +1,60 @@
+// app/_layout.tsx
 import { Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet, Image, Text } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Image, Text, Alert } from 'react-native';
+import * as Linking from 'expo-linking';
+import { router } from 'expo-router';
 
 export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Handle deep links for email verification
+    const handleDeepLink = (event: { url: string }) => {
+      const { url } = event;
+      if (url && url.includes('verify')) {
+        Alert.alert(
+          "Email Verified",
+          "Your email has been verified! You can now log in.",
+          [
+            {
+              text: "Go to Login",
+              onPress: () => router.replace("/auth/login"),
+            },
+          ]
+        );
+      }
+    };
+
+    // Add deep link listener
+    const subscription = Linking.addEventListener('url', handleDeepLink);
+
+    // Check if app was opened from a deep link
+    Linking.getInitialURL().then((url) => {
+      if (url && url.includes('verify')) {
+        setTimeout(() => {
+          Alert.alert(
+            "Email Verified",
+            "Your email has been verified! You can now log in.",
+            [
+              {
+                text: "Go to Login",
+                onPress: () => router.replace("/auth/login"),
+              },
+            ]
+          );
+        }, 1000);
+      }
+    });
+
+    // Simulate loading
     setTimeout(() => {
       setIsLoading(false);
     }, 2000);
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   if (isLoading) {

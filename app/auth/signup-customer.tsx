@@ -72,11 +72,8 @@ export default function SignupCustomerScreen() {
       userType: "buyer" as const,
     };
 
-    const success = await signUp(email, password, userData);
-
-    if (success) {
-      router.replace("/auth/login");
-    }
+    // Use signUp directly
+    await signUp(email, password, userData);
   };
 
   return (
@@ -263,7 +260,7 @@ export default function SignupCustomerScreen() {
                 color="#C35822"
               />
               <Text style={styles.noteText}>
-                We'll send a verification link to your email
+                We'll send a verification email to your address
               </Text>
             </View>
 
@@ -325,6 +322,7 @@ export default function SignupCustomerScreen() {
   );
 }
 
+// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,

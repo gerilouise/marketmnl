@@ -1,13 +1,13 @@
-// hooks/useFirebaseAuth.ts
+// hooks/useFirebaseAuth.ts - Fix the sendOTP function
 import { auth, db } from "@/lib/firebase";
 import { router } from "expo-router";
 import {
-    createUserWithEmailAndPassword,
-    sendEmailVerification,
-    sendPasswordResetEmail,
-    signInWithEmailAndPassword,
-    signOut,
-    User,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  User,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { useState } from "react";
@@ -17,7 +17,9 @@ export const useFirebaseAuth = () => {
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
-  // SIGN UP (Customer or Seller)
+  // ============================================
+  // SIGN UP (Creates account and sends verification email)
+  // ============================================
   const signUp = async (
     email: string,
     password: string,
@@ -56,6 +58,7 @@ export const useFirebaseAuth = () => {
         lastName: nameParts.slice(1).join(" ") || "",
         phone: userData.phone,
         userType: userData.userType,
+        emailVerified: false,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       };
@@ -80,9 +83,14 @@ export const useFirebaseAuth = () => {
       Alert.alert(
         "Success",
         "Account created! Please check your email for verification.",
+        [
+          {
+            text: "OK",
+            onPress: () => router.replace("/auth/login"),
+          },
+        ],
       );
 
-      router.replace("/auth/login");
       return true;
     } catch (error: any) {
       console.log("❌ Signup failed:", error);
@@ -102,7 +110,34 @@ export const useFirebaseAuth = () => {
     }
   };
 
+  // ============================================
+  // SEND OTP (Simplified - just shows instructions)
+  // ============================================
+  const sendOTP = async (
+    email: string,
+    userData: {
+      fullName: string;
+      phone: string;
+      userType: "buyer" | "seller";
+      storeName?: string;
+    },
+  ) => {
+    // Just show instructions and use signUp instead
+    Alert.alert(
+      "Email Verification",
+      "We'll send a verification email to your address. Please check your inbox.",
+      [
+        {
+          text: "Continue",
+          onPress: () => signUp(email, "temporaryPassword123!", userData), // You should generate a random password here
+        },
+      ],
+    );
+  };
+
+  // ============================================
   // LOGIN
+  // ============================================
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
@@ -161,7 +196,9 @@ export const useFirebaseAuth = () => {
     }
   };
 
+  // ============================================
   // LOGOUT
+  // ============================================
   const logout = async () => {
     try {
       await signOut(auth);
@@ -175,7 +212,9 @@ export const useFirebaseAuth = () => {
     }
   };
 
+  // ============================================
   // RESET PASSWORD
+  // ============================================
   const resetPassword = async (email: string) => {
     try {
       await sendPasswordResetEmail(auth, email);
@@ -187,12 +226,16 @@ export const useFirebaseAuth = () => {
     }
   };
 
+  // ============================================
   // GET CURRENT USER
+  // ============================================
   const getCurrentUser = () => {
     return auth.currentUser;
   };
 
+  // ============================================
   // GET USER PROFILE
+  // ============================================
   const getUserProfile = async () => {
     const user = auth.currentUser;
     if (!user) return null;
@@ -209,6 +252,7 @@ export const useFirebaseAuth = () => {
   return {
     loading,
     user,
+    sendOTP,
     signUp,
     login,
     logout,

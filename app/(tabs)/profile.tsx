@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Switch,
@@ -110,9 +111,17 @@ export default function ProfileScreen() {
 
         <View style={styles.profileCard}>
           <View style={styles.profileImageContainer}>
-            <View style={styles.profileImagePlaceholder}>
-              <Ionicons name="person" size={40} color="#8F796F" />
-            </View>
+            {/* This is the only change - shows photo if available, otherwise shows icon */}
+            {profile?.photoURL ? (
+              <Image
+                source={{ uri: profile.photoURL }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={styles.profileImagePlaceholder}>
+                <Ionicons name="person" size={40} color="#8F796F" />
+              </View>
+            )}
             <TouchableOpacity
               style={styles.editImageButton}
               onPress={handleEditProfile}
@@ -330,6 +339,14 @@ const styles = StyleSheet.create({
   profileImageContainer: {
     position: "relative",
     marginBottom: 12,
+  },
+  // New style for actual profile image
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 2,
+    borderColor: "#C35822",
   },
   profileImagePlaceholder: {
     width: 80,

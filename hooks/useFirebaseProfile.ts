@@ -1,20 +1,29 @@
 // hooks/useFirebaseProfile.ts
-import { auth, db } from "@/lib/firebase";
+import { auth, db, storage } from "@/lib/firebase";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
 import {
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    orderBy,
-    query,
-    setDoc,
-    Timestamp,
-    updateDoc,
-    where,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+} from "firebase/storage";
 import { useEffect, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 
 export interface ProfileData {
   id: string;
@@ -26,6 +35,7 @@ export interface ProfileData {
   age?: number;
   birthdate?: string;
   userType: string;
+  photoURL?: string;
   createdAt: Date;
   // Counts
   ordersCount: number;
@@ -45,7 +55,7 @@ export interface AddressData {
   province: string;
   zipCode: string;
   isDefault: boolean;
-  label: string; // "Home", "Office", etc.
+  label: string;
   createdAt: Date;
 }
 
@@ -68,20 +78,26 @@ export const useFirebaseProfile = () => {
         return;
       }
 
+      console.log("Fetching profile for user:", user.uid);
+
       // Get profile data
       const profileRef = doc(db, "profiles", user.uid);
       const profileSnap = await getDoc(profileRef);
 
       if (!profileSnap.exists()) {
+        console.log("Profile doesn't exist, creating...");
+
         // Create profile if it doesn't exist
+        const nameParts = (user.displayName || "").split(" ");
         const newProfile = {
           id: user.uid,
           email: user.email || "",
           fullName: user.displayName || "",
-          firstName: "",
-          lastName: "",
+          firstName: nameParts[0] || "",
+          lastName: nameParts.slice(1).join(" ") || "",
           phone: "",
           userType: "buyer",
+          photoURL: null,
           createdAt: Timestamp.now(),
           ordersCount: 0,
           reviewsCount: 0,
@@ -90,12 +106,14 @@ export const useFirebaseProfile = () => {
         };
 
         await setDoc(profileRef, newProfile);
+
         setProfile({
           ...newProfile,
           createdAt: new Date(),
         } as ProfileData);
       } else {
         const data = profileSnap.data();
+        console.log("Profile data from Firebase:", data);
 
         // Get counts from subcollections
         const ordersQuery = query(
@@ -116,10 +134,12 @@ export const useFirebaseProfile = () => {
         );
         const wishlistSnap = await getDocs(wishlistQuery);
 
-        // Split fullName into first and last
-        const nameParts = (data.fullName || "").split(" ") || ["", ""];
-        const firstName = nameParts[0] || "";
-        const lastName = nameParts.slice(1).join(" ") || "";
+        // Split fullName into first and last if not already present
+        const firstName =
+          data.firstName || (data.fullName ? data.fullName.split(" ")[0] : "");
+        const lastName =
+          data.lastName ||
+          (data.fullName ? data.fullName.split(" ").slice(1).join(" ") : "");
 
         setProfile({
           id: profileSnap.id,
@@ -131,15 +151,15 @@ export const useFirebaseProfile = () => {
           age: data.age,
           birthdate: data.birthdate,
           userType: data.userType || "buyer",
+          photoURL: data.photoURL,
           createdAt: data.createdAt?.toDate() || new Date(),
           ordersCount: ordersSnap.size,
           reviewsCount: reviewsSnap.size,
           wishlistCount: wishlistSnap.size,
-          addressesCount: 0, // Will be updated by fetchAddresses
+          addressesCount: 0,
         });
       }
 
-      // Fetch addresses
       await fetchAddresses();
     } catch (error: any) {
       setError(error.message);
@@ -257,7 +277,7 @@ export const useFirebaseProfile = () => {
         createdAt: Timestamp.now(),
       };
 
-      const docRef = await addDoc(addressesRef, newAddress);
+      await addDoc(addressesRef, newAddress);
 
       Alert.alert("Success", "Address added successfully!");
       await fetchAddresses();
@@ -350,6 +370,142 @@ export const useFirebaseProfile = () => {
     }
   };
 
+  // ============================================
+  // Profile Picture Functions
+  // ============================================
+
+  // Request permission for image picker
+  const requestImagePickerPermission = async () => {
+    if (Platform.OS !== "web") {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Please grant camera roll permissions to upload a photo.",
+        );
+        return false;
+      }
+      return true;
+    }
+    return true;
+  };
+
+  // Pick image from gallery
+  const pickImage = async () => {
+    try {
+      const hasPermission = await requestImagePickerPermission();
+      if (!hasPermission) return null;
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+
+      if (!result.canceled) {
+        // Compress and resize image
+        const manipulatedImage = await ImageManipulator.manipulateAsync(
+          result.assets[0].uri,
+          [{ resize: { width: 500, height: 500 } }],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        return manipulatedImage.uri;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error picking image:", error);
+      Alert.alert("Error", "Failed to pick image");
+      return null;
+    }
+  };
+
+  // Upload profile picture to Firebase Storage
+  const uploadProfilePicture = async (imageUri: string) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("No user logged in");
+
+      setLoading(true);
+
+      // Convert image to blob
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+
+      // Create storage reference
+      const storageRef = ref(storage, `profile_pictures/${user.uid}.jpg`);
+
+      // Upload image
+      await uploadBytes(storageRef, blob);
+
+      // Get download URL
+      const downloadURL = await getDownloadURL(storageRef);
+
+      // Update user profile in Firestore with photo URL
+      const userRef = doc(db, "profiles", user.uid);
+      await updateDoc(userRef, {
+        photoURL: downloadURL,
+        updatedAt: Timestamp.now(),
+      });
+
+      // Update local profile state
+      if (profile) {
+        setProfile({
+          ...profile,
+          photoURL: downloadURL,
+        });
+      }
+
+      Alert.alert("Success", "Profile picture updated successfully!");
+      return downloadURL;
+    } catch (error: any) {
+      console.error("Error uploading profile picture:", error);
+      Alert.alert("Error", error.message || "Failed to upload profile picture");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete profile picture
+  const deleteProfilePicture = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("No user logged in");
+
+      setLoading(true);
+
+      // Delete from storage
+      const storageRef = ref(storage, `profile_pictures/${user.uid}.jpg`);
+      await deleteObject(storageRef);
+
+      // Update user profile in Firestore
+      const userRef = doc(db, "profiles", user.uid);
+      await updateDoc(userRef, {
+        photoURL: null,
+        updatedAt: Timestamp.now(),
+      });
+
+      // Update local profile state
+      if (profile) {
+        setProfile({
+          ...profile,
+          photoURL: undefined,
+        });
+      }
+
+      Alert.alert("Success", "Profile picture removed successfully!");
+      return true;
+    } catch (error: any) {
+      console.error("Error deleting profile picture:", error);
+      Alert.alert("Error", error.message || "Failed to delete profile picture");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Load data on mount
   useEffect(() => {
     fetchProfile();
@@ -367,5 +523,8 @@ export const useFirebaseProfile = () => {
     updateAddress,
     deleteAddress,
     setDefaultAddress,
+    pickImage,
+    uploadProfilePicture,
+    deleteProfilePicture,
   };
 };

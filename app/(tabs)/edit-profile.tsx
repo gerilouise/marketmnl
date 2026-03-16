@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,8 +18,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditProfileScreen() {
-  const { profile, loading, fetchProfile, updateProfile } =
-    useFirebaseProfile();
+  const {
+    profile,
+    loading,
+    fetchProfile,
+    updateProfile,
+    pickImage,
+    uploadProfilePicture,
+    deleteProfilePicture,
+  } = useFirebaseProfile();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -27,6 +35,8 @@ export default function EditProfileScreen() {
   const [birthdate, setBirthdate] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -35,6 +45,7 @@ export default function EditProfileScreen() {
       setPhone(profile.phone || "");
       setAge(profile.age?.toString() || "");
       setBirthdate(profile.birthdate || "");
+      setProfileImage(profile.photoURL || null);
     }
   }, [profile]);
 
@@ -65,6 +76,48 @@ export default function EditProfileScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handlePickImage = async () => {
+    try {
+      const imageUri = await pickImage();
+      if (imageUri) {
+        setUploadingImage(true);
+        // Temporarily show the selected image
+        setProfileImage(imageUri);
+
+        // Upload to Firebase
+        const downloadURL = await uploadProfilePicture(imageUri);
+        if (!downloadURL) {
+          // If upload failed, revert to previous image
+          setProfileImage(profile?.photoURL || null);
+        }
+        setUploadingImage(false);
+      }
+    } catch (error) {
+      console.error("Error picking image:", error);
+      setUploadingImage(false);
+    }
+  };
+
+  const handleDeleteImage = async () => {
+    Alert.alert(
+      "Remove Profile Picture",
+      "Are you sure you want to remove your profile picture?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            const success = await deleteProfilePicture();
+            if (success) {
+              setProfileImage(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const onDateChange = (event: any, selectedDate?: Date) => {
@@ -126,6 +179,49 @@ export default function EditProfileScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Profile Picture Section */}
+        <View style={styles.profileImageSection}>
+          <TouchableOpacity
+            style={styles.profileImageContainer}
+            onPress={handlePickImage}
+            disabled={uploadingImage}
+          >
+            {profileImage ? (
+              <Image
+                source={{ uri: profileImage }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={styles.profileImagePlaceholder}>
+                <Ionicons name="person" size={50} color="#8F796F" />
+              </View>
+            )}
+
+            {/* Upload overlay */}
+            <View style={styles.imageOverlay}>
+              {uploadingImage ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons name="camera" size={24} color="#FFF" />
+              )}
+            </View>
+          </TouchableOpacity>
+
+          <Text style={styles.profileImageHint}>
+            Tap to change profile picture
+          </Text>
+
+          {profileImage && (
+            <TouchableOpacity
+              style={styles.removeImageButton}
+              onPress={handleDeleteImage}
+            >
+              <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+              <Text style={styles.removeImageText}>Remove Photo</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
 
@@ -275,6 +371,61 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     padding: 20,
+  },
+  // Profile Picture Styles
+  profileImageSection: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  profileImageContainer: {
+    position: "relative",
+    marginBottom: 8,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: "#C35822",
+  },
+  profileImagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#E0DAD1",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: "#C35822",
+    borderStyle: "dashed",
+  },
+  imageOverlay: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    backgroundColor: "#C35822",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FFF",
+  },
+  profileImageHint: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginBottom: 8,
+  },
+  removeImageButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    padding: 8,
+  },
+  removeImageText: {
+    fontSize: 12,
+    color: "#FF3B30",
   },
   section: {
     backgroundColor: "#FFF",
