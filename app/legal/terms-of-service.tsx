@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 10,
-    backgroundColor: "#FFF",
+    backgroundColor: "#FBF8F4",
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
   },
@@ -417,7 +417,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     borderWidth: 1,
     borderColor: "#C35822",
-    backgroundColor: "#FFF8F0",
   },
   acceptanceText: {
     fontSize: 14,

@@ -1,277 +1,198 @@
 // hooks/useFirebaseProducts.ts
-import { auth, db } from "@/lib/firebase";
-import {
-    addDoc,
-    collection,
-    deleteDoc,
-    doc,
-    getDocs,
-    orderBy,
-    query,
-    Timestamp,
-    updateDoc,
-    where,
-} from "firebase/firestore";
-import { useEffect, useState } from "react";
-import { Alert } from "react-native";
+import { useState } from 'react';
+import { auth, db } from '@/lib/firebase';
+import { 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  getDocs, 
+  query, 
+  where,
+  orderBy,
+  Timestamp 
+} from 'firebase/firestore';
+import { Alert } from 'react-native';
 
 export interface Product {
   id: string;
-  sellerId: string;
   name: string;
   description: string;
   price: number;
   category: string;
   stockQuantity: number;
   imageUrl: string | null;
-  rating: number;
-  reviews: number;
-  createdAt: Date;
+  sellerId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  netWeight?: string;
+  origin?: string;
+  culturalBackground?: string;
+  storage?: string;
+  shelfLife?: string;
 }
 
 export const useFirebaseProducts = () => {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Fetch all products
   const fetchProducts = async () => {
-    try {
-      setLoading(true);
-      const productsRef = collection(db, "products");
-      const q = query(productsRef, orderBy("createdAt", "desc"));
-      const querySnapshot = await getDocs(q);
-
-      const productsList: Product[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        productsList.push({
-          id: doc.id,
-          sellerId: data.sellerId || "",
-          name: data.name || "",
-          description: data.description || "",
-          price: data.price || 0,
-          category: data.category || "",
-          stockQuantity: data.stockQuantity || 0,
-          imageUrl: data.imageUrl || null,
-          rating: data.rating || 0,
-          reviews: data.reviews || 0,
-          createdAt: data.createdAt?.toDate() || new Date(),
-        });
-      });
-
-      setProducts(productsList);
-    } catch (error: any) {
-      setError(error.message);
-      console.error("Error fetching products:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch products by category
-  const fetchProductsByCategory = async (category: string) => {
-    try {
-      setLoading(true);
-      const productsRef = collection(db, "products");
-      let q;
-
-      if (category !== "All") {
-        q = query(
-          productsRef,
-          where("category", "==", category),
-          orderBy("createdAt", "desc"),
-        );
-      } else {
-        q = query(productsRef, orderBy("createdAt", "desc"));
-      }
-
-      const querySnapshot = await getDocs(q);
-
-      const productsList: Product[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        productsList.push({
-          id: doc.id,
-          sellerId: data.sellerId || "",
-          name: data.name || "",
-          description: data.description || "",
-          price: data.price || 0,
-          category: data.category || "",
-          stockQuantity: data.stockQuantity || 0,
-          imageUrl: data.imageUrl || null,
-          rating: data.rating || 0,
-          reviews: data.reviews || 0,
-          createdAt: data.createdAt?.toDate() || new Date(),
-        });
-      });
-
-      setProducts(productsList);
-    } catch (error: any) {
-      setError(error.message);
-      console.error("Error fetching products:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch single product by ID
-  const fetchProductById = async (id: string) => {
-    try {
-      const docRef = doc(db, "products", id);
-      const docSnap = await getDocs(
-        query(collection(db, "products"), where("__name__", "==", id)),
-      );
-
-      if (!docSnap.empty) {
-        const data = docSnap.docs[0].data();
-        return {
-          id: docSnap.docs[0].id,
-          sellerId: data.sellerId || "",
-          name: data.name || "",
-          description: data.description || "",
-          price: data.price || 0,
-          category: data.category || "",
-          stockQuantity: data.stockQuantity || 0,
-          imageUrl: data.imageUrl || null,
-          rating: data.rating || 0,
-          reviews: data.reviews || 0,
-          createdAt: data.createdAt?.toDate() || new Date(),
-        } as Product;
-      }
-      return null;
-    } catch (error: any) {
-      console.error("Error fetching product:", error);
-      return null;
-    }
-  };
-
-  // Add new product (for sellers)
-  const addProduct = async (
-    product: Omit<Product, "id" | "createdAt" | "rating" | "reviews">,
-  ) => {
+    setLoading(true);
     try {
       const user = auth.currentUser;
-
       if (!user) {
-        Alert.alert("Error", "You must be logged in to add products");
-        return null;
+        console.log('No user logged in');
+        setProducts([]);
+        return;
       }
 
-      const productsRef = collection(db, "products");
-      const newProduct = {
-        ...product,
-        sellerId: user.uid,
-        rating: 0,
-        reviews: 0,
-        createdAt: Timestamp.now(),
-      };
-
-      const docRef = await addDoc(productsRef, newProduct);
-
-      Alert.alert("Success", "Product added successfully!");
-      await fetchProducts(); // Refresh the list
-
-      return {
-        id: docRef.id,
-        ...newProduct,
-        createdAt: new Date(),
-      } as Product;
-    } catch (error: any) {
-      Alert.alert("Error", error.message);
-      return null;
-    }
-  };
-
-  // Update product
-  const updateProduct = async (id: string, updates: Partial<Product>) => {
-    try {
-      const productRef = doc(db, "products", id);
-      await updateDoc(productRef, updates);
-
-      Alert.alert("Success", "Product updated successfully!");
-      await fetchProducts(); // Refresh the list
-      return true;
-    } catch (error: any) {
-      Alert.alert("Error", error.message);
-      return false;
-    }
-  };
-
-  // Delete product
-  const deleteProduct = async (id: string) => {
-    try {
-      const productRef = doc(db, "products", id);
-      await deleteDoc(productRef);
-
-      Alert.alert("Success", "Product deleted successfully!");
-      await fetchProducts(); // Refresh the list
-      return true;
-    } catch (error: any) {
-      Alert.alert("Error", error.message);
-      return false;
-    }
-  };
-
-  // Search products
-  const searchProducts = async (queryText: string) => {
-    try {
-      setLoading(true);
-      const productsRef = collection(db, "products");
+      console.log('Fetching products for seller:', user.uid);
+      
+      const productsRef = collection(db, 'products');
       const q = query(
-        productsRef,
-        orderBy("name"),
-        // Note: Firestore doesn't support native text search
-        // You might need to implement a more complex search or use Algolia
+        productsRef, 
+        where('sellerId', '==', user.uid),
+        orderBy('createdAt', 'desc')
       );
-
+      
       const querySnapshot = await getDocs(q);
-
       const productsList: Product[] = [];
+      
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        // Client-side filtering for simple search
-        if (data.name?.toLowerCase().includes(queryText.toLowerCase())) {
-          productsList.push({
-            id: doc.id,
-            sellerId: data.sellerId || "",
-            name: data.name || "",
-            description: data.description || "",
-            price: data.price || 0,
-            category: data.category || "",
-            stockQuantity: data.stockQuantity || 0,
-            imageUrl: data.imageUrl || null,
-            rating: data.rating || 0,
-            reviews: data.reviews || 0,
-            createdAt: data.createdAt?.toDate() || new Date(),
-          });
-        }
+        productsList.push({ id: doc.id, ...doc.data() } as Product);
       });
-
+      
+      console.log(`Found ${productsList.length} products for seller`);
       setProducts(productsList);
-    } catch (error: any) {
-      setError(error.message);
-      console.error("Error searching products:", error);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      Alert.alert('Error', 'Failed to load products');
     } finally {
       setLoading(false);
     }
   };
 
-  // Load products on hook initialization
-  useEffect(() => {
-    fetchProducts();
-  }, []);
+  const getProductById = (productId: string) => {
+    return products.find(p => p.id === productId);
+  };
+
+  const addProduct = async (productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'sellerId'>) => {
+    setLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Error', 'Please log in');
+        return false;
+      }
+
+      console.log('Adding product for seller:', user.uid);
+
+      const productsRef = collection(db, 'products');
+      await addDoc(productsRef, {
+        ...productData,
+        sellerId: user.uid, // This ensures the product is tied to the logged-in seller
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+
+      await fetchProducts(); // Refresh the list
+      Alert.alert('Success', 'Product added successfully!');
+      return true;
+    } catch (error) {
+      console.error('Error adding product:', error);
+      Alert.alert('Error', 'Failed to add product');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateProduct = async (productId: string, productData: Partial<Product>) => {
+    setLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Error', 'Please log in');
+        return false;
+      }
+
+      // First verify this product belongs to the user
+      const productRef = doc(db, 'products', productId);
+      const productSnapshot = await getDoc(productRef);
+      
+      if (!productSnapshot.exists()) {
+        Alert.alert('Error', 'Product not found');
+        return false;
+      }
+
+      const productData_snap = productSnapshot.data();
+      if (productData_snap.sellerId !== user.uid) {
+        Alert.alert('Error', 'You do not have permission to edit this product');
+        return false;
+      }
+
+      await updateDoc(productRef, {
+        ...productData,
+        updatedAt: Timestamp.now(),
+      });
+
+      await fetchProducts(); // Refresh the list
+      Alert.alert('Success', 'Product updated successfully!');
+      return true;
+    } catch (error) {
+      console.error('Error updating product:', error);
+      Alert.alert('Error', 'Failed to update product');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteProduct = async (productId: string) => {
+    setLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Error', 'Please log in');
+        return false;
+      }
+
+      // First verify this product belongs to the user
+      const productRef = doc(db, 'products', productId);
+      const productSnapshot = await getDoc(productRef);
+      
+      if (!productSnapshot.exists()) {
+        Alert.alert('Error', 'Product not found');
+        return false;
+      }
+
+      const productData = productSnapshot.data();
+      if (productData.sellerId !== user.uid) {
+        Alert.alert('Error', 'You do not have permission to delete this product');
+        return false;
+      }
+
+      await deleteDoc(productRef);
+      await fetchProducts(); // Refresh the list
+      Alert.alert('Success', 'Product deleted successfully!');
+      return true;
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      Alert.alert('Error', 'Failed to delete product');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return {
     products,
     loading,
-    error,
     fetchProducts,
-    fetchProductsByCategory,
-    fetchProductById,
     addProduct,
     updateProduct,
     deleteProduct,
-    searchProducts,
+    getProductById,
   };
 };

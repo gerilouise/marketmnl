@@ -68,9 +68,15 @@ export default function SellerLayout() {
         }}
       />
 
-      {/* Add this line to hide product-manage from the tab bar */}
       <Tabs.Screen
         name="product-manage"
+        options={{
+          href: null, // This hides it from the tab bar
+        }}
+      />
+
+      <Tabs.Screen
+        name="edit-profile"
         options={{
           href: null, // This hides it from the tab bar
         }}

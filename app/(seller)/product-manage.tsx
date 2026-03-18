@@ -1,208 +1,483 @@
+// app/(seller)/product-manage.tsx
 import { useFirebaseProducts } from "@/hooks/useFirebaseProducts";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
+  Image,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as ImagePicker from 'expo-image-picker';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { auth } from '@/lib/firebase';
+
+const CATEGORIES = ["Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
 
 export default function SellerProductsManageScreen() {
-  const [showAddForm, setShowAddForm] = useState(false);
+  const { productId } = useLocalSearchParams();
+  const isEditing = !!productId;
+  
+  // Form fields
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
-  const [category, setCategory] = useState("Dried");
+  const [category, setCategory] = useState("Bottled");
   const [stock, setStock] = useState("");
+  const [weight, setWeight] = useState("");
+  const [origin, setOrigin] = useState("");
+  const [culturalBackground, setCulturalBackground] = useState("");
+  const [storage, setStorage] = useState("");
+  const [shelfLife, setShelfLife] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  
+  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
-  const { products, loading, addProduct, deleteProduct, fetchProducts } =
-    useFirebaseProducts();
+  const { products, fetchProducts, addProduct, updateProduct, getProductById } = useFirebaseProducts();
 
+  // Load product data if editing
   useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  const handleAddProduct = async () => {
-    if (!name || !price || !stock) {
-      Alert.alert("Error", "Please fill in all required fields");
-      return;
+    if (isEditing && productId) {
+      loadProductData();
     }
+  }, [productId, isEditing]);
 
-    const newProduct = {
-      name,
-      description: description || `${name} - Authentic Filipino delicacy`,
-      price: parseFloat(price),
-      category,
-      stockQuantity: parseInt(stock),
-      imageUrl: null,
-      sellerId: "", // Will be set by the hook
-    };
-
-    const success = await addProduct(newProduct);
-    if (success) {
-      setShowAddForm(false);
-      setName("");
-      setDescription("");
-      setPrice("");
-      setStock("");
+  const loadProductData = async () => {
+    setLoading(true);
+    try {
+      // First ensure products are fetched
       await fetchProducts();
+      
+      // Then find the product
+      const product = getProductById(productId as string);
+      
+      if (product) {
+        setName(product.name || "");
+        setDescription(product.description || "");
+        setPrice(product.price?.toString() || "");
+        setCategory(product.category || "Bottled");
+        setStock(product.stockQuantity?.toString() || "");
+        setWeight(product.netWeight || "");
+        setOrigin(product.origin || "");
+        setCulturalBackground(product.culturalBackground || "");
+        setStorage(product.storage || "");
+        setShelfLife(product.shelfLife || "");
+        setImage(product.imageUrl || null);
+        setOriginalImage(product.imageUrl || null);
+        setDataLoaded(true);
+      } else {
+        Alert.alert("Error", "Product not found");
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error loading product:', error);
+      Alert.alert('Error', 'Failed to load product data');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleGoBack = () => {
-    router.push("/(seller)/products");
+    router.back();
   };
 
-  const renderProduct = ({ item }: any) => (
-    <View style={styles.productCard}>
-      <View style={styles.productInfo}>
-        <Text style={styles.productName}>{item.name}</Text>
-        <Text style={styles.productPrice}>₱{item.price}</Text>
-        <Text style={styles.productStock}>Stock: {item.stockQuantity}</Text>
-        <Text style={styles.productCategory}>Category: {item.category}</Text>
-      </View>
-      <View style={styles.productActions}>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => Alert.alert("Edit", "Edit feature coming soon")}
-        >
-          <Ionicons name="create-outline" size={20} color="#FFF" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => {
-            Alert.alert("Delete Product", "Are you sure?", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Delete", onPress: () => deleteProduct(item.id) },
-            ]);
-          }}
-        >
-          <Ionicons name="trash-outline" size={20} color="#FFF" />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please grant camera roll permissions to upload images.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+    }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please grant camera permissions to take photos.");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setImage(result.assets[0].uri);
+    }
+  };
+
+  const showImageOptions = () => {
+    Alert.alert(
+      "Upload Image",
+      "Choose an option",
+      [
+        { text: "Take Photo", onPress: takePhoto },
+        { text: "Choose from Gallery", onPress: pickImage },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  };
+
+  const uploadImage = async (uri: string): Promise<string | null> => {
+    try {
+      setUploading(true);
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      
+      const storage = getStorage();
+      const filename = `products/${auth.currentUser?.uid}/${Date.now()}.jpg`;
+      const imageRef = ref(storage, filename);
+      
+      await uploadBytes(imageRef, blob);
+      const downloadUrl = await getDownloadURL(imageRef);
+      
+      return downloadUrl;
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      Alert.alert('Error', 'Failed to upload image');
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    // Validate required fields
+    if (!name || !price || !stock || !weight) {
+      Alert.alert("Error", "Please fill in all required fields");
+      return;
+    }
+
+    // Validate price and stock are valid numbers
+    if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+      Alert.alert("Error", "Please enter a valid price");
+      return;
+    }
+
+    if (isNaN(parseInt(stock)) || parseInt(stock) < 0) {
+      Alert.alert("Error", "Please enter a valid stock quantity");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      // Check if user is authenticated
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert("Error", "You must be logged in");
+        router.push("/auth/login");
+        return;
+      }
+
+      // Upload image if selected and changed
+      let imageUrl = originalImage;
+      if (image && image !== originalImage) {
+        const uploadedUrl = await uploadImage(image);
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl;
+        }
+      }
+
+      const productData = {
+        name: name.trim(),
+        description: description.trim() || `${name} - Authentic Filipino delicacy`,
+        price: parseFloat(price),
+        category,
+        stockQuantity: parseInt(stock),
+        netWeight: weight.trim(),
+        imageUrl,
+        origin: origin.trim() || null,
+        culturalBackground: culturalBackground.trim() || null,
+        storage: storage.trim() || null,
+        shelfLife: shelfLife.trim() || null,
+      };
+
+      console.log('Saving product data:', productData);
+
+      let success;
+      if (isEditing) {
+        success = await updateProduct(productId as string, productData);
+      } else {
+        success = await addProduct(productData);
+      }
+
+      if (success) {
+        Alert.alert(
+          "Success", 
+          `Product ${isEditing ? "updated" : "added"} successfully!`,
+          [{ text: "OK", onPress: () => router.back() }]
+        );
+      }
+    } catch (error) {
+      console.error('Error saving product:', error);
+      Alert.alert("Error", "Failed to save product. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {isEditing ? "Edit Product" : "Add Product"}
+          </Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleGoBack}>
-          <Ionicons name="arrow-back" size={24} color="#32221B" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Manage Products</Text>
-        <TouchableOpacity onPress={() => setShowAddForm(!showAddForm)}>
-          <Ionicons
-            name={showAddForm ? "close-circle" : "add-circle"}
-            size={28}
-            color="#C35822"
-          />
-        </TouchableOpacity>
-      </View>
-
-      {showAddForm && (
-        <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Add New Product</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="Product Name"
-            value={name}
-            onChangeText={setName}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Description"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Price"
-            value={price}
-            onChangeText={setPrice}
-            keyboardType="numeric"
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Stock Quantity"
-            value={stock}
-            onChangeText={setStock}
-            keyboardType="numeric"
-          />
-
-          <View style={styles.categoryRow}>
-            <TouchableOpacity
-              style={[
-                styles.categoryButton,
-                category === "Dried" && styles.categoryActive,
-              ]}
-              onPress={() => setCategory("Dried")}
-            >
-              <Text
-                style={
-                  category === "Dried"
-                    ? styles.categoryTextActive
-                    : styles.categoryText
-                }
-              >
-                Dried
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.categoryButton,
-                category === "Bottled" && styles.categoryActive,
-              ]}
-              onPress={() => setCategory("Bottled")}
-            >
-              <Text
-                style={
-                  category === "Bottled"
-                    ? styles.categoryTextActive
-                    : styles.categoryText
-                }
-              >
-                Bottled
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            style={styles.saveButton}
-            onPress={handleAddProduct}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.keyboardView}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {isEditing ? "Edit Product" : "Add Product"}
+          </Text>
+          <TouchableOpacity 
+            onPress={handleSubmit} 
+            style={[styles.saveButton, submitting && styles.saveButtonDisabled]}
+            disabled={submitting}
           >
-            <Text style={styles.saveButtonText}>Save Product</Text>
+            {submitting ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save</Text>
+            )}
           </TouchableOpacity>
         </View>
-      )}
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#C35822" style={styles.loader} />
-      ) : (
-        <FlatList
-          data={products}
-          renderItem={renderProduct}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="cube-outline" size={60} color="#E0DAD1" />
-              <Text style={styles.emptyText}>No products yet</Text>
+        <ScrollView 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Product Image */}
+          <View style={styles.imageSection}>
+            <Text style={styles.label}>Product Image</Text>
+            <TouchableOpacity 
+              style={styles.imageUploader} 
+              onPress={showImageOptions}
+              disabled={submitting}
+            >
+              {image ? (
+                <Image source={{ uri: image }} style={styles.previewImage} />
+              ) : (
+                <View style={styles.imagePlaceholder}>
+                  <Ionicons name="camera-outline" size={40} color="#8F796F" />
+                  <Text style={styles.imageUploadText}>Upload Image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {uploading && (
+              <View style={styles.uploadingContainer}>
+                <ActivityIndicator size="small" color="#C35822" />
+                <Text style={styles.uploadingText}>Uploading...</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Product Information */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Product Information</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Product Name <Text style={styles.required}>*</Text></Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Authentic Bottled Spicy Tuyo"
+                placeholderTextColor="#8F796F"
+                value={name}
+                onChangeText={setName}
+                editable={!submitting}
+              />
             </View>
-          }
-        />
-      )}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Describe your product"
+                placeholderTextColor="#8F796F"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                editable={!submitting}
+              />
+            </View>
+
+            <View style={styles.rowInputs}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.label}>Price (₱) <Text style={styles.required}>*</Text></Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="250.00"
+                  placeholderTextColor="#8F796F"
+                  value={price}
+                  onChangeText={setPrice}
+                  keyboardType="numeric"
+                  editable={!submitting}
+                />
+              </View>
+
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.label}>Stock <Text style={styles.required}>*</Text></Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="100"
+                  placeholderTextColor="#8F796F"
+                  value={stock}
+                  onChangeText={setStock}
+                  keyboardType="numeric"
+                  editable={!submitting}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Net Weight <Text style={styles.required}>*</Text></Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 250g"
+                placeholderTextColor="#8F796F"
+                value={weight}
+                onChangeText={setWeight}
+                editable={!submitting}
+              />
+            </View>
+          </View>
+
+          {/* Category Selection */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Category</Text>
+            <View style={styles.categoriesContainer}>
+              {CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.categoryChip,
+                    category === cat && styles.categoryChipActive
+                  ]}
+                  onPress={() => setCategory(cat)}
+                  disabled={submitting}
+                >
+                  <Text style={[
+                    styles.categoryChipText,
+                    category === cat && styles.categoryChipTextActive
+                  ]}>
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Additional Details */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Additional Details (Optional)</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Origin</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Cotabato City, Mindanao"
+                placeholderTextColor="#8F796F"
+                value={origin}
+                onChangeText={setOrigin}
+                editable={!submitting}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Cultural Background</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="e.g., Traditional Maguindanaoan dish..."
+                placeholderTextColor="#8F796F"
+                value={culturalBackground}
+                onChangeText={setCulturalBackground}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                editable={!submitting}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Storage Instructions</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Keep refrigerated after opening"
+                placeholderTextColor="#8F796F"
+                value={storage}
+                onChangeText={setStorage}
+                editable={!submitting}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Shelf Life</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 6 months unopened"
+                placeholderTextColor="#8F796F"
+                value={shelfLife}
+                onChangeText={setShelfLife}
+                editable={!submitting}
+              />
+            </View>
+          </View>
+
+          {/* Bottom Padding */}
+          <View style={styles.bottomPadding} />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -212,150 +487,170 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FBF8F4",
   },
+  keyboardView: {
+    flex: 1,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: "#FFF",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#FBF8F4",
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
   },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#FBF8F4",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#32221B",
-  },
-  formContainer: {
-    backgroundColor: "#FFF",
-    margin: 20,
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  formTitle: {
     fontSize: 18,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 15,
-  },
-  input: {
-    backgroundColor: "#F5F0EB",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-  },
-  categoryRow: {
-    flexDirection: "row",
-    marginBottom: 15,
-    gap: 10,
-  },
-  categoryButton: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: "#F5F0EB",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-  },
-  categoryActive: {
-    backgroundColor: "#C35822",
-    borderColor: "#C35822",
-  },
-  categoryText: {
-    color: "#8F796F",
-    fontWeight: "500",
-  },
-  categoryTextActive: {
-    color: "#FFF",
-    fontWeight: "600",
   },
   saveButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     backgroundColor: "#C35822",
-    padding: 15,
-    borderRadius: 8,
+    borderRadius: 20,
+    minWidth: 60,
     alignItems: "center",
+  },
+  saveButtonDisabled: {
+    backgroundColor: "#FFB6A5",
   },
   saveButtonText: {
     color: "#FFF",
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
   },
-  loader: {
-    marginTop: 50,
-  },
-  list: {
-    padding: 20,
-  },
-  productCard: {
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 10,
-    flexDirection: "row",
-    justifyContent: "space-between",
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  imageSection: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 14,
+    color: "#32221B",
+    fontWeight: "500",
+    marginBottom: 6,
+  },
+  imageUploader: {
+    width: "100%",
+    height: 150,
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#E0DAD1",
+    borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  imagePlaceholder: {
+    alignItems: "center",
+  },
+  previewImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  imageUploadText: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginTop: 8,
+  },
+  uploadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+    gap: 8,
+  },
+  uploadingText: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  section: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowRadius: 4,
     elevation: 2,
   },
-  productInfo: {
-    flex: 1,
-  },
-  productName: {
+  sectionTitle: {
     fontSize: 16,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  productPrice: {
-    fontSize: 14,
-    color: "#C35822",
-    fontWeight: "600",
-    marginBottom: 2,
+  inputGroup: {
+    marginBottom: 16,
   },
-  productStock: {
-    fontSize: 12,
-    color: "#8F796F",
-  },
-  productCategory: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginTop: 2,
-  },
-  productActions: {
+  rowInputs: {
     flexDirection: "row",
+    marginBottom: 8,
+  },
+  required: {
+    color: "#C35822",
+  },
+  input: {
+    backgroundColor: "#FBF8F4",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 14,
+    color: "#32221B",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  categoriesContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
-  editButton: {
-    backgroundColor: "#8F796F",
-    padding: 8,
-    borderRadius: 6,
-  },
-  deleteButton: {
-    backgroundColor: "#FF3B30",
-    padding: 8,
-    borderRadius: 6,
-  },
-  emptyContainer: {
+  categoryChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "#FBF8F4",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    minWidth: 70,
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
   },
-  emptyText: {
-    fontSize: 16,
+  categoryChipActive: {
+    backgroundColor: "#C35822",
+    borderColor: "#C35822",
+  },
+  categoryChipText: {
+    fontSize: 13,
     color: "#8F796F",
-    marginTop: 12,
+    fontWeight: "500",
+  },
+  categoryChipTextActive: {
+    color: "#FFF",
+  },
+  bottomPadding: {
+    height: 20,
   },
 });

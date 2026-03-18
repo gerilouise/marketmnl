@@ -1,5 +1,5 @@
 // app/(seller)/profile.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,26 +9,76 @@ import {
   Image,
   Switch,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { auth, db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
+
+interface SellerData {
+  fullName: string;
+  email: string;
+  phone: string;
+  storeName: string;
+  description?: string;
+  location?: string;
+  avatar?: string;
+  joinDate?: string;
+}
 
 export default function SellerProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [sellerData, setSellerData] = useState<SellerData | null>(null);
 
-  // Mock seller data
-  const sellerData = {
-    name: "Jan Carlo",
-    email: "jancarlorentoy@gmail.com",
-    storeName: "Janjan's Kitchen",
-    description: "Family-owned business specializing in authentic delicacies. We use traditional recipes passed down through three generations.",
-    location: "Quezon City",
+  // Load seller data from Firebase when screen opens
+  useEffect(() => {
+    loadSellerData();
+  }, []);
+
+  const loadSellerData = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Error', 'Please log in');
+        router.push('/auth/login');
+        return;
+      }
+
+      // Get user data from Firestore
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        
+        // Get store data if exists
+        const storeDoc = await getDoc(doc(db, 'stores', user.uid));
+        const storeData = storeDoc.exists() ? storeDoc.data() : {};
+
+        setSellerData({
+          fullName: userData.fullName || '',
+          email: user.email || '',
+          phone: userData.phone || '',
+          storeName: storeData.storeName || userData.storeName || 'My Store',
+          description: storeData.description || 'No description yet',
+          location: storeData.location || 'Not set',
+          avatar: storeData.logo || null,
+          joinDate: userData.createdAt ? new Date(userData.createdAt).toLocaleDateString() : 'Recently',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading seller data:', error);
+      Alert.alert('Error', 'Failed to load profile data');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleEditProfile = () => {
-    Alert.alert("Edit Profile", "Navigate to edit profile screen");
-    // router.push("/seller/edit-profile");
+    router.push("/(seller)/edit-profile");
   };
 
   const handleLogout = () => {
@@ -36,33 +86,57 @@ export default function SellerProfileScreen() {
       "Log Out",
       "Are you sure you want to log out?",
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Log Out",
-          onPress: () => {
-            // TODO: Add actual logout logic
-            router.replace("/auth/login");
-          },
           style: "destructive",
+          onPress: async () => {
+            try {
+              await signOut(auth);
+              router.replace("/auth/login");
+            } catch (error) {
+              Alert.alert('Error', 'Failed to log out');
+            }
+          },
         },
       ]
     );
   };
 
-  const MenuItem = ({ icon, title, onPress, rightIcon }: any) => (
+  const handleViewStore = () => {
+    const user = auth.currentUser;
+    if (user) {
+      router.push(`/store/${user.uid}`);
+    }
+  };
+
+  const MenuItem = ({ icon, title, subtitle, onPress, rightIcon }: any) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <View style={styles.menuItemLeft}>
         <View style={styles.iconContainer}>
           <Ionicons name={icon} size={22} color="#8F796F" />
         </View>
-        <Text style={styles.menuItemTitle}>{title}</Text>
+        <View>
+          <Text style={styles.menuItemTitle}>{title}</Text>
+          {subtitle && <Text style={styles.menuItemSubtitle}>{subtitle}</Text>}
+        </View>
       </View>
       {rightIcon || <Ionicons name="chevron-forward" size={20} color="#8F796F" />}
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Profile</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -80,34 +154,100 @@ export default function SellerProfileScreen() {
           {/* Profile Image Placeholder */}
           <View style={styles.profileImageContainer}>
             <View style={styles.profileImagePlaceholder}>
-              <Ionicons name="storefront-outline" size={40} color="#8F796F" />
+              {sellerData?.avatar ? (
+                <Image source={{ uri: sellerData.avatar }} style={styles.profileImage} />
+              ) : (
+                <Ionicons name="storefront-outline" size={40} color="#8F796F" />
+              )}
             </View>
+            <TouchableOpacity style={styles.cameraButton} onPress={handleEditProfile}>
+              <Ionicons name="camera" size={16} color="#FFF" />
+            </TouchableOpacity>
           </View>
 
           {/* Seller Name and Email */}
-          <Text style={styles.sellerName}>{sellerData.name}</Text>
-          <Text style={styles.sellerEmail}>{sellerData.email}</Text>
+          <Text style={styles.sellerName}>{sellerData?.fullName || 'Seller Name'}</Text>
+          <Text style={styles.sellerEmail}>{sellerData?.email || 'email@example.com'}</Text>
+
+          {/* View Store Button */}
+          <TouchableOpacity style={styles.viewStoreButton} onPress={handleViewStore}>
+            <Ionicons name="storefront-outline" size={16} color="#C35822" />
+            <Text style={styles.viewStoreText}>View My Store</Text>
+          </TouchableOpacity>
 
           {/* Store Details */}
           <View style={styles.detailsContainer}>
             {/* Store Name */}
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Store Name</Text>
-              <Text style={styles.detailValue}>{sellerData.storeName}</Text>
+              <Ionicons name="business-outline" size={18} color="#8F796F" />
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Store Name</Text>
+                <Text style={styles.detailValue}>{sellerData?.storeName || 'Not set'}</Text>
+              </View>
+            </View>
+
+            {/* Phone */}
+            <View style={styles.detailRow}>
+              <Ionicons name="call-outline" size={18} color="#8F796F" />
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Phone Number</Text>
+                <Text style={styles.detailValue}>{sellerData?.phone || 'Not set'}</Text>
+              </View>
             </View>
 
             {/* Description */}
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Description</Text>
-              <Text style={styles.detailValue}>{sellerData.description}</Text>
+              <Ionicons name="document-text-outline" size={18} color="#8F796F" />
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Description</Text>
+                <Text style={styles.detailValue}>{sellerData?.description || 'No description'}</Text>
+              </View>
             </View>
 
             {/* Location */}
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Location</Text>
-              <Text style={styles.detailValue}>{sellerData.location}</Text>
+              <Ionicons name="location-outline" size={18} color="#8F796F" />
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Location</Text>
+                <Text style={styles.detailValue}>{sellerData?.location || 'Not set'}</Text>
+              </View>
+            </View>
+
+            {/* Member Since */}
+            <View style={styles.detailRow}>
+              <Ionicons name="calendar-outline" size={18} color="#8F796F" />
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Member Since</Text>
+                <Text style={styles.detailValue}>{sellerData?.joinDate || 'Recently'}</Text>
+              </View>
             </View>
           </View>
+        </View>
+
+        {/* Account Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Account</Text>
+          
+          <MenuItem
+            icon="cube-outline"
+            title="My Products"
+            subtitle="Manage your products"
+            onPress={() => router.push("/(seller)/products")}
+          />
+
+          <MenuItem
+            icon="receipt-outline"
+            title="Orders"
+            subtitle="View customer orders"
+            onPress={() => router.push("/(seller)/orders")}
+          />
+
+          <MenuItem
+            icon="bar-chart-outline"
+            title="Dashboard"
+            subtitle="Sales and analytics"
+            onPress={() => router.push("/(seller)/dashboard")}
+          />
         </View>
 
         {/* Preferences Section */}
@@ -130,11 +270,17 @@ export default function SellerProfileScreen() {
             />
           </View>
 
-          {/* Settings Menu Item */}
           <MenuItem
             icon="settings-outline"
             title="Settings"
-            onPress={() => Alert.alert("Settings", "Navigate to settings")}
+            subtitle="App preferences"
+            onPress={() => Alert.alert("Settings", "Coming soon!")}
+          />
+
+          <MenuItem
+            icon="help-circle-outline"
+            title="Help & Support"
+            onPress={() => Alert.alert("Help", "Contact support@marketmnl.com")}
           />
         </View>
 
@@ -174,6 +320,11 @@ const styles = StyleSheet.create({
     color: "#C35822",
     fontWeight: "500",
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   section: {
     backgroundColor: "#FFF",
     marginHorizontal: 20,
@@ -193,22 +344,41 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   profileImageContainer: {
+    position: "relative",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   profileImagePlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     backgroundColor: "#F0F0F0",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: "#E0DAD1",
-    borderStyle: "dashed",
+    overflow: "hidden",
+  },
+  profileImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+  },
+  cameraButton: {
+    position: "absolute",
+    bottom: 0,
+    right: "35%",
+    backgroundColor: "#C35822",
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FFF",
   },
   sellerName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#32221B",
     textAlign: "center",
@@ -218,18 +388,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#8F796F",
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 12,
+  },
+  viewStoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FBF8F4",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginBottom: 16,
+    alignSelf: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#C35822",
+  },
+  viewStoreText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
   },
   detailsContainer: {
-    gap: 16,
+    gap: 12,
   },
   detailRow: {
-    gap: 4,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  detailContent: {
+    flex: 1,
   },
   detailLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#8F796F",
-    fontWeight: "500",
+    marginBottom: 2,
   },
   detailValue: {
     fontSize: 14,
@@ -247,6 +441,7 @@ const styles = StyleSheet.create({
   menuItemLeft: {
     flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   iconContainer: {
     width: 32,
@@ -257,6 +452,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#32221B",
     fontWeight: "500",
+  },
+  menuItemSubtitle: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 2,
   },
   logoutButton: {
     flexDirection: "row",

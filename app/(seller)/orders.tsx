@@ -1,72 +1,139 @@
 // app/(seller)/orders.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   FlatList,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { auth, db } from '@/lib/firebase';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  updateDoc,
+  orderBy,
+  Timestamp 
+} from 'firebase/firestore';
 
-// Mock orders data
-const ORDERS_DATA = [
-  {
-    id: "ORD-001",
-    orderNumber: "ORD-001",
-    customer: "Geri Hernia",
-    product: "Authentic Bottled Pastil",
-    quantity: 2,
-    status: "Pending",
-    date: "February 10, 2026",
-    total: 250.00,
-  },
-  {
-    id: "ORD-002",
-    orderNumber: "ORD-002",
-    customer: "Gian Murao",
-    product: "Authentic Bottled Pastil",
-    quantity: 2,
-    status: "Confirmed",
-    date: "February 09, 2026",
-    total: 250.00,
-  },
-  {
-    id: "ORD-003",
-    orderNumber: "ORD-003",
-    customer: "Ryza Flores",
-    product: "Authentic Bottled Pastil",
-    quantity: 2,
-    status: "Shipped",
-    date: "February 09, 2026",
-    total: 250.00,
-  },
-  {
-    id: "ORD-004",
-    orderNumber: "ORD-004",
-    customer: "Ryza Flores",
-    product: "Authentic Bottled Pastil",
-    quantity: 2,
-    status: "Delivered",
-    date: "February 09, 2026",
-    total: 250.00,
-  },
-];
+interface OrderItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  price: number;
+}
+
+interface Order {
+  id: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  items: OrderItem[];
+  status: 'Pending' | 'Confirmed' | 'Shipped' | 'Delivered' | 'Cancelled';
+  subtotal: number;
+  shippingFee: number;
+  total: number;
+  shippingAddress: {
+    name: string;
+    phone: string;
+    address: string;
+    city: string;
+    province: string;
+    zipCode: string;
+  };
+  paymentMethod: string;
+  paymentStatus: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  sellerId: string;
+}
 
 const STATUS_CATEGORIES = ["All", "Pending", "Confirmed", "Shipped", "Delivered"];
 
 export default function OrdersScreen() {
   const [selectedStatus, setSelectedStatus] = useState("All");
-  const [orders, setOrders] = useState(ORDERS_DATA);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
-  const filteredOrders = orders.filter(order => 
-    selectedStatus === "All" ? true : order.status === selectedStatus
-  );
+  // Load orders from Firebase when screen opens
+  useEffect(() => {
+    loadOrders();
+  }, []);
+
+  const loadOrders = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Error', 'Please log in');
+        router.push('/auth/login');
+        return;
+      }
+
+      // Query orders where sellerId matches current user
+      const ordersRef = collection(db, 'orders');
+      const q = query(
+        ordersRef, 
+        where('sellerId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const ordersList: Order[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        ordersList.push({ id: doc.id, ...doc.data() } as Order);
+      });
+      
+      setOrders(ordersList);
+    } catch (error) {
+      console.error('Error loading orders:', error);
+      Alert.alert('Error', 'Failed to load orders');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Update order status in Firebase
+  const updateOrderStatus = async (orderId: string, newStatus: Order['status']) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await updateDoc(orderRef, {
+        status: newStatus,
+        updatedAt: Timestamp.now()
+      });
+
+      // Update local state
+      setOrders(prev => 
+        prev.map(order => 
+          order.id === orderId 
+            ? { ...order, status: newStatus } 
+            : order
+        )
+      );
+
+      Alert.alert('Success', `Order marked as ${newStatus}`);
+    } catch (error) {
+      console.error('Error updating order:', error);
+      Alert.alert('Error', 'Failed to update order status');
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
 
   const handleConfirmOrder = (orderId: string) => {
     Alert.alert(
@@ -76,15 +143,7 @@ export default function OrdersScreen() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Confirm",
-          onPress: () => {
-            setOrders(prev => 
-              prev.map(order => 
-                order.id === orderId 
-                  ? { ...order, status: "Confirmed" } 
-                  : order
-              )
-            );
-          },
+          onPress: () => updateOrderStatus(orderId, 'Confirmed'),
         },
       ]
     );
@@ -98,15 +157,7 @@ export default function OrdersScreen() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Mark as Shipped",
-          onPress: () => {
-            setOrders(prev => 
-              prev.map(order => 
-                order.id === orderId 
-                  ? { ...order, status: "Shipped" } 
-                  : order
-              )
-            );
-          },
+          onPress: () => updateOrderStatus(orderId, 'Shipped'),
         },
       ]
     );
@@ -121,18 +172,31 @@ export default function OrdersScreen() {
         {
           text: "Yes, Cancel",
           style: "destructive",
-          onPress: () => {
-            setOrders(prev => 
-              prev.map(order => 
-                order.id === orderId 
-                  ? { ...order, status: "Cancelled" } 
-                  : order
-              )
-            );
-          },
+          onPress: () => updateOrderStatus(orderId, 'Cancelled'),
         },
       ]
     );
+  };
+
+  const handleMarkAsDelivered = (orderId: string) => {
+    Alert.alert(
+      "Mark as Delivered",
+      "Mark this order as delivered?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Yes",
+          onPress: () => updateOrderStatus(orderId, 'Delivered'),
+        },
+      ]
+    );
+  };
+
+  const getFilteredOrders = () => {
+    if (selectedStatus === "All") {
+      return orders;
+    }
+    return orders.filter(order => order.status === selectedStatus);
   };
 
   const getStatusColor = (status: string) => {
@@ -146,73 +210,122 @@ export default function OrdersScreen() {
     }
   };
 
-  const renderOrderItem = ({ item }: { item: typeof ORDERS_DATA[0] }) => (
-    <View style={styles.orderCard}>
-      {/* Order Header */}
-      <View style={styles.orderHeader}>
-        <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + "20" }]}>
-          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {item.status}
-          </Text>
+  const formatDate = (timestamp: Timestamp) => {
+    if (!timestamp) return 'N/A';
+    const date = timestamp.toDate();
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  };
+
+  const renderOrderItem = ({ item }: { item: Order }) => {
+    const isUpdating = updatingOrderId === item.id;
+    const mainProduct = item.items[0]; // Show first product as main
+    const otherItemsCount = item.items.length - 1;
+
+    return (
+      <View style={styles.orderCard}>
+        {/* Order Header */}
+        <View style={styles.orderHeader}>
+          <Text style={styles.orderNumber}>{item.orderNumber}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + "20" }]}>
+            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+              {item.status}
+            </Text>
+          </View>
+        </View>
+
+        {/* Customer and Product */}
+        <Text style={styles.customerName}>{item.customerName}</Text>
+        <Text style={styles.productName}>
+          {mainProduct.productName} x{mainProduct.quantity}
+          {otherItemsCount > 0 && ` +${otherItemsCount} more`}
+        </Text>
+
+        {/* Date and Price Row */}
+        <View style={styles.datePriceRow}>
+          <Text style={styles.orderDate}>{formatDate(item.createdAt)}</Text>
+          <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtonsContainer}>
+          {isUpdating ? (
+            <ActivityIndicator size="small" color="#C35822" />
+          ) : (
+            <>
+              {item.status === "Pending" && (
+                <>
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.confirmButton]}
+                    onPress={() => handleConfirmOrder(item.id)}
+                  >
+                    <Text style={styles.actionButtonText}>Confirm</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.cancelButton]}
+                    onPress={() => handleCancelOrder(item.id)}
+                  >
+                    <Text style={styles.actionButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {item.status === "Confirmed" && (
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.shippedButton]}
+                  onPress={() => handleMarkAsShipped(item.id)}
+                >
+                  <Text style={styles.actionButtonText}>Mark as Shipped</Text>
+                </TouchableOpacity>
+              )}
+
+              {item.status === "Shipped" && (
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.deliveredButton]}
+                  onPress={() => handleMarkAsDelivered(item.id)}
+                >
+                  <Text style={styles.actionButtonText}>Mark as Delivered</Text>
+                </TouchableOpacity>
+              )}
+
+              {item.status === "Delivered" && (
+                <View style={styles.statusMessage}>
+                  <Ionicons name="checkmark-done-circle" size={20} color="#9C27B0" />
+                  <Text style={styles.statusMessageText}>Delivered</Text>
+                </View>
+              )}
+
+              {item.status === "Cancelled" && (
+                <View style={styles.statusMessage}>
+                  <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                  <Text style={styles.statusMessageText}>Cancelled</Text>
+                </View>
+              )}
+            </>
+          )}
         </View>
       </View>
+    );
+  };
 
-      {/* Customer and Product */}
-      <Text style={styles.customerName}>{item.customer}</Text>
-      <Text style={styles.productName}>{item.product} x{item.quantity}</Text>
+  const filteredOrders = getFilteredOrders();
 
-      {/* Date and Price Row */}
-      <View style={styles.datePriceRow}>
-        <Text style={styles.orderDate}>{item.date}</Text>
-        <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
-      </View>
-
-      {/* Action Buttons below date and price */}
-      <View style={styles.actionButtonsContainer}>
-        {item.status === "Pending" && (
-          <>
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.confirmButton]}
-              onPress={() => handleConfirmOrder(item.id)}
-            >
-              <Text style={styles.actionButtonText}>Confirm</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.cancelButton]}
-              onPress={() => handleCancelOrder(item.id)}
-            >
-              <Text style={styles.actionButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {item.status === "Confirmed" && (
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.shippedButton]}
-            onPress={() => handleMarkAsShipped(item.id)}
-          >
-            <Text style={styles.actionButtonText}>Mark as Shipped</Text>
-          </TouchableOpacity>
-        )}
-
-        {item.status === "Shipped" && (
-          <View style={styles.statusMessage}>
-            <Ionicons name="checkmark-circle" size={20} color="#2196F3" />
-            <Text style={styles.statusMessageText}>Shipped</Text>
-          </View>
-        )}
-
-        {item.status === "Delivered" && (
-          <View style={styles.statusMessage}>
-            <Ionicons name="checkmark-done-circle" size={20} color="#9C27B0" />
-            <Text style={styles.statusMessageText}>Delivered</Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Orders</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -257,6 +370,17 @@ export default function OrdersScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.ordersList}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadOrders();
+            }}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
@@ -282,6 +406,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "bold",
     color: "#32221B",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   categoriesWrapper: {
     marginBottom: 16,
@@ -383,6 +512,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     gap: 8,
     marginTop: 4,
+    minHeight: 36,
   },
   actionButton: {
     paddingHorizontal: 20,
@@ -390,14 +520,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 80,
-  },
-   fullWidthButton: {
-    width: "100%",
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: "center",
-    justifyContent: "center",
+    minWidth: 100,
   },
   actionButtonText: {
     color: "#FFF",
@@ -405,14 +528,16 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   confirmButton: {
-    backgroundColor: "#C35822", // Orange
+    backgroundColor: "#4CAF50", // Green for Confirm
   },
   cancelButton: {
-    backgroundColor: "#C35822", // Orange
+    backgroundColor: "#FF3B30", // Red for Cancel
   },
   shippedButton: {
-    backgroundColor: "#C35822", // Orange
-    paddingHorizontal: 105,
+    backgroundColor: "#2196F3", // Blue for Shipped
+  },
+  deliveredButton: {
+    backgroundColor: "#9C27B0", // Purple for Delivered
   },
   statusMessage: {
     flexDirection: "row",
@@ -422,7 +547,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   statusMessageText: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#666",
     fontWeight: "500",
   },

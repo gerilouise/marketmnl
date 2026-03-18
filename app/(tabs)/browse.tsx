@@ -1,3 +1,4 @@
+// app/(tabs)/browse.tsx
 import { useFirebaseProducts } from "@/hooks/useFirebaseProducts";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
@@ -22,8 +23,13 @@ export default function BrowseScreen() {
   const [sortOrder, setSortOrder] = useState("asc");
   const [showSortOptions, setShowSortOptions] = useState(false);
 
-  const { products, loading, fetchProductsByCategory, searchProducts } =
-    useFirebaseProducts();
+  const { 
+    allProducts, 
+    loading, 
+    fetchProductsByCategory, 
+    searchProducts,
+    fetchAllProducts 
+  } = useFirebaseProducts();
 
   // Handle category from home screen
   useEffect(() => {
@@ -31,7 +37,7 @@ export default function BrowseScreen() {
       setSelectedFilter(params.category as string);
       fetchProductsByCategory(params.category as string);
     } else {
-      fetchProductsByCategory("All");
+      fetchAllProducts();
     }
   }, [params.category]);
 
@@ -53,7 +59,7 @@ export default function BrowseScreen() {
   }, [searchQuery]);
 
   // Sort products
-  const sortedProducts = [...products].sort((a, b) => {
+  const sortedProducts = [...allProducts].sort((a, b) => {
     if (sortOrder === "asc") {
       return a.price - b.price;
     } else {
@@ -107,13 +113,13 @@ export default function BrowseScreen() {
         <Text style={styles.price}>₱{item.price}</Text>
         <View style={styles.ratingContainer}>
           <Ionicons name="star" size={12} color="#FFD700" />
-          <Text style={styles.rating}>{item.rating}</Text>
+          <Text style={styles.rating}>{item.rating || 4.5}</Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 
-  if (loading && products.length === 0) {
+  if (loading && allProducts.length === 0) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#C35822" />
@@ -239,7 +245,7 @@ export default function BrowseScreen() {
   );
 }
 
-// Copy the styles from your existing browse.tsx - they remain the same
+// Keep your existing styles - they're perfect!
 const styles = StyleSheet.create({
   container: {
     flex: 1,
