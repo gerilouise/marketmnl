@@ -68,6 +68,14 @@ export default function TabLayout() {
         }}
       />
 
+      {/* 👇 HIDE CHAT TAB FROM NAVBAR 👇 */}
+      <Tabs.Screen
+        name="chat"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+
       {/* 👇 EXPLICITLY HIDE THESE SCREENS 👇 */}
       <Tabs.Screen
         name="edit-profile"
