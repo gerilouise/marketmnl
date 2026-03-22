@@ -1,9 +1,16 @@
 // app/_layout.tsx
-import { Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet, Image, Text, Alert } from 'react-native';
-import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
+import { CartProvider } from "@/app/contexts/CartContext";
+import * as Linking from "expo-linking";
+import { router, Stack } from "expo-router";
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
@@ -12,7 +19,7 @@ export default function RootLayout() {
     // Handle deep links for email verification
     const handleDeepLink = (event: { url: string }) => {
       const { url } = event;
-      if (url && url.includes('verify')) {
+      if (url && url.includes("verify")) {
         Alert.alert(
           "Email Verified",
           "Your email has been verified! You can now log in.",
@@ -21,17 +28,17 @@ export default function RootLayout() {
               text: "Go to Login",
               onPress: () => router.replace("/auth/login"),
             },
-          ]
+          ],
         );
       }
     };
 
     // Add deep link listener
-    const subscription = Linking.addEventListener('url', handleDeepLink);
+    const subscription = Linking.addEventListener("url", handleDeepLink);
 
     // Check if app was opened from a deep link
     Linking.getInitialURL().then((url) => {
-      if (url && url.includes('verify')) {
+      if (url && url.includes("verify")) {
         setTimeout(() => {
           Alert.alert(
             "Email Verified",
@@ -41,7 +48,7 @@ export default function RootLayout() {
                 text: "Go to Login",
                 onPress: () => router.replace("/auth/login"),
               },
-            ]
+            ],
           );
         }, 1000);
       }
@@ -62,24 +69,29 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="auth" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="(seller)" options={{ headerShown: false }} />
-      <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
-      <Stack.Screen name="store/[id]" options={{ headerShown: false }} />
-      <Stack.Screen name="checkout" options={{ headerShown: false }} />
-      <Stack.Screen name="seller/products-add" options={{ headerShown: false }} />
-      <Stack.Screen name="legal" options={{ headerShown: false }} />
-    </Stack>
+    <CartProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="auth" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(seller)" options={{ headerShown: false }} />
+        <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="store/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="checkout" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="seller/products-add"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen name="legal" options={{ headerShown: false }} />
+      </Stack>
+    </CartProvider>
   );
 }
 
 function LoadingScreen() {
   return (
     <View style={styles.container}>
-      <Image 
-        source={require('@/assets/images/logo.png')}
+      <Image
+        source={require("@/assets/images/logo.png")}
         style={styles.logo}
         resizeMode="contain"
       />
@@ -93,9 +105,9 @@ function LoadingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FBF8F4',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#FBF8F4",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   logo: {
@@ -105,15 +117,15 @@ const styles = StyleSheet.create({
   },
   brandName: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#32221B',
+    fontWeight: "bold",
+    color: "#32221B",
     marginBottom: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   brandTagline: {
     fontSize: 16,
-    color: '#8F796F',
-    textAlign: 'center',
+    color: "#8F796F",
+    textAlign: "center",
     marginBottom: 50,
   },
   loader: {

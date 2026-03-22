@@ -68,6 +68,14 @@ export default function TabLayout() {
         }}
       />
 
+      {/* 👇 HIDE ORDERS TAB FROM NAVBAR 👇 */}
+      <Tabs.Screen
+        name="orders"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+
       {/* 👇 HIDE CHAT TAB FROM NAVBAR 👇 */}
       <Tabs.Screen
         name="chat"

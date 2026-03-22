@@ -63,7 +63,7 @@ export default function ProfileScreen() {
         router.push("/(tabs)/addresses");
         break;
       case "orders":
-        Alert.alert("Coming Soon", "Orders screen will be available soon!");
+        router.push("/(tabs)/orders"); // 👈 Changed from Alert to navigate
         break;
       case "reviews":
         Alert.alert("Coming Soon", "Reviews screen will be available soon!");

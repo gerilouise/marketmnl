@@ -1,58 +1,56 @@
 // app/checkout/index.tsx
+import { useCart } from "@/app/contexts/CartContext";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
+import { createOrder } from "@/app/services/orders";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Mock cart items - replace with actual cart data from your cart screen
-const MOCK_ORDER_ITEMS = [
-  {
-    id: "1",
-    name: "Spicy Tuyo",
-    quantity: 1,
-    price: 250,
-  },
-  {
-    id: "2",
-    name: "Spicy Tapa",
-    quantity: 1,
-    price: 250,
-  },
-  {
-    id: "3",
-    name: "Spicy Bangus",
-    quantity: 1,
-    price: 250,
-  },
-];
-
-const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Credit Card"];
+const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
 export default function CheckoutScreen() {
+  const { selectedItems, setSelectedItems } = useCart();
   const { addresses, loading, fetchAddresses } = useFirebaseProfile();
+  const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [selectedPayment, setSelectedPayment] = useState("Cash on Delivery");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showOrderSuccess, setShowOrderSuccess] = useState(false);
+  const [orderNumber, setOrderNumber] = useState("");
+
+  // GCash/Maya Modal
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [referenceNumber, setReferenceNumber] = useState("");
+
+  // Credit Card Modal
+  const [showCreditCardModal, setShowCreditCardModal] = useState(false);
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardName, setCardName] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
+  const [cvv, setCvv] = useState("");
 
   useEffect(() => {
     loadAddresses();
+    setCheckoutItems(selectedItems);
   }, []);
 
   const loadAddresses = async () => {
     await fetchAddresses();
   };
 
-  // Set default address when addresses load
   useEffect(() => {
     if (addresses.length > 0) {
       const defaultAddr = addresses.find((addr) => addr.isDefault);
@@ -65,8 +63,8 @@ export default function CheckoutScreen() {
   }, [addresses]);
 
   const calculateSubtotal = () => {
-    return MOCK_ORDER_ITEMS.reduce(
-      (sum, item) => sum + item.price * item.quantity,
+    return checkoutItems.reduce(
+      (sum, item) => sum + item.productPrice * item.quantity,
       0,
     );
   };
@@ -75,35 +73,125 @@ export default function CheckoutScreen() {
   const subtotal = calculateSubtotal();
   const total = subtotal + shippingFee;
 
-  const handlePlaceOrder = () => {
+  const handlePaymentSelection = () => {
     if (!selectedAddress) {
       Alert.alert("No Address", "Please add a shipping address first");
       router.push("/(tabs)/addresses");
       return;
     }
 
+    if (checkoutItems.length === 0) {
+      Alert.alert("No Items", "No items selected for checkout");
+      router.push("/(tabs)/cart");
+      return;
+    }
+
+    if (selectedPayment === "Cash on Delivery") {
+      processOrder();
+    } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
+      setShowPaymentModal(true);
+    } else if (selectedPayment === "Credit Card") {
+      setShowCreditCardModal(true);
+    }
+  };
+
+  // In app/checkout/index.tsx - Update the processOrder function
+
+  const processOrder = async (paymentDetails?: any) => {
     setIsProcessing(true);
 
-    // Simulate order processing
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      const orderData = {
+        items: checkoutItems.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          productPrice: item.productPrice,
+          quantity: item.quantity,
+          sellerId: item.sellerId || item.userId,
+          sellerName: item.sellerName,
+          imageUrl: item.imageUrl,
+        })),
+        subtotal,
+        shippingFee,
+        total,
+        paymentMethod: selectedPayment,
+        // Only include paymentDetails if it exists
+        paymentDetails: paymentDetails || null, // 👈 FIX: Use null instead of undefined
+        address: {
+          fullName: selectedAddress.fullName,
+          phone: selectedAddress.phone,
+          street: selectedAddress.street,
+          barangay: selectedAddress.barangay,
+          city: selectedAddress.city,
+          province: selectedAddress.province,
+          zipCode: selectedAddress.zipCode,
+          label: selectedAddress.label,
+        },
+      };
+
+      console.log("Order data being sent:", orderData); // Debug log
+
+      const result = await createOrder(orderData);
+
+      if (result.success) {
+        setOrderNumber(result.orderNumber);
+        setShowOrderSuccess(true);
+        // Clear selected items after successful order
+        setSelectedItems([]);
+      }
+    } catch (error: any) {
+      console.error("Order error:", error);
       Alert.alert(
-        "Order Placed Successfully!",
-        `Your order total is ₱${total}. Thank you for shopping with us!`,
-        [
-          {
-            text: "View Orders",
-            onPress: () => {
-              router.push("/(tabs)/profile");
-            },
-          },
-          {
-            text: "Continue Shopping",
-            onPress: () => router.push("/(tabs)"),
-          },
-        ],
+        "Error",
+        error.message || "Failed to place order. Please try again.",
       );
-    }, 1500);
+    } finally {
+      setIsProcessing(false);
+      setShowPaymentModal(false);
+      setShowCreditCardModal(false);
+      setPhoneNumber("");
+      setReferenceNumber("");
+      setCardNumber("");
+      setCardName("");
+      setExpiryDate("");
+      setCvv("");
+    }
+  };
+
+  const validateGCashMaya = () => {
+    if (!phoneNumber) {
+      Alert.alert("Error", "Please enter your mobile number");
+      return false;
+    }
+    if (phoneNumber.length < 11) {
+      Alert.alert("Error", "Please enter a valid mobile number");
+      return false;
+    }
+    if (!referenceNumber) {
+      Alert.alert("Error", "Please enter reference number");
+      return false;
+    }
+    return true;
+  };
+
+  const validateCreditCard = () => {
+    if (!cardNumber || cardNumber.replace(/\s/g, "").length < 16) {
+      Alert.alert("Error", "Please enter a valid card number");
+      return false;
+    }
+    if (!cardName) {
+      Alert.alert("Error", "Please enter cardholder name");
+      return false;
+    }
+    if (!expiryDate || expiryDate.length < 5) {
+      Alert.alert("Error", "Please enter valid expiry date (MM/YY)");
+      return false;
+    }
+    if (!cvv || cvv.length < 3) {
+      Alert.alert("Error", "Please enter valid CVV");
+      return false;
+    }
+    return true;
   };
 
   const navigateToAddresses = () => {
@@ -113,6 +201,20 @@ export default function CheckoutScreen() {
   const formatAddress = (address: any) => {
     if (!address) return "";
     return `${address.street}, ${address.barangay}, ${address.city}, ${address.province} ${address.zipCode}`;
+  };
+
+  const formatCardNumber = (text: string) => {
+    const cleaned = text.replace(/\s/g, "");
+    const groups = cleaned.match(/.{1,4}/g);
+    return groups ? groups.join(" ") : cleaned;
+  };
+
+  const formatExpiryDate = (text: string) => {
+    const cleaned = text.replace(/[^\d]/g, "");
+    if (cleaned.length >= 2) {
+      return `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}`;
+    }
+    return cleaned;
   };
 
   if (loading) {
@@ -137,7 +239,6 @@ export default function CheckoutScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -155,25 +256,39 @@ export default function CheckoutScreen() {
       >
         {/* Order Summary Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Order Summary</Text>
-
-          {MOCK_ORDER_ITEMS.map((item, index) => (
-            <View key={item.id} style={styles.orderItem}>
-              <View style={styles.orderItemLeft}>
-                <Text style={styles.orderItemName}>{item.name}</Text>
-                <Text style={styles.orderItemQuantity}>
-                  Qty: {item.quantity}
+          <Text style={styles.sectionTitle}>
+            Order Summary ({checkoutItems.length} items)
+          </Text>
+          {checkoutItems.length === 0 ? (
+            <View style={styles.emptyCartContainer}>
+              <Text style={styles.emptyCartText}>No items selected</Text>
+              <TouchableOpacity
+                style={styles.goToCartButton}
+                onPress={() => router.push("/(tabs)/cart")}
+              >
+                <Text style={styles.goToCartButtonText}>Go to Cart</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            checkoutItems.map((item) => (
+              <View key={item.id} style={styles.orderItem}>
+                <View style={styles.orderItemLeft}>
+                  <Text style={styles.orderItemName}>{item.productName}</Text>
+                  <Text style={styles.orderItemQuantity}>
+                    Qty: {item.quantity}
+                  </Text>
+                </View>
+                <Text style={styles.orderItemPrice}>
+                  ₱{item.productPrice * item.quantity}
                 </Text>
               </View>
-              <Text style={styles.orderItemPrice}>₱{item.price}</Text>
-            </View>
-          ))}
+            ))
+          )}
         </View>
 
         {/* Delivery Address Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Address</Text>
-
           {addresses.length === 0 ? (
             <TouchableOpacity
               style={styles.addAddressButton}
@@ -198,12 +313,10 @@ export default function CheckoutScreen() {
                   </View>
                 )}
               </View>
-
               <Text style={styles.addressPhone}>{selectedAddress.phone}</Text>
               <Text style={styles.addressText}>
                 {formatAddress(selectedAddress)}
               </Text>
-
               <View style={styles.addressFooter}>
                 <Text style={styles.addressLabel}>{selectedAddress.label}</Text>
                 <TouchableOpacity onPress={navigateToAddresses}>
@@ -217,7 +330,6 @@ export default function CheckoutScreen() {
         {/* Payment Method Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
-
           {PAYMENT_METHODS.map((method) => (
             <TouchableOpacity
               key={method}
@@ -245,28 +357,25 @@ export default function CheckoutScreen() {
         </View>
 
         {/* Price Breakdown Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Price Details</Text>
-
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Subtotal</Text>
-            <Text style={styles.priceValue}>₱{subtotal}</Text>
+        {checkoutItems.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Price Details</Text>
+            <View style={styles.priceRow}>
+              <Text style={styles.priceLabel}>Subtotal</Text>
+              <Text style={styles.priceValue}>₱{subtotal}</Text>
+            </View>
+            <View style={styles.priceRow}>
+              <Text style={styles.priceLabel}>Shipping Fee</Text>
+              <Text style={styles.priceValue}>₱{shippingFee}</Text>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalValue}>₱{total}</Text>
+            </View>
           </View>
+        )}
 
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Shipping Fee</Text>
-            <Text style={styles.priceValue}>₱{shippingFee}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>₱{total}</Text>
-          </View>
-        </View>
-
-        {/* Bottom padding for button */}
         <View style={styles.bottomPadding} />
       </ScrollView>
 
@@ -275,15 +384,17 @@ export default function CheckoutScreen() {
         <TouchableOpacity
           style={[
             styles.placeOrderButton,
-            (!selectedAddress || isProcessing) &&
+            (!selectedAddress || isProcessing || checkoutItems.length === 0) &&
               styles.placeOrderButtonDisabled,
           ]}
-          onPress={handlePlaceOrder}
-          disabled={!selectedAddress || isProcessing}
+          onPress={handlePaymentSelection}
+          disabled={
+            !selectedAddress || isProcessing || checkoutItems.length === 0
+          }
         >
           {isProcessing ? (
             <View style={styles.processingContainer}>
-              <Ionicons name="refresh-outline" size={20} color="#FFF" />
+              <ActivityIndicator size="small" color="#FFF" />
               <Text style={styles.placeOrderText}>Processing...</Text>
             </View>
           ) : (
@@ -291,15 +402,168 @@ export default function CheckoutScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* GCash/Maya Modal */}
+      <Modal visible={showPaymentModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{selectedPayment} Payment</Text>
+              <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSubtitle}>Enter your payment details</Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Mobile Number *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="09171234567"
+                value={phoneNumber}
+                onChangeText={setPhoneNumber}
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Reference Number *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter reference number"
+                value={referenceNumber}
+                onChangeText={setReferenceNumber}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.confirmButton}
+              onPress={() => {
+                if (validateGCashMaya()) {
+                  processOrder({ phoneNumber, referenceNumber });
+                }
+              }}
+            >
+              <Text style={styles.confirmButtonText}>Confirm Payment</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Credit Card Modal */}
+      <Modal visible={showCreditCardModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Credit Card Payment</Text>
+              <TouchableOpacity onPress={() => setShowCreditCardModal(false)}>
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Card Number *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="1234 5678 9012 3456"
+                value={cardNumber}
+                onChangeText={(text) => setCardNumber(formatCardNumber(text))}
+                keyboardType="numeric"
+                maxLength={19}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Cardholder Name *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Name on card"
+                value={cardName}
+                onChangeText={setCardName}
+              />
+            </View>
+
+            <View style={styles.rowInputs}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.label}>Expiry Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="MM/YY"
+                  value={expiryDate}
+                  onChangeText={(text) => setExpiryDate(formatExpiryDate(text))}
+                  keyboardType="numeric"
+                  maxLength={5}
+                />
+              </View>
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.label}>CVV *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="123"
+                  value={cvv}
+                  onChangeText={setCvv}
+                  keyboardType="numeric"
+                  maxLength={4}
+                  secureTextEntry
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.confirmButton}
+              onPress={() => {
+                if (validateCreditCard()) {
+                  processOrder({ cardNumber, cardName, expiryDate, cvv });
+                }
+              }}
+            >
+              <Text style={styles.confirmButtonText}>Pay ₱{total}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Success Modal */}
+      <Modal visible={showOrderSuccess} animationType="fade" transparent>
+        <View style={styles.successOverlay}>
+          <View style={styles.successContent}>
+            <View style={styles.successIcon}>
+              <Ionicons name="checkmark-circle" size={60} color="#4CAF50" />
+            </View>
+            <Text style={styles.successTitle}>Order Placed Successfully!</Text>
+            <Text style={styles.orderNumber}>Order #{orderNumber}</Text>
+            <Text style={styles.successMessage}>
+              Thank you for shopping with us! Your order has been confirmed.
+            </Text>
+            <TouchableOpacity
+              style={styles.successButton}
+              onPress={() => {
+                setShowOrderSuccess(false);
+                router.push("/(tabs)");
+              }}
+            >
+              <Text style={styles.successButtonText}>Continue Shopping</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.viewOrdersButton}
+              onPress={() => {
+                setShowOrderSuccess(false);
+                router.push("/(tabs)/profile");
+              }}
+            >
+              <Text style={styles.viewOrdersText}>View My Orders</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
+// Add all styles from previous version plus new modal styles
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FBF8F4",
-  },
+  // ... keep all previous styles ...
+  container: { flex: 1, backgroundColor: "#FBF8F4" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -319,19 +583,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  scrollContent: {
-    padding: 16,
-  },
+  headerTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  scrollContent: { padding: 16 },
   section: {
     backgroundColor: "#FFF",
     borderRadius: 16,
@@ -349,6 +603,15 @@ const styles = StyleSheet.create({
     color: "#32221B",
     marginBottom: 12,
   },
+  emptyCartContainer: { alignItems: "center", paddingVertical: 20 },
+  emptyCartText: { fontSize: 14, color: "#8F796F", marginBottom: 12 },
+  goToCartButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  goToCartButtonText: { color: "#FFF", fontSize: 14, fontWeight: "500" },
   orderItem: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -357,24 +620,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
   },
-  orderItemLeft: {
-    flex: 1,
-  },
+  orderItemLeft: { flex: 1 },
   orderItemName: {
     fontSize: 14,
     fontWeight: "500",
     color: "#32221B",
     marginBottom: 2,
   },
-  orderItemQuantity: {
-    fontSize: 12,
-    color: "#8F796F",
-  },
-  orderItemPrice: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#C35822",
-  },
+  orderItemQuantity: { fontSize: 12, color: "#8F796F" },
+  orderItemPrice: { fontSize: 14, fontWeight: "600", color: "#C35822" },
   addAddressButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -386,16 +640,8 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     gap: 8,
   },
-  addAddressText: {
-    color: "#C35822",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  addressCard: {
-    backgroundColor: "#FBF8F4",
-    borderRadius: 12,
-    padding: 12,
-  },
+  addAddressText: { color: "#C35822", fontSize: 14, fontWeight: "500" },
+  addressCard: { backgroundColor: "#FBF8F4", borderRadius: 12, padding: 12 },
   addressHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -415,11 +661,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 12,
   },
-  defaultBadgeText: {
-    color: "#FFF",
-    fontSize: 10,
-    fontWeight: "600",
-  },
+  defaultBadgeText: { color: "#FFF", fontSize: 10, fontWeight: "600" },
   addressPhone: {
     fontSize: 13,
     color: "#8F796F",
@@ -448,11 +690,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 12,
   },
-  changeButtonText: {
-    color: "#C35822",
-    fontSize: 13,
-    fontWeight: "500",
-  },
+  changeButtonText: { color: "#C35822", fontSize: 13, fontWeight: "500" },
   paymentOption: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -461,10 +699,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
   },
-  paymentOptionLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+  paymentOptionLeft: { flexDirection: "row", alignItems: "center" },
   radioButton: {
     width: 20,
     height: 20,
@@ -475,63 +710,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 12,
   },
-  radioButtonSelected: {
-    borderColor: "#C35822",
-  },
+  radioButtonSelected: { borderColor: "#C35822" },
   radioButtonInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: "#C35822",
   },
-  paymentOptionText: {
-    fontSize: 14,
-    color: "#32221B",
-  },
-  paymentNote: {
-    fontSize: 12,
-    color: "#8F796F",
-    fontStyle: "italic",
-  },
+  paymentOptionText: { fontSize: 14, color: "#32221B" },
+  paymentNote: { fontSize: 12, color: "#8F796F", fontStyle: "italic" },
   priceRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 8,
   },
-  priceLabel: {
-    fontSize: 14,
-    color: "#666",
-  },
-  priceValue: {
-    fontSize: 14,
-    color: "#32221B",
-    fontWeight: "500",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E0DAD1",
-    marginVertical: 8,
-  },
+  priceLabel: { fontSize: 14, color: "#666" },
+  priceValue: { fontSize: 14, color: "#32221B", fontWeight: "500" },
+  divider: { height: 1, backgroundColor: "#E0DAD1", marginVertical: 8 },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 8,
   },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  totalValue: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#C35822",
-  },
-  bottomPadding: {
-    height: 80,
-  },
+  totalLabel: { fontSize: 16, fontWeight: "600", color: "#32221B" },
+  totalValue: { fontSize: 20, fontWeight: "bold", color: "#C35822" },
+  bottomPadding: { height: 80 },
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -554,17 +759,107 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: "center",
   },
-  placeOrderButtonDisabled: {
-    backgroundColor: "#E0DAD1",
+  placeOrderButtonDisabled: { backgroundColor: "#E0DAD1" },
+  placeOrderText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
+  processingContainer: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  placeOrderText: {
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    width: "90%",
+    maxHeight: "80%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: { fontSize: 20, fontWeight: "bold", color: "#32221B" },
+  modalSubtitle: { fontSize: 14, color: "#8F796F", marginBottom: 20 },
+  inputGroup: { marginBottom: 16 },
+  label: { fontSize: 14, color: "#32221B", marginBottom: 6, fontWeight: "500" },
+  input: {
+    backgroundColor: "#F5F0EB",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    color: "#32221B",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  rowInputs: { flexDirection: "row", marginBottom: 8 },
+  confirmButton: {
+    backgroundColor: "#C35822",
+    borderRadius: 25,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  confirmButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
+
+  // Success Modal Styles
+  successOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  successContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+  },
+  successIcon: { marginBottom: 16 },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  orderNumber: {
+    fontSize: 16,
+    color: "#C35822",
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  successMessage: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  successButton: {
+    backgroundColor: "#C35822",
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginBottom: 12,
+    width: "100%",
+  },
+  successButtonText: {
     color: "#FFF",
     fontSize: 16,
     fontWeight: "600",
+    textAlign: "center",
   },
-  processingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+  viewOrdersButton: { paddingVertical: 12, width: "100%" },
+  viewOrdersText: {
+    color: "#C35822",
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
   },
 });

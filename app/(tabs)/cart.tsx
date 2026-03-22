@@ -1,91 +1,47 @@
 // app/(tabs)/cart.tsx
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useCart } from "@/app/contexts/CartContext";
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { auth, db } from '@/lib/firebase';
-import { 
-  collection, 
-  doc, 
-  deleteDoc, 
-  updateDoc, 
-  query, 
-  where, 
-  getDocs, 
-  getDoc,
-  Timestamp 
-} from 'firebase/firestore';
-
-interface CartItem {
-  id: string;
-  userId: string;
-  productId: string;
-  productName: string;
-  productPrice: number;
-  sellerName: string;
-  quantity: number;
-  imageUrl?: string | null;
-  addedAt: any;
-  updatedAt: any;
-}
+import { deleteDoc, doc, Timestamp, updateDoc } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function CartScreen() {
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const { cartItems, setCartItems, setSelectedItems, loadCart, loading } =
+    useCart();
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   // Load cart from Firebase
-  const loadCart = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        setCartItems([]);
-        setLoading(false);
-        return;
-      }
-
-      const cartRef = collection(db, 'carts');
-      const q = query(cartRef, where('userId', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      const items: CartItem[] = [];
-      querySnapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() } as CartItem);
-      });
-      
-      setCartItems(items);
-    } catch (error) {
-      console.error('Error loading cart:', error);
-      Alert.alert('Error', 'Failed to load cart');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const loadCartData = async () => {
+    await loadCart();
+    setRefreshing(false);
   };
 
   // Refresh when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      loadCart();
-    }, [])
+      loadCartData();
+    }, []),
   );
 
   const toggleSelectItem = (itemId: string) => {
-    setSelectedItems(prev => {
+    setSelectedItemIds((prev) => {
       if (prev.includes(itemId)) {
-        const newSelected = prev.filter(id => id !== itemId);
+        const newSelected = prev.filter((id) => id !== itemId);
         setSelectAll(false);
         return newSelected;
       } else {
@@ -100,62 +56,65 @@ export default function CartScreen() {
 
   const toggleSelectAll = () => {
     if (selectAll) {
-      setSelectedItems([]);
+      setSelectedItemIds([]);
       setSelectAll(false);
     } else {
-      setSelectedItems(cartItems.map(item => item.id));
+      setSelectedItemIds(cartItems.map((item) => item.id));
       setSelectAll(true);
     }
   };
 
   const updateQuantity = async (itemId: string, increment: boolean) => {
     try {
-      const item = cartItems.find(i => i.id === itemId);
+      const item = cartItems.find((i) => i.id === itemId);
       if (!item) return;
 
-      const newQuantity = increment ? item.quantity + 1 : Math.max(1, item.quantity - 1);
-      const itemRef = doc(db, 'carts', itemId);
-      await updateDoc(itemRef, { quantity: newQuantity, updatedAt: Timestamp.now() });
-      
-      setCartItems(prev => prev.map(i => 
-        i.id === itemId ? { ...i, quantity: newQuantity } : i
-      ));
+      const newQuantity = increment
+        ? item.quantity + 1
+        : Math.max(1, item.quantity - 1);
+      const itemRef = doc(db, "carts", itemId);
+      await updateDoc(itemRef, {
+        quantity: newQuantity,
+        updatedAt: Timestamp.now(),
+      });
+
+      setCartItems((prev) =>
+        prev.map((i) =>
+          i.id === itemId ? { ...i, quantity: newQuantity } : i,
+        ),
+      );
     } catch (error) {
-      console.error('Error updating quantity:', error);
-      Alert.alert('Error', 'Failed to update quantity');
+      console.error("Error updating quantity:", error);
+      Alert.alert("Error", "Failed to update quantity");
     }
   };
 
   const removeItem = async (itemId: string, productName: string) => {
-    Alert.alert(
-      "Remove Item",
-      `Remove "${productName}" from your cart?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteDoc(doc(db, 'carts', itemId));
-              setCartItems(prev => prev.filter(item => item.id !== itemId));
-              setSelectedItems(prev => prev.filter(id => id !== itemId));
-              if (selectedItems.length === cartItems.length) {
-                setSelectAll(false);
-              }
-            } catch (error) {
-              console.error('Error removing item:', error);
-              Alert.alert('Error', 'Failed to remove item');
+    Alert.alert("Remove Item", `Remove "${productName}" from your cart?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteDoc(doc(db, "carts", itemId));
+            setCartItems((prev) => prev.filter((item) => item.id !== itemId));
+            setSelectedItemIds((prev) => prev.filter((id) => id !== itemId));
+            if (selectedItemIds.length === cartItems.length) {
+              setSelectAll(false);
             }
-          },
+          } catch (error) {
+            console.error("Error removing item:", error);
+            Alert.alert("Error", "Failed to remove item");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const calculateSelectedTotal = () => {
     return cartItems
-      .filter(item => selectedItems.includes(item.id))
+      .filter((item) => selectedItemIds.includes(item.id))
       .reduce((sum, item) => sum + item.productPrice * item.quantity, 0);
   };
 
@@ -166,20 +125,27 @@ export default function CartScreen() {
   };
 
   const handleCheckout = () => {
-    if (selectedItems.length === 0) {
+    if (selectedItemIds.length === 0) {
       Alert.alert("No Items Selected", "Please select items to checkout");
       return;
     }
-    router.push('/checkout');
+
+    // Get selected items and store in context
+    const selectedCartItems = cartItems.filter((item) =>
+      selectedItemIds.includes(item.id),
+    );
+    setSelectedItems(selectedCartItems);
+
+    router.push("/checkout");
   };
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadCart();
+    loadCartData();
   };
 
-  const renderCartItem = ({ item }: { item: CartItem }) => {
-    const isSelected = selectedItems.includes(item.id);
+  const renderCartItem = ({ item }: { item: any }) => {
+    const isSelected = selectedItemIds.includes(item.id);
 
     return (
       <View style={styles.cartItem}>
@@ -192,7 +158,10 @@ export default function CartScreen() {
 
         <View style={styles.imagePlaceholder}>
           {item.imageUrl ? (
-            <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+            <Image
+              source={{ uri: item.imageUrl }}
+              style={styles.productImage}
+            />
           ) : (
             <Ionicons name="image-outline" size={30} color="#CCC" />
           )}
@@ -234,7 +203,7 @@ export default function CartScreen() {
 
   const subtotal = calculateSelectedTotal();
   const estimatedTotal = calculateEstimatedTotal();
-  const itemCount = selectedItems.length;
+  const itemCount = selectedItemIds.length;
 
   if (loading && !refreshing) {
     return (
@@ -257,10 +226,12 @@ export default function CartScreen() {
         </View>
         <View style={styles.notLoggedInContainer}>
           <Ionicons name="cart-outline" size={60} color="#E0DAD1" />
-          <Text style={styles.notLoggedInText}>Please log in to view your cart</Text>
+          <Text style={styles.notLoggedInText}>
+            Please log in to view your cart
+          </Text>
           <TouchableOpacity
             style={styles.loginButton}
-            onPress={() => router.push('/auth/login')}
+            onPress={() => router.push("/auth/login")}
           >
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
@@ -274,15 +245,32 @@ export default function CartScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Shopping Cart</Text>
-          <Text style={styles.itemCount}>{cartItems.length} items in your cart</Text>
+          <Text style={styles.itemCount}>
+            {cartItems.length} items in your cart
+          </Text>
         </View>
-        
+
         {cartItems.length > 0 && (
-          <TouchableOpacity style={styles.selectAllContainer} onPress={toggleSelectAll}>
-            <View style={[styles.checkboxSmall, selectAll && styles.checkboxSmallSelected]}>
-              {selectAll && <Ionicons name="checkmark" size={12} color="#FFF" />}
+          <TouchableOpacity
+            style={styles.selectAllContainer}
+            onPress={toggleSelectAll}
+          >
+            <View
+              style={[
+                styles.checkboxSmall,
+                selectAll && styles.checkboxSmallSelected,
+              ]}
+            >
+              {selectAll && (
+                <Ionicons name="checkmark" size={12} color="#FFF" />
+              )}
             </View>
-            <Text style={[styles.selectAllText, selectAll && styles.selectAllTextActive]}>
+            <Text
+              style={[
+                styles.selectAllText,
+                selectAll && styles.selectAllTextActive,
+              ]}
+            >
               Select All
             </Text>
           </TouchableOpacity>
@@ -309,7 +297,7 @@ export default function CartScreen() {
             <Text style={styles.emptyCartText}>Your cart is empty</Text>
             <TouchableOpacity
               style={styles.shopButton}
-              onPress={() => router.push('/(tabs)/browse')}
+              onPress={() => router.push("/(tabs)/browse")}
             >
               <Text style={styles.shopButtonText}>Start Shopping</Text>
             </TouchableOpacity>
@@ -333,13 +321,13 @@ export default function CartScreen() {
           <TouchableOpacity
             style={[
               styles.checkoutButton,
-              selectedItems.length === 0 && styles.checkoutButtonDisabled,
+              selectedItemIds.length === 0 && styles.checkoutButtonDisabled,
             ]}
             onPress={handleCheckout}
-            disabled={selectedItems.length === 0}
+            disabled={selectedItemIds.length === 0}
           >
             <Text style={styles.checkoutButtonText}>
-              Checkout {itemCount > 0 ? `(${itemCount} items)` : ''}
+              Checkout {itemCount > 0 ? `(${itemCount} items)` : ""}
             </Text>
           </TouchableOpacity>
         </View>
