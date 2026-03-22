@@ -1,5 +1,5 @@
 // app/product/[id].tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,103 +8,250 @@ import {
   TouchableOpacity,
   Image,
   Alert,
+  ActivityIndicator,
+  Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { db, auth } from '@/lib/firebase';
+import { doc, getDoc, collection, addDoc, deleteDoc, updateDoc, Timestamp } from 'firebase/firestore';
 
-// Mock product data - will be replaced with database later
-const PRODUCTS_DATA = {
-  "1": {
-    id: "1",
-    brand: "GOLDEN LANES",
-    name: "SPICY TUYO",
-    description: "Beverage that brings you Golden Nights. Aromatic, spicy and fruity. Served with a pinch of salt.",
-    netWeight: "250g",
-    seller: "Janjan's Kitchen",
-    sellerId: "1", // Added seller ID to link to store
-    rating: 4.9,
-    reviews: 120,
-    origin: "Cotabato City, Mindanao",
-    culturalBackground: "Pastil is a traditional Maguindanaoan dish, where seasoned rice is wrapped in banana leaves. This bottled version preserves the authentic flavors of the Bangsamoro region.",
-    storage: "Keep refrigerated after opening. Best consumed within 5 days.",
-    shelfLife: "6 months unopened",
-    price: 250,
-    category: "Bottled",
-  },
-  "2": {
-    id: "2",
-    brand: "GOLDEN LANES",
-    name: "SPICY TINAPA",
-    description: "Smoked fish delicacy with a spicy kick. Perfect for breakfast or as a pulutan.",
-    netWeight: "200g",
-    seller: "Gian's Preserved Food",
-    sellerId: "2", // Added seller ID
-    rating: 4.9,
-    reviews: 89,
-    origin: "Davao City, Mindanao",
-    culturalBackground: "Tinapa is a Filipino smoked fish tradition. This spicy version adds a modern twist to a classic preservation method.",
-    storage: "Keep refrigerated after opening. Best consumed within 7 days.",
-    shelfLife: "4 months unopened",
-    price: 250,
-    category: "Dried",
-  },
-  "3": {
-    id: "3",
-    brand: "GOLDEN LANES",
-    name: "SPICY BANGUS",
-    description: "Milkfish marinated in special spices, smoked to perfection.",
-    netWeight: "300g",
-    seller: "Jangan's Kitchen",
-    sellerId: "1", // Same seller as product 1
-    rating: 4.9,
-    reviews: 156,
-    origin: "General Santos City, Mindanao",
-    culturalBackground: "Bangus (milkfish) is the national fish of the Philippines. This preparation honors the traditional smoking methods of Mindanao.",
-    storage: "Keep refrigerated after opening. Best consumed within 5 days.",
-    shelfLife: "6 months unopened",
-    price: 250,
-    category: "Dried",
-  },
-};
+interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  stockQuantity: number;
+  imageUrl: string | null;
+  sellerId: string;
+  sellerName?: string;
+  storeName?: string; // Store name from stores collection
+  rating?: number;
+  reviews?: number;
+  createdAt: any;
+  netWeight?: string;
+  origin?: string;
+  culturalBackground?: string;
+  storage?: string;
+  shelfLife?: string;
+}
 
 export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams();
   const [quantity, setQuantity] = useState(1);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [product, setProduct] = useState<Product | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [storeName, setStoreName] = useState<string>("");
 
-  // Get product data based on ID
-  const product = PRODUCTS_DATA[id as keyof typeof PRODUCTS_DATA];
+  // Load product data from Firebase
+  useEffect(() => {
+    loadProduct();
+  }, [id]);
 
-  // If product not found, show error
-  if (!product) {
-    return (
-      <View style={styles.errorContainer}>
-        <Ionicons name="alert-circle-outline" size={60} color="#C35822" />
-        <Text style={styles.errorText}>Product not found</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const loadProduct = async () => {
+    if (!id) return;
+    
+    setLoading(true);
+    try {
+      const productRef = doc(db, 'products', id as string);
+      const productSnap = await getDoc(productRef);
+      
+      if (productSnap.exists()) {
+        const productData = { id: productSnap.id, ...productSnap.data() } as Product;
+        setProduct(productData);
+        
+        // Load store info from stores collection (not users)
+        if (productData.sellerId) {
+          const storeRef = doc(db, 'stores', productData.sellerId);
+          const storeSnap = await getDoc(storeRef);
+          if (storeSnap.exists()) {
+            const storeData = storeSnap.data();
+            setStoreName(storeData.storeName || productData.sellerName || "MarketMNL");
+          } else {
+            setStoreName(productData.sellerName || "MarketMNL");
+          }
+        }
+        
+        // Check if product is in wishlist
+        await checkWishlistStatus();
+      } else {
+        Alert.alert("Error", "Product not found");
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error loading product:', error);
+      Alert.alert("Error", "Failed to load product");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleAddToCart = () => {
-    Alert.alert("Added to Cart", `${quantity} x ${product.name} added to your cart`);
-    // TODO: Add actual cart logic with database
+  const checkWishlistStatus = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    
+    try {
+      const wishlistRef = collection(db, 'wishlists');
+      const itemId = `${user.uid}_${id}`;
+      const docRef = doc(wishlistRef, itemId);
+      const docSnap = await getDoc(docRef);
+      setIsWishlisted(docSnap.exists());
+    } catch (error) {
+      console.error('Error checking wishlist:', error);
+    }
+  };
+
+  const handleAddToCart = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to add items to cart", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
+
+    try {
+      const cartRef = collection(db, 'carts');
+      const cartItemId = `${user.uid}_${product?.id}`;
+      const docRef = doc(cartRef, cartItemId);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        // Update quantity
+        const currentQty = docSnap.data().quantity;
+        await updateDoc(docRef, {
+          quantity: currentQty + quantity,
+          updatedAt: Timestamp.now()
+        });
+      } else {
+        // Add new item
+        await addDoc(cartRef, {
+          id: cartItemId,
+          userId: user.uid,
+          productId: product?.id,
+          productName: product?.name,
+          productPrice: product?.price,
+          sellerName: storeName, // Use store name here
+          quantity: quantity,
+          imageUrl: product?.imageUrl,
+          addedAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        });
+      }
+      
+      Alert.alert("Success", `${quantity} x ${product?.name} added to cart`);
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      Alert.alert("Error", "Failed to add to cart");
+    }
+  };
+
+  const handleToggleWishlist = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to add items to wishlist", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
+
+    try {
+      const wishlistRef = collection(db, 'wishlists');
+      const itemId = `${user.uid}_${product?.id}`;
+      const docRef = doc(wishlistRef, itemId);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        // Remove from wishlist
+        await deleteDoc(docRef);
+        setIsWishlisted(false);
+        Alert.alert("Removed", `${product?.name} removed from wishlist`);
+      } else {
+        // Add to wishlist
+        await addDoc(wishlistRef, {
+          id: itemId,
+          userId: user.uid,
+          productId: product?.id,
+          productName: product?.name,
+          productPrice: product?.price,
+          sellerName: storeName, // Use store name here
+          imageUrl: product?.imageUrl,
+          addedAt: Timestamp.now()
+        });
+        setIsWishlisted(true);
+        Alert.alert("Added", `${product?.name} added to wishlist`);
+      }
+    } catch (error) {
+      console.error('Error toggling wishlist:', error);
+      Alert.alert("Error", "Failed to update wishlist");
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Check out ${product?.name} from ${storeName} on MarketMNL! ₱${product?.price}\n\n${product?.description}\n\nGet it here: ${Platform.OS === 'ios' ? 'marketmnl://product/' + product?.id : 'https://marketmnl.com/product/' + product?.id}`,
+        title: product?.name,
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
   };
 
   const navigateToStore = () => {
-    router.push(`/store/${product.sellerId}`);
+    if (product?.sellerId) {
+      router.push(`/store/${product.sellerId}`);
+    }
   };
 
   const incrementQuantity = () => setQuantity(prev => prev + 1);
   const decrementQuantity = () => setQuantity(prev => (prev > 1 ? prev - 1 : 1));
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!product) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={60} color="#C35822" />
+          <Text style={styles.errorText}>Product not found</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with back button and wishlist */}
+        {/* Header with back button, wishlist and share */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -112,7 +259,7 @@ export default function ProductDetailsScreen() {
           <View style={styles.headerRight}>
             <TouchableOpacity 
               style={styles.headerButton}
-              onPress={() => setIsWishlisted(!isWishlisted)}
+              onPress={handleToggleWishlist}
             >
               <Ionicons 
                 name={isWishlisted ? "heart" : "heart-outline"} 
@@ -120,7 +267,10 @@ export default function ProductDetailsScreen() {
                 color={isWishlisted ? "#C35822" : "#32221B"} 
               />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerButton}>
+            <TouchableOpacity 
+              style={styles.headerButton}
+              onPress={handleShare}
+            >
               <Ionicons name="share-outline" size={24} color="#32221B" />
             </TouchableOpacity>
           </View>
@@ -129,9 +279,13 @@ export default function ProductDetailsScreen() {
         {/* Product Image */}
         <View style={styles.imageContainer}>
           <View style={styles.imageWrapper}>
-            <View style={styles.imagePlaceholder}>
-              <Ionicons name="image-outline" size={50} color="#CCC" />
-            </View>
+            {product.imageUrl ? (
+              <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
+            ) : (
+              <View style={styles.imagePlaceholder}>
+                <Ionicons name="image-outline" size={50} color="#CCC" />
+              </View>
+            )}
           </View>
         </View>
 
@@ -139,7 +293,7 @@ export default function ProductDetailsScreen() {
         <View style={styles.contentContainer}>
           {/* Brand and Category */}
           <View style={styles.brandRow}>
-            <Text style={styles.brand}>{product.brand}</Text>
+            <Text style={styles.brand}>{storeName || "MarketMNL"}</Text>
             <View style={styles.categoryTag}>
               <Text style={styles.categoryText}>{product.category}</Text>
             </View>
@@ -155,79 +309,84 @@ export default function ProductDetailsScreen() {
           <Text style={styles.description}>{product.description}</Text>
           
           {/* Net Weight */}
-          <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
+          {product.netWeight && (
+            <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
+          )}
 
           {/* Divider */}
           <View style={styles.divider} />
 
-          {/* Seller and Rating - Now clickable */}
+          {/* Seller and Rating - Clickable */}
           <TouchableOpacity 
             style={styles.sellerCard}
             onPress={navigateToStore}
             activeOpacity={0.7}
           >
             <View style={styles.sellerInfo}>
-              <Text style={styles.sellerLabel}>Authentic Bottled Pastil</Text>
+              <Text style={styles.sellerLabel}>Store</Text>
               <View style={styles.sellerNameContainer}>
-                <Text style={styles.sellerName}>{product.seller}</Text>
+                <Text style={styles.sellerName}>{storeName || "MarketMNL"}</Text>
                 <Ionicons name="chevron-forward" size={16} color="#C35822" />
               </View>
             </View>
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={styles.ratingText}>{product.rating}</Text>
-              <Text style={styles.reviewsText}>({product.reviews})</Text>
+              <Text style={styles.ratingText}>{product.rating || 4.5}</Text>
+              <Text style={styles.reviewsText}>({product.reviews || 0})</Text>
             </View>
           </TouchableOpacity>
 
           {/* Product Details Section */}
           <View style={styles.detailsCard}>
-            {/* Product Origin */}
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <Ionicons name="location-outline" size={18} color="#C35822" />
+            {product.origin && (
+              <View style={styles.detailItem}>
+                <View style={styles.detailIconContainer}>
+                  <Ionicons name="location-outline" size={18} color="#C35822" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>Product Origin</Text>
+                  <Text style={styles.detailValue}>{product.origin}</Text>
+                </View>
               </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Product Origin</Text>
-                <Text style={styles.detailValue}>{product.origin}</Text>
-              </View>
-            </View>
+            )}
 
-            {/* Cultural Background */}
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <Ionicons name="leaf-outline" size={18} color="#C35822" />
+            {product.culturalBackground && (
+              <View style={styles.detailItem}>
+                <View style={styles.detailIconContainer}>
+                  <Ionicons name="leaf-outline" size={18} color="#C35822" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>Cultural Background</Text>
+                  <Text style={styles.detailValue}>{product.culturalBackground}</Text>
+                </View>
               </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Cultural Background</Text>
-                <Text style={styles.detailValue}>{product.culturalBackground}</Text>
-              </View>
-            </View>
+            )}
 
-            {/* Storage */}
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <Ionicons name="snow-outline" size={18} color="#C35822" />
+            {product.storage && (
+              <View style={styles.detailItem}>
+                <View style={styles.detailIconContainer}>
+                  <Ionicons name="snow-outline" size={18} color="#C35822" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>Storage</Text>
+                  <Text style={styles.detailValue}>{product.storage}</Text>
+                </View>
               </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Storage</Text>
-                <Text style={styles.detailValue}>{product.storage}</Text>
-              </View>
-            </View>
+            )}
 
-            {/* Shelf Life */}
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <Ionicons name="time-outline" size={18} color="#C35822" />
+            {product.shelfLife && (
+              <View style={styles.detailItem}>
+                <View style={styles.detailIconContainer}>
+                  <Ionicons name="time-outline" size={18} color="#C35822" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>Shelf Life</Text>
+                  <Text style={styles.detailValue}>{product.shelfLife}</Text>
+                </View>
               </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Shelf Life</Text>
-                <Text style={styles.detailValue}>{product.shelfLife}</Text>
-              </View>
-            </View>
+            )}
           </View>
 
-          {/* Bottom padding for Add to Cart button */}
           <View style={styles.bottomPadding} />
         </View>
       </ScrollView>
@@ -258,11 +417,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FBF8F4",
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FBF8F4",
     padding: 20,
   },
   errorText: {
@@ -313,6 +476,11 @@ const styles = StyleSheet.create({
   },
   imageWrapper: {
     position: "relative",
+  },
+  productImage: {
+    width: 280,
+    height: 280,
+    borderRadius: 24,
   },
   imagePlaceholder: {
     width: 280,
@@ -440,6 +608,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     borderRadius: 16,
     padding: 16,
+    marginBottom: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,

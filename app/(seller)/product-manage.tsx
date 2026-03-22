@@ -1,5 +1,5 @@
 // app/(seller)/product-manage.tsx
-import { useFirebaseProducts } from "@/hooks/useFirebaseProducts";
+import { auth, db } from '@/lib/firebase';
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { auth } from '@/lib/firebase';
+import { collection, addDoc, doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
 
 const CATEGORIES = ["Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
 
@@ -44,27 +44,40 @@ export default function SellerProductsManageScreen() {
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [dataLoaded, setDataLoaded] = useState(false);
 
-  const { products, fetchProducts, addProduct, updateProduct, getProductById } = useFirebaseProducts();
+  // Reset form function
+  const resetForm = () => {
+    setName("");
+    setDescription("");
+    setPrice("");
+    setCategory("Bottled");
+    setStock("");
+    setWeight("");
+    setOrigin("");
+    setCulturalBackground("");
+    setStorage("");
+    setShelfLife("");
+    setImage(null);
+    setOriginalImage(null);
+  };
 
   // Load product data if editing
   useEffect(() => {
     if (isEditing && productId) {
       loadProductData();
+    } else {
+      resetForm(); // Reset form when adding new product
     }
   }, [productId, isEditing]);
 
   const loadProductData = async () => {
     setLoading(true);
     try {
-      // First ensure products are fetched
-      await fetchProducts();
+      const productRef = doc(db, 'products', productId as string);
+      const productSnap = await getDoc(productRef);
       
-      // Then find the product
-      const product = getProductById(productId as string);
-      
-      if (product) {
+      if (productSnap.exists()) {
+        const product = productSnap.data();
         setName(product.name || "");
         setDescription(product.description || "");
         setPrice(product.price?.toString() || "");
@@ -77,21 +90,22 @@ export default function SellerProductsManageScreen() {
         setShelfLife(product.shelfLife || "");
         setImage(product.imageUrl || null);
         setOriginalImage(product.imageUrl || null);
-        setDataLoaded(true);
       } else {
         Alert.alert("Error", "Product not found");
-        router.back();
+        router.replace("/(seller)/products");
       }
     } catch (error) {
       console.error('Error loading product:', error);
       Alert.alert('Error', 'Failed to load product data');
+      router.replace("/(seller)/products");
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoBack = () => {
-    router.back();
+    // Go directly to products page
+    router.replace("/(seller)/products");
   };
 
   const pickImage = async () => {
@@ -175,7 +189,6 @@ export default function SellerProductsManageScreen() {
       return;
     }
 
-    // Validate price and stock are valid numbers
     if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
       Alert.alert("Error", "Please enter a valid price");
       return;
@@ -189,7 +202,6 @@ export default function SellerProductsManageScreen() {
     setSubmitting(true);
 
     try {
-      // Check if user is authenticated
       const user = auth.currentUser;
       if (!user) {
         Alert.alert("Error", "You must be logged in");
@@ -206,6 +218,8 @@ export default function SellerProductsManageScreen() {
         }
       }
 
+      const now = Timestamp.now();
+
       const productData = {
         name: name.trim(),
         description: description.trim() || `${name} - Authentic Filipino delicacy`,
@@ -213,29 +227,34 @@ export default function SellerProductsManageScreen() {
         category,
         stockQuantity: parseInt(stock),
         netWeight: weight.trim(),
-        imageUrl,
+        imageUrl: imageUrl || null,
         origin: origin.trim() || null,
         culturalBackground: culturalBackground.trim() || null,
         storage: storage.trim() || null,
         shelfLife: shelfLife.trim() || null,
+        sellerId: user.uid,
+        createdAt: now,
+        updatedAt: now,
       };
 
-      console.log('Saving product data:', productData);
+      console.log('Saving product:', productData);
 
-      let success;
       if (isEditing) {
-        success = await updateProduct(productId as string, productData);
+        const productRef = doc(db, 'products', productId as string);
+        await updateDoc(productRef, {
+          ...productData,
+          updatedAt: Timestamp.now(),
+        });
+        Alert.alert("Success", "Product updated successfully!");
       } else {
-        success = await addProduct(productData);
+        const productsRef = collection(db, 'products');
+        await addDoc(productsRef, productData);
+        Alert.alert("Success", "Product added successfully!");
       }
-
-      if (success) {
-        Alert.alert(
-          "Success", 
-          `Product ${isEditing ? "updated" : "added"} successfully!`,
-          [{ text: "OK", onPress: () => router.back() }]
-        );
-      }
+      
+      // Navigate directly to products page
+      router.replace("/(seller)/products");
+      
     } catch (error) {
       console.error('Error saving product:', error);
       Alert.alert("Error", "Failed to save product. Please try again.");
@@ -270,7 +289,6 @@ export default function SellerProductsManageScreen() {
         style={styles.keyboardView}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -296,7 +314,6 @@ export default function SellerProductsManageScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Product Image */}
           <View style={styles.imageSection}>
             <Text style={styles.label}>Product Image</Text>
             <TouchableOpacity 
@@ -321,7 +338,6 @@ export default function SellerProductsManageScreen() {
             )}
           </View>
 
-          {/* Product Information */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Product Information</Text>
             
@@ -393,7 +409,6 @@ export default function SellerProductsManageScreen() {
             </View>
           </View>
 
-          {/* Category Selection */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Category</Text>
             <View style={styles.categoriesContainer}>
@@ -418,7 +433,6 @@ export default function SellerProductsManageScreen() {
             </View>
           </View>
 
-          {/* Additional Details */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Additional Details (Optional)</Text>
             
@@ -474,7 +488,6 @@ export default function SellerProductsManageScreen() {
             </View>
           </View>
 
-          {/* Bottom Padding */}
           <View style={styles.bottomPadding} />
         </ScrollView>
       </KeyboardAvoidingView>

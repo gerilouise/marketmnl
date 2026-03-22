@@ -1,5 +1,5 @@
 // app/(tabs)/cart.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,59 +8,79 @@ import {
   TouchableOpacity,
   Image,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
+import { auth, db } from '@/lib/firebase';
+import { 
+  collection, 
+  doc, 
+  deleteDoc, 
+  updateDoc, 
+  query, 
+  where, 
+  getDocs, 
+  getDoc,
+  Timestamp 
+} from 'firebase/firestore';
 
-// Mock cart data
-const INITIAL_CART_ITEMS = [
-  {
-    id: "1",
-    name: "Spicy Tuyo",
-    seller: "Janjan's Kitchen",
-    price: 250,
-    quantity: 1,
-    image: null,
-  },
-  {
-    id: "2",
-    name: "Spicy Tapa",
-    seller: "Janjan's Kitchen",
-    price: 250,
-    quantity: 1,
-    image: null,
-  },
-  {
-    id: "3",
-    name: "SpICY Bangus",
-    seller: "Janjan's Kitchen",
-    price: 250,
-    quantity: 1,
-    image: null,
-  },
-  {
-    id: "4",
-    name: "Original Tapa",
-    seller: "Janjan's Kitchen",
-    price: 250,
-    quantity: 1,
-    image: null,
-  },
-  {
-    id: "5",
-    name: "Original Tahong",
-    seller: "Janjan's Kitchen",
-    price: 250,
-    quantity: 1,
-    image: null,
-  },
-];
+interface CartItem {
+  id: string;
+  userId: string;
+  productId: string;
+  productName: string;
+  productPrice: number;
+  sellerName: string;
+  quantity: number;
+  imageUrl?: string | null;
+  addedAt: any;
+  updatedAt: any;
+}
 
 export default function CartScreen() {
-  const [cartItems, setCartItems] = useState(INITIAL_CART_ITEMS);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Load cart from Firebase
+  const loadCart = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setCartItems([]);
+        setLoading(false);
+        return;
+      }
+
+      const cartRef = collection(db, 'carts');
+      const q = query(cartRef, where('userId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      const items: CartItem[] = [];
+      querySnapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() } as CartItem);
+      });
+      
+      setCartItems(items);
+    } catch (error) {
+      console.error('Error loading cart:', error);
+      Alert.alert('Error', 'Failed to load cart');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadCart();
+    }, [])
+  );
 
   const toggleSelectItem = (itemId: string) => {
     setSelectedItems(prev => {
@@ -88,32 +108,44 @@ export default function CartScreen() {
     }
   };
 
-  const updateQuantity = (itemId: string, increment: boolean) => {
-    setCartItems(prev =>
-      prev.map(item => {
-        if (item.id === itemId) {
-          const newQuantity = increment ? item.quantity + 1 : Math.max(1, item.quantity - 1);
-          return { ...item, quantity: newQuantity };
-        }
-        return item;
-      })
-    );
+  const updateQuantity = async (itemId: string, increment: boolean) => {
+    try {
+      const item = cartItems.find(i => i.id === itemId);
+      if (!item) return;
+
+      const newQuantity = increment ? item.quantity + 1 : Math.max(1, item.quantity - 1);
+      const itemRef = doc(db, 'carts', itemId);
+      await updateDoc(itemRef, { quantity: newQuantity, updatedAt: Timestamp.now() });
+      
+      setCartItems(prev => prev.map(i => 
+        i.id === itemId ? { ...i, quantity: newQuantity } : i
+      ));
+    } catch (error) {
+      console.error('Error updating quantity:', error);
+      Alert.alert('Error', 'Failed to update quantity');
+    }
   };
 
-  const removeItem = (itemId: string) => {
+  const removeItem = async (itemId: string, productName: string) => {
     Alert.alert(
       "Remove Item",
-      "Are you sure you want to remove this item from your cart?",
+      `Remove "${productName}" from your cart?`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Remove",
           style: "destructive",
-          onPress: () => {
-            setCartItems(prev => prev.filter(item => item.id !== itemId));
-            setSelectedItems(prev => prev.filter(id => id !== itemId));
-            if (selectedItems.length === cartItems.length) {
-              setSelectAll(false);
+          onPress: async () => {
+            try {
+              await deleteDoc(doc(db, 'carts', itemId));
+              setCartItems(prev => prev.filter(item => item.id !== itemId));
+              setSelectedItems(prev => prev.filter(id => id !== itemId));
+              if (selectedItems.length === cartItems.length) {
+                setSelectAll(false);
+              }
+            } catch (error) {
+              console.error('Error removing item:', error);
+              Alert.alert('Error', 'Failed to remove item');
             }
           },
         },
@@ -121,19 +153,15 @@ export default function CartScreen() {
     );
   };
 
-  const calculateSubtotal = () => {
-    return cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  };
-
   const calculateSelectedTotal = () => {
     return cartItems
       .filter(item => selectedItems.includes(item.id))
-      .reduce((sum, item) => sum + item.price * item.quantity, 0);
+      .reduce((sum, item) => sum + item.productPrice * item.quantity, 0);
   };
 
   const calculateEstimatedTotal = () => {
     const subtotal = calculateSelectedTotal();
-    const shipping = subtotal > 0 ? 50 : 0; // ₱50 shipping fee
+    const shipping = subtotal > 0 ? 50 : 0;
     return subtotal + shipping;
   };
 
@@ -142,22 +170,19 @@ export default function CartScreen() {
       Alert.alert("No Items Selected", "Please select items to checkout");
       return;
     }
-    Alert.alert(
-      "Proceed to Checkout",
-      `Total amount: ₱${calculateEstimatedTotal()}`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Checkout", onPress: () => console.log("Checkout pressed") },
-      ]
-    );
+    router.push('/checkout');
   };
 
-  const renderCartItem = ({ item }: { item: typeof INITIAL_CART_ITEMS[0] }) => {
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadCart();
+  };
+
+  const renderCartItem = ({ item }: { item: CartItem }) => {
     const isSelected = selectedItems.includes(item.id);
 
     return (
       <View style={styles.cartItem}>
-        {/* Select Checkbox */}
         <TouchableOpacity
           style={[styles.checkbox, isSelected && styles.checkboxSelected]}
           onPress={() => toggleSelectItem(item.id)}
@@ -165,29 +190,28 @@ export default function CartScreen() {
           {isSelected && <Ionicons name="checkmark" size={16} color="#FFF" />}
         </TouchableOpacity>
 
-        {/* Product Image Placeholder */}
         <View style={styles.imagePlaceholder}>
-          <Ionicons name="image-outline" size={30} color="#CCC" />
+          {item.imageUrl ? (
+            <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+          ) : (
+            <Ionicons name="image-outline" size={30} color="#CCC" />
+          )}
         </View>
 
-        {/* Product Details */}
         <View style={styles.itemDetails}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemSeller}>{item.seller}</Text>
-          <Text style={styles.itemPrice}>₱{item.price}</Text>
+          <Text style={styles.itemName}>{item.productName}</Text>
+          <Text style={styles.itemSeller}>{item.sellerName}</Text>
+          <Text style={styles.itemPrice}>₱{item.productPrice}</Text>
         </View>
 
-        {/* Right Side Container with Trash above Quantity */}
         <View style={styles.rightContainer}>
-          {/* Red Trash Icon - Top */}
           <TouchableOpacity
             style={styles.trashButton}
-            onPress={() => removeItem(item.id)}
+            onPress={() => removeItem(item.id, item.productName)}
           >
             <Ionicons name="trash-outline" size={20} color="#FF3B30" />
           </TouchableOpacity>
 
-          {/* Quantity Controls - Bottom */}
           <View style={styles.quantityContainer}>
             <TouchableOpacity
               style={styles.quantityButton}
@@ -212,40 +236,80 @@ export default function CartScreen() {
   const estimatedTotal = calculateEstimatedTotal();
   const itemCount = selectedItems.length;
 
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Shopping Cart</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!auth.currentUser) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Shopping Cart</Text>
+        </View>
+        <View style={styles.notLoggedInContainer}>
+          <Ionicons name="cart-outline" size={60} color="#E0DAD1" />
+          <Text style={styles.notLoggedInText}>Please log in to view your cart</Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push('/auth/login')}
+          >
+            <Text style={styles.loginButtonText}>Log In</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header with item count and select all */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Shopping Cart</Text>
           <Text style={styles.itemCount}>{cartItems.length} items in your cart</Text>
         </View>
         
-        {/* Select All with Checkbox */}
-        <TouchableOpacity style={styles.selectAllContainer} onPress={toggleSelectAll}>
-          <View style={[styles.checkboxSmall, selectAll && styles.checkboxSmallSelected]}>
-            {selectAll && <Ionicons name="checkmark" size={12} color="#FFF" />}
-          </View>
-          <Text style={[styles.selectAllText, selectAll && styles.selectAllTextActive]}>
-            Select All
-          </Text>
-        </TouchableOpacity>
+        {cartItems.length > 0 && (
+          <TouchableOpacity style={styles.selectAllContainer} onPress={toggleSelectAll}>
+            <View style={[styles.checkboxSmall, selectAll && styles.checkboxSmallSelected]}>
+              {selectAll && <Ionicons name="checkmark" size={12} color="#FFF" />}
+            </View>
+            <Text style={[styles.selectAllText, selectAll && styles.selectAllTextActive]}>
+              Select All
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Cart Items List */}
       <FlatList
         data={cartItems}
         renderItem={renderCartItem}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.cartList}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyCart}>
             <Ionicons name="cart-outline" size={60} color="#E0DAD1" />
             <Text style={styles.emptyCartText}>Your cart is empty</Text>
             <TouchableOpacity
               style={styles.shopButton}
-              onPress={() => router.push('/browse')}
+              onPress={() => router.push('/(tabs)/browse')}
             >
               <Text style={styles.shopButtonText}>Start Shopping</Text>
             </TouchableOpacity>
@@ -253,10 +317,8 @@ export default function CartScreen() {
         }
       />
 
-      {/* Bottom Summary and Checkout */}
       {cartItems.length > 0 && (
         <View style={styles.bottomContainer}>
-          {/* Summary */}
           <View style={styles.summaryContainer}>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Subtotal</Text>
@@ -268,7 +330,6 @@ export default function CartScreen() {
             </View>
           </View>
 
-          {/* Checkout Button */}
           <TouchableOpacity
             style={[
               styles.checkoutButton,
@@ -309,6 +370,35 @@ const styles = StyleSheet.create({
   itemCount: {
     fontSize: 14,
     color: "#8F796F",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  notLoggedInContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  notLoggedInText: {
+    fontSize: 16,
+    color: "#8F796F",
+    textAlign: "center",
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  loginButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  loginButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   selectAllContainer: {
     flexDirection: "row",
@@ -385,6 +475,12 @@ const styles = StyleSheet.create({
     borderColor: "#E0E0E0",
     borderStyle: "dashed",
     marginRight: 12,
+    overflow: "hidden",
+  },
+  productImage: {
+    width: 70,
+    height: 70,
+    borderRadius: 12,
   },
   itemDetails: {
     flex: 1,
@@ -408,7 +504,7 @@ const styles = StyleSheet.create({
   rightContainer: {
     alignItems: "center",
     justifyContent: "space-between",
-    height: 80, // Fixed height for vertical stacking
+    height: 80,
   },
   trashButton: {
     padding: 4,

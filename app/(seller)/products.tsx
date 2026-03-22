@@ -1,5 +1,5 @@
 // app/(seller)/products.tsx
-import { useFirebaseProducts } from "@/hooks/useFirebaseProducts";
+import { auth, db } from '@/lib/firebase';
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -16,33 +16,82 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
 
 const CATEGORIES = ["All", "Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
 
 export default function SellerProductsScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [refreshing, setRefreshing] = useState(false);
-  
-  const { products, loading, fetchProducts, deleteProduct } = useFirebaseProducts();
+  const [products, setProducts] = useState<any[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch products from Firebase
+  const fetchProducts = async () => {
+    setLoading(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setProducts([]);
+        setFilteredProducts([]);
+        setLoading(false);
+        return;
+      }
+      
+      const productsRef = collection(db, 'products');
+      const q = query(productsRef, where('sellerId', '==', user.uid));
+      
+      const querySnapshot = await getDocs(q);
+      const productsList: any[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        productsList.push({ id: doc.id, ...doc.data() });
+      });
+      
+      setProducts(productsList);
+      // Apply filter after loading
+      filterProductsByCategory(selectedCategory, productsList);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      Alert.alert('Error', 'Failed to load products');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter products by category
+  const filterProductsByCategory = (category: string, productList: any[] = products) => {
+    if (category === "All") {
+      setFilteredProducts(productList);
+    } else {
+      const filtered = productList.filter(product => product.category === category);
+      setFilteredProducts(filtered);
+    }
+  };
+
+  // Handle category change
+  const handleCategoryChange = (category: string) => {
+    setSelectedCategory(category);
+    filterProductsByCategory(category);
+  };
 
   // Fetch products when screen loads
   useEffect(() => {
     fetchProducts();
   }, []);
 
-  // Fetch products when screen comes into focus (after returning from add/edit)
+  // Fetch products when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       fetchProducts();
     }, [])
   );
 
-  // FIXED: Navigate to product-manage (not product-add)
   const handleAddProduct = () => {
     router.push("/(seller)/product-manage");
   };
 
-  // Navigate to product-manage with productId for editing
   const handleEditProduct = (productId: string) => {
     router.push({
       pathname: "/(seller)/product-manage",
@@ -50,35 +99,11 @@ export default function SellerProductsScreen() {
     });
   };
 
-  const handleDeleteProduct = (productId: string, productName: string) => {
-    Alert.alert(
-      "Delete Product",
-      `Are you sure you want to delete "${productName}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            const success = await deleteProduct(productId);
-            if (success) {
-              // Products will auto-refresh via useFocusEffect
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchProducts();
     setRefreshing(false);
   };
-
-  const filteredProducts = products.filter((product) =>
-    selectedCategory === "All" ? true : product.category === selectedCategory
-  );
 
   const renderProductItem = ({ item }: { item: any }) => (
     <View style={styles.productCard}>
@@ -93,12 +118,12 @@ export default function SellerProductsScreen() {
 
       {/* Product Details */}
       <View style={styles.productDetails}>
-        <Text style={styles.productName}>{item.name}</Text>
+        <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
         <Text style={styles.productDescription} numberOfLines={2}>
           {item.description || "No description"}
         </Text>
 
-        {/* Price and Stock */}
+        {/* Price and Stock Row */}
         <View style={styles.priceStockRow}>
           <Text style={styles.productPrice}>₱{item.price.toFixed(2)}</Text>
           <Text style={styles.productStock}>Stock: {item.stockQuantity}</Text>
@@ -116,14 +141,35 @@ export default function SellerProductsScreen() {
           style={styles.editButton}
           onPress={() => handleEditProduct(item.id)}
         >
-          <Ionicons name="create-outline" size={18} color="#FFF" />
+          <Ionicons name="create-outline" size={20} color="#FFF" />
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.deleteButton}
-          onPress={() => handleDeleteProduct(item.id, item.name)}
+          onPress={() => {
+            Alert.alert(
+              "Delete Product",
+              `Are you sure you want to delete "${item.name}"?`,
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await deleteDoc(doc(db, 'products', item.id));
+                      await fetchProducts();
+                      Alert.alert('Success', 'Product deleted');
+                    } catch (error) {
+                      Alert.alert('Error', 'Failed to delete');
+                    }
+                  },
+                },
+              ]
+            );
+          }}
         >
-          <Ionicons name="trash-outline" size={18} color="#FFF" />
+          <Ionicons name="trash-outline" size={20} color="#FFF" />
         </TouchableOpacity>
       </View>
     </View>
@@ -134,6 +180,9 @@ export default function SellerProductsScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Products</Text>
+          <TouchableOpacity style={styles.addButton} onPress={handleAddProduct}>
+            <Ionicons name="add" size={24} color="#FFF" />
+          </TouchableOpacity>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
@@ -167,7 +216,7 @@ export default function SellerProductsScreen() {
                 styles.categoryChip,
                 selectedCategory === category && styles.categoryChipActive,
               ]}
-              onPress={() => setSelectedCategory(category)}
+              onPress={() => handleCategoryChange(category)}
             >
               <Text
                 style={[
@@ -181,6 +230,11 @@ export default function SellerProductsScreen() {
           ))}
         </View>
       </ScrollView>
+
+      {/* Product Count */}
+      <Text style={styles.productCount}>
+        {filteredProducts.length} {filteredProducts.length === 1 ? 'product' : 'products'}
+      </Text>
 
       {/* Products List */}
       <FlatList
@@ -252,7 +306,7 @@ const styles = StyleSheet.create({
   },
   categoriesScroll: {
     maxHeight: 50,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   categoriesScrollContent: {
     alignItems: "center",
@@ -287,6 +341,12 @@ const styles = StyleSheet.create({
   categoryChipTextActive: {
     color: "#FFF",
   },
+  productCount: {
+    fontSize: 14,
+    color: "#8F796F",
+    paddingHorizontal: 20,
+    marginBottom: 12,
+  },
   productsList: {
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -302,7 +362,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
-    position: "relative",
   },
   productImagePlaceholder: {
     width: 80,
@@ -324,23 +383,24 @@ const styles = StyleSheet.create({
   },
   productDetails: {
     flex: 1,
+    marginRight: 90,
   },
   productName: {
     fontSize: 16,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 2,
+    marginBottom: 4,
   },
   productDescription: {
     fontSize: 13,
     color: "#8F796F",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   priceStockRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   productPrice: {
     fontSize: 16,
@@ -348,26 +408,26 @@ const styles = StyleSheet.create({
     color: "#C35822",
   },
   productStock: {
-    fontSize: 12,
+    fontSize: 14,
     color: "#8F796F",
   },
   categoryTag: {
     alignSelf: "flex-start",
     backgroundColor: "#F0F0F0",
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 4,
     borderRadius: 12,
   },
   categoryTagText: {
-    fontSize: 10,
+    fontSize: 11,
     color: "#666",
   },
   actionButtons: {
     position: "absolute",
-    bottom: 16,
     right: 16,
+    top: 16,
     flexDirection: "row",
-    gap: 8,
+    gap: 12,
   },
   editButton: {
     width: 36,
