@@ -334,14 +334,51 @@ export const useFirebaseProfile = () => {
   // Delete address
   const deleteAddress = async (addressId: string) => {
     try {
+      console.log("🗑️ Starting delete for address ID:", addressId);
+
+      const user = auth.currentUser;
+      if (!user) {
+        console.log("❌ No user logged in");
+        Alert.alert("Error", "You must be logged in to delete addresses");
+        return false;
+      }
+
+      console.log("✅ User logged in:", user.uid);
+
       const addressRef = doc(db, "addresses", addressId);
+
+      // Try to delete
+      console.log("📡 Sending delete request to Firebase...");
       await deleteDoc(addressRef);
 
-      Alert.alert("Success", "Address deleted successfully!");
+      console.log("✅ Delete successful!");
+
+      // Refresh the addresses list
       await fetchAddresses();
+      console.log("📋 Addresses refreshed, new count:", addresses.length);
+
+      Alert.alert("Success", "Address deleted successfully!");
       return true;
     } catch (error: any) {
-      Alert.alert("Error", error.message);
+      console.error("❌ Delete error:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+
+      if (error.code === "permission-denied") {
+        Alert.alert(
+          "Permission Denied",
+          "You don't have permission to delete this address. Check Firebase Security Rules.",
+        );
+      } else if (error.code === "not-found") {
+        Alert.alert(
+          "Error",
+          "Address not found. It may have already been deleted.",
+        );
+        // Refresh the list anyway
+        await fetchAddresses();
+      } else {
+        Alert.alert("Error", error.message || "Failed to delete address");
+      }
       return false;
     }
   };

@@ -1,8 +1,10 @@
 // app/(tabs)/addresses.tsx
 import { AddressData, useFirebaseProfile } from "@/hooks/useFirebaseProfile";
+import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import { deleteDoc, doc } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,15 +17,59 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddressesScreen() {
-  const { addresses, loading, setDefaultAddress, deleteAddress } =
-    useFirebaseProfile();
+  const {
+    addresses,
+    loading,
+    setDefaultAddress,
+    deleteAddress,
+    fetchAddresses,
+  } = useFirebaseProfile();
   const [showForm, setShowForm] = useState(false);
+
+  // Debug: Log all addresses in state
+  useEffect(() => {
+    console.log("=== ADDRESSES IN STATE ===");
+    addresses.forEach((addr) => {
+      console.log(`ID: ${addr.id}`);
+      console.log(`Name: ${addr.fullName}`);
+      console.log(`---`);
+    });
+  }, [addresses]);
+
+  // Test direct delete function
+  const testDirectDelete = async () => {
+    if (addresses.length === 0) {
+      Alert.alert("No addresses", "No addresses to test");
+      return;
+    }
+
+    const firstAddress = addresses[0];
+    console.log("🔧 TESTING DIRECT DELETE for:", firstAddress.id);
+    console.log("Address name:", firstAddress.fullName);
+
+    try {
+      const addressRef = doc(db, "addresses", firstAddress.id);
+      await deleteDoc(addressRef);
+      console.log("✅ TEST DELETE SUCCESSFUL!");
+
+      // Refresh the addresses
+      await fetchAddresses();
+
+      Alert.alert("Success", `Address "${firstAddress.fullName}" deleted!`);
+    } catch (error: any) {
+      console.error("❌ TEST DELETE FAILED:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+      Alert.alert("Test Failed", `${error.code}: ${error.message}`);
+    }
+  };
 
   const handleSetDefault = async (id: string) => {
     await setDefaultAddress(id);
   };
 
   const handleDelete = (id: string) => {
+    console.log("🗑️ Delete button pressed for address ID:", id);
     Alert.alert(
       "Delete Address",
       "Are you sure you want to delete this address?",
@@ -31,7 +77,11 @@ export default function AddressesScreen() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
-          onPress: () => deleteAddress(id),
+          onPress: async () => {
+            console.log("✅ Confirmed delete for:", id);
+            const result = await deleteAddress(id);
+            console.log("Delete result:", result ? "SUCCESS" : "FAILED");
+          },
           style: "destructive",
         },
       ],
@@ -97,9 +147,17 @@ export default function AddressesScreen() {
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Shipping Addresses</Text>
-        <TouchableOpacity onPress={() => router.push("/(tabs)/add-address")}>
-          <Ionicons name="add-circle" size={28} color="#C35822" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <TouchableOpacity
+            onPress={testDirectDelete}
+            style={styles.testButton}
+          >
+            <Text style={styles.testButtonText}>TEST</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/(tabs)/add-address")}>
+            <Ionicons name="add-circle" size={28} color="#C35822" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -124,7 +182,6 @@ export default function AddressesScreen() {
   );
 }
 
-// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -152,6 +209,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#32221B",
+  },
+  testButton: {
+    backgroundColor: "#FF9800",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 5,
+  },
+  testButtonText: {
+    color: "#FFF",
+    fontSize: 12,
+    fontWeight: "bold",
   },
   list: {
     padding: 20,
