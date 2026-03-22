@@ -1,7 +1,15 @@
 // app/(seller)/products.tsx
-import { auth, db } from '@/lib/firebase';
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  orderBy,
+  query,
+} from "firebase/firestore";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,9 +24,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
 
-const CATEGORIES = ["All", "Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
+const CATEGORIES = [
+  "All",
+  "Specials",
+  "Spicy",
+  "Seafood",
+  "Meat",
+  "Bottled",
+  "Dried",
+];
 
 export default function SellerProductsScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -26,54 +41,89 @@ export default function SellerProductsScreen() {
   const [products, setProducts] = useState<any[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
-  // Fetch products from Firebase
+  // Fetch ALL products from Firebase
   const fetchProducts = async () => {
     setLoading(true);
     try {
       const user = auth.currentUser;
       if (!user) {
+        console.log("No user logged in");
         setProducts([]);
         setFilteredProducts([]);
         setLoading(false);
         return;
       }
-      
-      const productsRef = collection(db, 'products');
-      const q = query(productsRef, where('sellerId', '==', user.uid));
-      
+
+      console.log("Fetching ALL products...");
+
+      const productsRef = collection(db, "products");
+      const q = query(productsRef, orderBy("createdAt", "desc"));
+
       const querySnapshot = await getDocs(q);
       const productsList: any[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         productsList.push({ id: doc.id, ...doc.data() });
       });
-      
+
+      console.log("Products fetched:", productsList.length);
       setProducts(productsList);
-      // Apply filter after loading
-      filterProductsByCategory(selectedCategory, productsList);
+
+      // Apply filter
+      if (selectedCategory === "All") {
+        setFilteredProducts(productsList);
+      } else {
+        const filtered = productsList.filter(
+          (product) => product.category === selectedCategory,
+        );
+        setFilteredProducts(filtered);
+      }
     } catch (error) {
-      console.error('Error fetching products:', error);
-      Alert.alert('Error', 'Failed to load products');
+      console.error("Error fetching products:", error);
+      Alert.alert("Error", "Failed to load products");
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Filter products by category
-  const filterProductsByCategory = (category: string, productList: any[] = products) => {
-    if (category === "All") {
-      setFilteredProducts(productList);
-    } else {
-      const filtered = productList.filter(product => product.category === category);
-      setFilteredProducts(filtered);
     }
   };
 
   // Handle category change
   const handleCategoryChange = (category: string) => {
     setSelectedCategory(category);
-    filterProductsByCategory(category);
+    if (category === "All") {
+      setFilteredProducts(products);
+    } else {
+      const filtered = products.filter(
+        (product) => product.category === category,
+      );
+      setFilteredProducts(filtered);
+    }
+  };
+
+  // Delete product function
+  const deleteProduct = async (productId: string, productName: string) => {
+    if (deleting) return;
+
+    setDeleting(true);
+    try {
+      console.log("🗑️ Deleting product:", productName);
+
+      const productRef = doc(db, "products", productId);
+      await deleteDoc(productRef);
+
+      console.log("✅ Product deleted:", productName);
+
+      // Refresh the list
+      await fetchProducts();
+
+      Alert.alert("Success", `"${productName}" has been deleted`);
+    } catch (error: any) {
+      console.error("❌ Delete error:", error);
+      Alert.alert("Error", error.message || "Failed to delete product");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // Fetch products when screen loads
@@ -84,8 +134,9 @@ export default function SellerProductsScreen() {
   // Fetch products when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      console.log("Screen focused, refreshing products...");
       fetchProducts();
-    }, [])
+    }, []),
   );
 
   const handleAddProduct = () => {
@@ -95,7 +146,7 @@ export default function SellerProductsScreen() {
   const handleEditProduct = (productId: string) => {
     router.push({
       pathname: "/(seller)/product-manage",
-      params: { productId }
+      params: { productId },
     });
   };
 
@@ -118,15 +169,21 @@ export default function SellerProductsScreen() {
 
       {/* Product Details */}
       <View style={styles.productDetails}>
-        <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.productName} numberOfLines={1}>
+          {item.name}
+        </Text>
         <Text style={styles.productDescription} numberOfLines={2}>
           {item.description || "No description"}
         </Text>
 
         {/* Price and Stock Row */}
         <View style={styles.priceStockRow}>
-          <Text style={styles.productPrice}>₱{item.price.toFixed(2)}</Text>
-          <Text style={styles.productStock}>Stock: {item.stockQuantity}</Text>
+          <Text style={styles.productPrice}>
+            ₱{item.price?.toFixed(2) || "0.00"}
+          </Text>
+          <Text style={styles.productStock}>
+            Stock: {item.stockQuantity || 0}
+          </Text>
         </View>
 
         {/* Category Tag */}
@@ -140,12 +197,13 @@ export default function SellerProductsScreen() {
         <TouchableOpacity
           style={styles.editButton}
           onPress={() => handleEditProduct(item.id)}
+          disabled={deleting}
         >
           <Ionicons name="create-outline" size={20} color="#FFF" />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.deleteButton}
+          style={[styles.deleteButton, deleting && styles.disabledButton]}
           onPress={() => {
             Alert.alert(
               "Delete Product",
@@ -155,19 +213,12 @@ export default function SellerProductsScreen() {
                 {
                   text: "Delete",
                   style: "destructive",
-                  onPress: async () => {
-                    try {
-                      await deleteDoc(doc(db, 'products', item.id));
-                      await fetchProducts();
-                      Alert.alert('Success', 'Product deleted');
-                    } catch (error) {
-                      Alert.alert('Error', 'Failed to delete');
-                    }
-                  },
+                  onPress: () => deleteProduct(item.id, item.name),
                 },
-              ]
+              ],
             );
           }}
+          disabled={deleting}
         >
           <Ionicons name="trash-outline" size={20} color="#FFF" />
         </TouchableOpacity>
@@ -186,6 +237,7 @@ export default function SellerProductsScreen() {
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
+          <Text style={styles.loadingText}>Loading your products...</Text>
         </View>
       </SafeAreaView>
     );
@@ -221,7 +273,8 @@ export default function SellerProductsScreen() {
               <Text
                 style={[
                   styles.categoryChipText,
-                  selectedCategory === category && styles.categoryChipTextActive,
+                  selectedCategory === category &&
+                    styles.categoryChipTextActive,
                 ]}
               >
                 {category}
@@ -233,7 +286,8 @@ export default function SellerProductsScreen() {
 
       {/* Product Count */}
       <Text style={styles.productCount}>
-        {filteredProducts.length} {filteredProducts.length === 1 ? 'product' : 'products'}
+        {filteredProducts.length}{" "}
+        {filteredProducts.length === 1 ? "product" : "products"} found
       </Text>
 
       {/* Products List */}
@@ -254,12 +308,17 @@ export default function SellerProductsScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="cube-outline" size={60} color="#E0DAD1" />
-            <Text style={styles.emptyText}>No products found</Text>
+            <Text style={styles.emptyText}>No products yet</Text>
+            <Text style={styles.emptySubText}>
+              Start selling by adding your first product!
+            </Text>
             <TouchableOpacity
               style={styles.addFirstButton}
               onPress={handleAddProduct}
             >
-              <Text style={styles.addFirstButtonText}>Add Your First Product</Text>
+              <Text style={styles.addFirstButtonText}>
+                Add Your First Product
+              </Text>
             </TouchableOpacity>
           </View>
         }
@@ -303,6 +362,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#8F796F",
   },
   categoriesScroll: {
     maxHeight: 50,
@@ -455,15 +519,24 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  disabledButton: {
+    opacity: 0.5,
+  },
   emptyContainer: {
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 60,
   },
   emptyText: {
-    fontSize: 16,
-    color: "#8F796F",
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#32221B",
     marginTop: 12,
+    marginBottom: 8,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: "#8F796F",
     marginBottom: 20,
   },
   addFirstButton: {

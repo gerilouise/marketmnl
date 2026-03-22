@@ -1,18 +1,16 @@
 // app/(seller)/dashboard.tsx
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  FlatList,
-  Alert,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import React, { useState } from "react";
+import {
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 // Mock data for seller dashboard
 const SELLER_STATS = {
@@ -30,7 +28,7 @@ const RECENT_ORDERS = [
     product: "Authentic Bottled Pastil",
     quantity: 2,
     status: "Pending",
-    total: 250.00,
+    total: 250.0,
     date: "2024-02-28",
   },
   {
@@ -39,7 +37,7 @@ const RECENT_ORDERS = [
     product: "Authentic Bottled Pastil",
     quantity: 2,
     status: "Confirmed",
-    total: 250.00,
+    total: 250.0,
     date: "2024-02-27",
   },
   {
@@ -48,7 +46,7 @@ const RECENT_ORDERS = [
     product: "Spicy Tuyo",
     quantity: 3,
     status: "Shipped",
-    total: 750.00,
+    total: 750.0,
     date: "2024-02-26",
   },
 ];
@@ -69,32 +67,46 @@ export default function SellerDashboardScreen() {
   };
 
   const getStatusColor = (status: string) => {
-    switch(status) {
-      case "Pending": return "#FFA500";
-      case "Confirmed": return "#4CAF50";
-      case "Shipped": return "#2196F3";
-      case "Delivered": return "#9C27B0";
-      default: return "#666";
+    switch (status) {
+      case "Pending":
+        return "#FFA500";
+      case "Confirmed":
+        return "#4CAF50";
+      case "Shipped":
+        return "#2196F3";
+      case "Delivered":
+        return "#9C27B0";
+      default:
+        return "#666";
     }
   };
 
-  const renderOrderItem = ({ item }: { item: typeof RECENT_ORDERS[0] }) => (
-    <TouchableOpacity 
+  const renderOrderItem = ({ item }: { item: (typeof RECENT_ORDERS)[0] }) => (
+    <TouchableOpacity
       style={styles.orderCard}
       onPress={() => handleViewOrderDetails(item.id)}
     >
       <View style={styles.orderHeader}>
         <Text style={styles.orderId}>{item.id}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + "20" }]}>
-          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: getStatusColor(item.status) + "20" },
+          ]}
+        >
+          <Text
+            style={[styles.statusText, { color: getStatusColor(item.status) }]}
+          >
             {item.status}
           </Text>
         </View>
       </View>
 
       <Text style={styles.customerName}>{item.customer}</Text>
-      <Text style={styles.productName}>{item.product} x{item.quantity}</Text>
-      
+      <Text style={styles.productName}>
+        {item.product} x{item.quantity}
+      </Text>
+
       <View style={styles.orderFooter}>
         <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
         <Ionicons name="chevron-forward" size={20} color="#8F796F" />
@@ -156,12 +168,18 @@ export default function SellerDashboardScreen() {
 
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.addProductButton} onPress={handleAddProduct}>
+          <TouchableOpacity
+            style={styles.addProductButton}
+            onPress={handleAddProduct}
+          >
             <Ionicons name="add-circle-outline" size={20} color="#FFF" />
             <Text style={styles.addProductText}>Add Product</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.viewOrdersButton} onPress={handleViewOrders}>
+          <TouchableOpacity
+            style={styles.viewOrdersButton}
+            onPress={handleViewOrders}
+          >
             <Ionicons name="eye-outline" size={20} color="#C35822" />
             <Text style={styles.viewOrdersText}>View Orders</Text>
           </TouchableOpacity>
@@ -190,9 +208,9 @@ export default function SellerDashboardScreen() {
       </ScrollView>
 
       {/* AI Chatbot Floating Button */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.chatButton}
-        onPress={() => router.push('/chat')}
+        onPress={() => router.push("/chat")}
         activeOpacity={0.8}
       >
         <View style={styles.chatButtonInner}>
@@ -422,5 +440,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 8,
-  }
+  },
 });

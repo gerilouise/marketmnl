@@ -169,8 +169,9 @@ export const useFirebaseAuth = () => {
 
       Alert.alert("Success", "Logged in successfully!");
 
+      // FIX: Redirect to specific tab screens
       if (userType === "seller") {
-        router.replace("/(seller)");
+        router.replace("/(seller)/dashboard");
       } else {
         router.replace("/(tabs)");
       }

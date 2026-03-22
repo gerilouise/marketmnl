@@ -9,7 +9,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   setDoc,
   Timestamp,
@@ -169,18 +168,18 @@ export const useFirebaseProfile = () => {
     }
   };
 
-  // Fetch addresses
+  // Fetch addresses - FIXED VERSION (no index required)
   const fetchAddresses = async () => {
     try {
       const user = auth.currentUser;
       if (!user) return;
 
+      // Simple query WITHOUT orderBy to avoid index error
       const addressesRef = collection(db, "addresses");
       const q = query(
         addressesRef,
         where("userId", "==", user.uid),
-        orderBy("isDefault", "desc"),
-        orderBy("createdAt", "desc"),
+        // REMOVED: orderBy("isDefault", "desc"), orderBy("createdAt", "desc")
       );
 
       const querySnapshot = await getDocs(q);
@@ -202,6 +201,13 @@ export const useFirebaseProfile = () => {
           label: data.label || "Home",
           createdAt: data.createdAt?.toDate() || new Date(),
         });
+      });
+
+      // Sort manually in JavaScript (default first, then newest first)
+      addressesList.sort((a, b) => {
+        if (a.isDefault && !b.isDefault) return -1;
+        if (!a.isDefault && b.isDefault) return 1;
+        return b.createdAt.getTime() - a.createdAt.getTime();
       });
 
       setAddresses(addressesList);

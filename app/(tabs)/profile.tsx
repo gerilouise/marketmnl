@@ -19,12 +19,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const { profile, addresses, loading, fetchProfile } = useFirebaseProfile();
+  const { profile, addresses, loading, fetchProfile, fetchAddresses } =
+    useFirebaseProfile();
   const { logout } = useFirebaseAuth();
 
   useEffect(() => {
-    fetchProfile();
+    loadData();
   }, []);
+
+  const loadData = async () => {
+    await fetchProfile();
+    await fetchAddresses(); // This is the key fix - fetch addresses!
+  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -111,7 +117,6 @@ export default function ProfileScreen() {
 
         <View style={styles.profileCard}>
           <View style={styles.profileImageContainer}>
-            {/* This is the only change - shows photo if available, otherwise shows icon */}
             {profile?.photoURL ? (
               <Image
                 source={{ uri: profile.photoURL }}
@@ -187,7 +192,8 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {defaultAddress && (
+        {/* Default Address Section - Now shows if there's a default address */}
+        {defaultAddress ? (
           <TouchableOpacity
             style={styles.defaultAddressCard}
             onPress={() => navigateTo("addresses")}
@@ -216,6 +222,23 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.noAddressCard}
+            onPress={() => navigateTo("addresses")}
+          >
+            <Ionicons name="location-outline" size={32} color="#C35822" />
+            <Text style={styles.noAddressTitle}>No Address Added Yet</Text>
+            <Text style={styles.noAddressText}>
+              Add your first shipping address to start ordering
+            </Text>
+            <TouchableOpacity
+              style={styles.addAddressButton}
+              onPress={() => router.push("/(tabs)/add-address")}
+            >
+              <Text style={styles.addAddressButtonText}>Add Address</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
         )}
 
         <View style={styles.quickActions}>
@@ -242,7 +265,7 @@ export default function ProfileScreen() {
           <MenuItem
             icon="location-outline"
             title="Shipping Address"
-            subtitle={`${profile?.addressesCount || 0} saved addresses`}
+            subtitle={`${addresses?.length || 0} saved addresses`}
             onPress={() => navigateTo("addresses")}
           />
 
@@ -340,7 +363,6 @@ const styles = StyleSheet.create({
     position: "relative",
     marginBottom: 12,
   },
-  // New style for actual profile image
   profileImage: {
     width: 80,
     height: 80,
@@ -495,6 +517,41 @@ const styles = StyleSheet.create({
     color: "#C35822",
     fontSize: 12,
     fontWeight: "500",
+  },
+  noAddressCard: {
+    backgroundColor: "#FFF",
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    borderStyle: "dashed",
+  },
+  noAddressTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  noAddressText: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  addAddressButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 25,
+  },
+  addAddressButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "600",
   },
   quickActions: {
     flexDirection: "row",
