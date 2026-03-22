@@ -1,7 +1,17 @@
 // app/(tabs)/browse.tsx
-import { auth, db } from '@/lib/firebase';
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,9 +25,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { collection, getDocs, query, where, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 
-const CATEGORIES = ["All", "Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
+const CATEGORIES = [
+  "All",
+  "Specials",
+  "Spicy",
+  "Seafood",
+  "Meat",
+  "Bottled",
+  "Dried",
+];
 
 export default function BrowseScreen() {
   const params = useLocalSearchParams();
@@ -37,19 +54,19 @@ export default function BrowseScreen() {
       setWishlist(new Set());
       return;
     }
-    
+
     try {
-      const wishlistRef = collection(db, 'wishlists');
-      const q = query(wishlistRef, where('userId', '==', user.uid));
+      const wishlistRef = collection(db, "wishlists");
+      const q = query(wishlistRef, where("userId", "==", user.uid));
       const querySnapshot = await getDocs(q);
       const wishlistSet = new Set<string>();
       querySnapshot.forEach((doc) => {
         wishlistSet.add(doc.data().productId);
       });
       setWishlist(wishlistSet);
-      console.log('Wishlist loaded:', wishlistSet.size, 'items');
+      console.log("Wishlist loaded:", wishlistSet.size, "items");
     } catch (error) {
-      console.error('Error loading wishlist:', error);
+      console.error("Error loading wishlist:", error);
     }
   };
 
@@ -57,7 +74,7 @@ export default function BrowseScreen() {
   const loadProducts = async () => {
     setLoading(true);
     try {
-      const productsRef = collection(db, 'products');
+      const productsRef = collection(db, "products");
       const querySnapshot = await getDocs(productsRef);
       const productsList: any[] = [];
       querySnapshot.forEach((doc) => {
@@ -65,33 +82,40 @@ export default function BrowseScreen() {
       });
       setAllProducts(productsList);
       filterProducts(selectedCategory, searchQuery, sortOrder, productsList);
-      console.log('Products loaded:', productsList.length);
+      console.log("Products loaded:", productsList.length);
     } catch (error) {
-      console.error('Error loading products:', error);
-      Alert.alert('Error', 'Failed to load products');
+      console.error("Error loading products:", error);
+      Alert.alert("Error", "Failed to load products");
     } finally {
       setLoading(false);
     }
   };
 
   // Filter products based on category, search, and sort
-  const filterProducts = (category: string, search: string, sort: string, productsList: any[] = allProducts) => {
+  const filterProducts = (
+    category: string,
+    search: string,
+    sort: string,
+    productsList: any[] = allProducts,
+  ) => {
     let filtered = [...productsList];
-    
+
     // Apply category filter
     if (category !== "All") {
-      filtered = filtered.filter(product => product.category === category);
+      filtered = filtered.filter((product) => product.category === category);
     }
-    
+
     // Apply search filter
     if (search.trim() !== "") {
       const searchLower = search.toLowerCase();
-      filtered = filtered.filter(product => 
-        product.name.toLowerCase().includes(searchLower) ||
-        (product.description && product.description.toLowerCase().includes(searchLower))
+      filtered = filtered.filter(
+        (product) =>
+          product.name.toLowerCase().includes(searchLower) ||
+          (product.description &&
+            product.description.toLowerCase().includes(searchLower)),
       );
     }
-    
+
     // Apply sorting
     filtered.sort((a, b) => {
       if (sort === "asc") {
@@ -100,7 +124,7 @@ export default function BrowseScreen() {
         return b.price - a.price;
       }
     });
-    
+
     setFilteredProducts(filtered);
   };
 
@@ -129,26 +153,26 @@ export default function BrowseScreen() {
     if (!user) {
       Alert.alert("Login Required", "Please log in to add items to wishlist", [
         { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") }
+        { text: "Login", onPress: () => router.push("/auth/login") },
       ]);
       return;
     }
 
     try {
-      const wishlistRef = collection(db, 'wishlists');
+      const wishlistRef = collection(db, "wishlists");
       const itemId = `${user.uid}_${productId}`;
       const docRef = doc(wishlistRef, itemId);
       const docSnap = await getDoc(docRef);
-      
+
       if (docSnap.exists()) {
         // Remove from wishlist
         await deleteDoc(docRef);
-        setWishlist(prev => {
+        setWishlist((prev) => {
           const newSet = new Set(prev);
           newSet.delete(productId);
           return newSet;
         });
-        Alert.alert('Removed', `${product.name} removed from wishlist`);
+        Alert.alert("Removed", `${product.name} removed from wishlist`);
       } else {
         // Add to wishlist
         await setDoc(docRef, {
@@ -157,16 +181,25 @@ export default function BrowseScreen() {
           productId: productId,
           productName: product.name,
           productPrice: product.price,
-          sellerName: product.sellerName || 'MarketMNL',
+          sellerName: product.sellerName || "MarketMNL",
           productImage: product.imageUrl || null,
           addedAt: new Date(),
         });
-        setWishlist(prev => new Set(prev).add(productId));
-        Alert.alert('Added', `${product.name} added to wishlist`);
+        setWishlist((prev) => new Set(prev).add(productId));
+
+        // ✅ MOVED THIS INSIDE THE FUNCTION
+        console.log("✅ Item added to wishlist:", {
+          productId: productId,
+          productName: product.name,
+          userId: user.uid,
+          itemId: itemId,
+        });
+
+        Alert.alert("Added", `${product.name} added to wishlist`);
       }
     } catch (error) {
-      console.error('Error toggling wishlist:', error);
-      Alert.alert('Error', 'Failed to update wishlist');
+      console.error("Error toggling wishlist:", error);
+      Alert.alert("Error", "Failed to update wishlist");
     }
   };
 
@@ -205,16 +238,20 @@ export default function BrowseScreen() {
             toggleWishlist(item.id, item);
           }}
         >
-          <Ionicons 
-            name={wishlist.has(item.id) ? "heart" : "heart-outline"} 
-            size={18} 
-            color={wishlist.has(item.id) ? "#C35822" : "#8F796F"} 
+          <Ionicons
+            name={wishlist.has(item.id) ? "heart" : "heart-outline"}
+            size={18}
+            color={wishlist.has(item.id) ? "#C35822" : "#8F796F"}
           />
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
-      <Text style={styles.sellerName} numberOfLines={1}>{item.sellerName || "MarketMNL"}</Text>
+      <Text style={styles.productName} numberOfLines={1}>
+        {item.name}
+      </Text>
+      <Text style={styles.sellerName} numberOfLines={1}>
+        {item.sellerName || "MarketMNL"}
+      </Text>
 
       <View style={styles.priceRow}>
         <Text style={styles.price}>₱{item.price}</Text>
@@ -249,7 +286,10 @@ export default function BrowseScreen() {
             onChangeText={handleSearch}
           />
         </View>
-        <TouchableOpacity style={styles.sortButton} onPress={() => setShowSortOptions(!showSortOptions)}>
+        <TouchableOpacity
+          style={styles.sortButton}
+          onPress={() => setShowSortOptions(!showSortOptions)}
+        >
           <Ionicons name="options-outline" size={20} color="#32221B" />
         </TouchableOpacity>
       </View>
@@ -257,23 +297,43 @@ export default function BrowseScreen() {
       {/* Sort Options */}
       {showSortOptions && (
         <View style={styles.sortDropdown}>
-          <TouchableOpacity 
-            style={[styles.sortOption, sortOrder === "asc" && styles.sortOptionActive]} 
+          <TouchableOpacity
+            style={[
+              styles.sortOption,
+              sortOrder === "asc" && styles.sortOptionActive,
+            ]}
             onPress={() => handleSortChange("asc")}
           >
-            <Text style={[styles.sortOptionText, sortOrder === "asc" && styles.sortOptionTextActive]}>
+            <Text
+              style={[
+                styles.sortOptionText,
+                sortOrder === "asc" && styles.sortOptionTextActive,
+              ]}
+            >
               Price: Low to High
             </Text>
-            {sortOrder === "asc" && <Ionicons name="checkmark" size={16} color="#C35822" />}
+            {sortOrder === "asc" && (
+              <Ionicons name="checkmark" size={16} color="#C35822" />
+            )}
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.sortOption, sortOrder === "desc" && styles.sortOptionActive]} 
+          <TouchableOpacity
+            style={[
+              styles.sortOption,
+              sortOrder === "desc" && styles.sortOptionActive,
+            ]}
             onPress={() => handleSortChange("desc")}
           >
-            <Text style={[styles.sortOptionText, sortOrder === "desc" && styles.sortOptionTextActive]}>
+            <Text
+              style={[
+                styles.sortOptionText,
+                sortOrder === "desc" && styles.sortOptionTextActive,
+              ]}
+            >
               Price: High to Low
             </Text>
-            {sortOrder === "desc" && <Ionicons name="checkmark" size={16} color="#C35822" />}
+            {sortOrder === "desc" && (
+              <Ionicons name="checkmark" size={16} color="#C35822" />
+            )}
           </TouchableOpacity>
         </View>
       )}
@@ -308,7 +368,9 @@ export default function BrowseScreen() {
       </ScrollView>
 
       {/* Product Count */}
-      <Text style={styles.productCount}>{filteredProducts.length} products found</Text>
+      <Text style={styles.productCount}>
+        {filteredProducts.length} products found
+      </Text>
 
       {/* Product Grid */}
       <FlatList

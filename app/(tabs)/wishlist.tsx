@@ -1,29 +1,28 @@
 // app/(tabs)/wishlist.tsx
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { auth, db } from '@/lib/firebase';
-import { 
-  collection, 
-  doc, 
-  deleteDoc, 
-  query, 
-  where, 
+import {
+  collection,
+  deleteDoc,
+  doc,
   getDocs,
-  orderBy 
-} from 'firebase/firestore';
+  query,
+  where,
+} from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface WishlistItem {
   id: string;
@@ -51,24 +50,42 @@ export default function WishlistScreen() {
         return;
       }
 
-      const wishlistRef = collection(db, 'wishlists');
+      console.log("Loading wishlist for user:", user.uid);
+
+      const wishlistRef = collection(db, "wishlists");
+      // REMOVED orderBy to avoid index requirement
       const q = query(
-        wishlistRef, 
-        where('userId', '==', user.uid),
-        orderBy('addedAt', 'desc')
+        wishlistRef,
+        where("userId", "==", user.uid),
+        // orderBy('addedAt', 'desc') - REMOVED THIS LINE
       );
-      
+
       const querySnapshot = await getDocs(q);
       const items: WishlistItem[] = [];
       querySnapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() } as WishlistItem);
+        const data = doc.data();
+        items.push({
+          id: doc.id,
+          productId: data.productId,
+          userId: data.userId,
+          productName: data.productName,
+          productPrice: data.productPrice,
+          productImage: data.productImage,
+          sellerName: data.sellerName,
+          addedAt: data.addedAt,
+        } as WishlistItem);
       });
-      
+
+      // Sort manually in JavaScript instead
+      items.sort((a, b) => {
+        return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
+      });
+
       setWishlistItems(items);
-      console.log('Wishlist loaded:', items.length, 'items');
+      console.log("Wishlist loaded:", items.length, "items");
     } catch (error) {
-      console.error('Error loading wishlist:', error);
-      Alert.alert('Error', 'Failed to load wishlist');
+      console.error("Error loading wishlist:", error);
+      Alert.alert("Error", "Failed to load wishlist");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -79,11 +96,14 @@ export default function WishlistScreen() {
   useFocusEffect(
     useCallback(() => {
       loadWishlist();
-    }, [])
+    }, []),
   );
 
   // Remove from wishlist
-  const handleRemoveFromWishlist = async (productId: string, productName: string) => {
+  const handleRemoveFromWishlist = async (
+    productId: string,
+    productName: string,
+  ) => {
     Alert.alert(
       "Remove from Wishlist",
       `Remove "${productName}" from your wishlist?`,
@@ -98,30 +118,31 @@ export default function WishlistScreen() {
               if (!user) return;
 
               const itemId = `${user.uid}_${productId}`;
-              await deleteDoc(doc(db, 'wishlists', itemId));
-              
-              setWishlistItems(prev => prev.filter(item => item.productId !== productId));
-              Alert.alert('Success', 'Item removed from wishlist');
+              await deleteDoc(doc(db, "wishlists", itemId));
+
+              // Refresh the list after deletion
+              await loadWishlist();
+              Alert.alert("Success", "Item removed from wishlist");
             } catch (error) {
-              console.error('Error removing from wishlist:', error);
-              Alert.alert('Error', 'Failed to remove item');
+              console.error("Error removing from wishlist:", error);
+              Alert.alert("Error", "Failed to remove item");
             }
           },
         },
-      ]
+      ],
     );
   };
 
   // Add to cart (placeholder)
   const handleAddToCart = (item: WishlistItem) => {
-    Alert.alert(
-      "Add to Cart",
-      `Add ${item.productName} to your cart?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Add", onPress: () => Alert.alert("Success", `${item.productName} added to cart`) }
-      ]
-    );
+    Alert.alert("Add to Cart", `Add ${item.productName} to your cart?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Add",
+        onPress: () =>
+          Alert.alert("Success", `${item.productName} added to cart`),
+      },
+    ]);
   };
 
   // Add all to cart
@@ -132,8 +153,11 @@ export default function WishlistScreen() {
       `Add all ${wishlistItems.length} items to your cart?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Add All", onPress: () => Alert.alert("Success", `All items added to cart`) }
-      ]
+        {
+          text: "Add All",
+          onPress: () => Alert.alert("Success", `All items added to cart`),
+        },
+      ],
     );
   };
 
@@ -149,22 +173,29 @@ export default function WishlistScreen() {
   };
 
   const renderItem = ({ item }: { item: WishlistItem }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.wishlistItem}
       onPress={() => navigateToProduct(item.productId)}
       activeOpacity={0.7}
     >
       <View style={styles.imagePlaceholder}>
         {item.productImage ? (
-          <Image source={{ uri: item.productImage }} style={styles.productImage} />
+          <Image
+            source={{ uri: item.productImage }}
+            style={styles.productImage}
+          />
         ) : (
           <Ionicons name="image-outline" size={30} color="#CCC" />
         )}
       </View>
 
       <View style={styles.itemDetails}>
-        <Text style={styles.itemName} numberOfLines={1}>{item.productName}</Text>
-        <Text style={styles.itemSeller} numberOfLines={1}>{item.sellerName}</Text>
+        <Text style={styles.itemName} numberOfLines={1}>
+          {item.productName}
+        </Text>
+        <Text style={styles.itemSeller} numberOfLines={1}>
+          {item.sellerName}
+        </Text>
         <Text style={styles.itemPrice}>₱{item.productPrice}</Text>
       </View>
 
@@ -193,7 +224,8 @@ export default function WishlistScreen() {
   );
 
   // Check if user is logged in
-  if (!auth.currentUser && !loading) {
+  const user = auth.currentUser;
+  if (!user && !loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
@@ -201,10 +233,12 @@ export default function WishlistScreen() {
         </View>
         <View style={styles.notLoggedInContainer}>
           <Ionicons name="heart-outline" size={60} color="#E0DAD1" />
-          <Text style={styles.notLoggedInText}>Please log in to view your wishlist</Text>
+          <Text style={styles.notLoggedInText}>
+            Please log in to view your wishlist
+          </Text>
           <TouchableOpacity
             style={styles.loginButton}
-            onPress={() => router.push('/auth/login')}
+            onPress={() => router.push("/auth/login")}
           >
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
@@ -231,7 +265,9 @@ export default function WishlistScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>My Wishlist</Text>
-          <Text style={styles.itemCount}>{wishlistItems.length} saved items</Text>
+          <Text style={styles.itemCount}>
+            {wishlistItems.length} saved items
+          </Text>
         </View>
       </View>
 
@@ -252,7 +288,7 @@ export default function WishlistScreen() {
         ListFooterComponent={
           wishlistItems.length > 0 ? (
             <View style={styles.footerContainer}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.addAllButton}
                 onPress={handleAddAllToCart}
               >
@@ -270,7 +306,7 @@ export default function WishlistScreen() {
             <Text style={styles.emptyWishlistText}>Your wishlist is empty</Text>
             <TouchableOpacity
               style={styles.shopButton}
-              onPress={() => router.push('/(tabs)/browse')}
+              onPress={() => router.push("/(tabs)/browse")}
             >
               <Text style={styles.shopButtonText}>Start Shopping</Text>
             </TouchableOpacity>
@@ -303,19 +339,19 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   notLoggedInContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 20,
   },
   notLoggedInText: {
     fontSize: 16,
     color: "#8F796F",
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 12,
     marginBottom: 20,
   },
