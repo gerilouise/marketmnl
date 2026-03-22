@@ -1,19 +1,20 @@
 // app/checkout/index.tsx
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  Alert,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-// Mock data - would come from cart and user profile in real app
+// Mock cart items - replace with actual cart data from your cart screen
 const MOCK_ORDER_ITEMS = [
   {
     id: "1",
@@ -35,32 +36,54 @@ const MOCK_ORDER_ITEMS = [
   },
 ];
 
-const MOCK_ADDRESS = {
-  name: "Ryza Flores",
-  phone: "+63 906 561 6297",
-  street: "11 Chico St., Brgy. Quirino 2-A",
-  city: "Quezon City",
-  province: "Metro Manila",
-  zipCode: "1102",
-};
-
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Credit Card"];
 
 export default function CheckoutScreen() {
+  const { addresses, loading, fetchAddresses } = useFirebaseProfile();
+  const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [selectedPayment, setSelectedPayment] = useState("Cash on Delivery");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const calculateSubtotal = () => {
-    return MOCK_ORDER_ITEMS.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  useEffect(() => {
+    loadAddresses();
+  }, []);
+
+  const loadAddresses = async () => {
+    await fetchAddresses();
   };
 
-  const shippingFee = 100;
+  // Set default address when addresses load
+  useEffect(() => {
+    if (addresses.length > 0) {
+      const defaultAddr = addresses.find((addr) => addr.isDefault);
+      if (defaultAddr) {
+        setSelectedAddress(defaultAddr);
+      } else {
+        setSelectedAddress(addresses[0]);
+      }
+    }
+  }, [addresses]);
+
+  const calculateSubtotal = () => {
+    return MOCK_ORDER_ITEMS.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0,
+    );
+  };
+
+  const shippingFee = 50;
   const subtotal = calculateSubtotal();
   const total = subtotal + shippingFee;
 
   const handlePlaceOrder = () => {
+    if (!selectedAddress) {
+      Alert.alert("No Address", "Please add a shipping address first");
+      router.push("/(tabs)/addresses");
+      return;
+    }
+
     setIsProcessing(true);
-    
+
     // Simulate order processing
     setTimeout(() => {
       setIsProcessing(false);
@@ -71,7 +94,6 @@ export default function CheckoutScreen() {
           {
             text: "View Orders",
             onPress: () => {
-              // Navigate to orders screen (you can create this later)
               router.push("/(tabs)/profile");
             },
           },
@@ -79,39 +101,69 @@ export default function CheckoutScreen() {
             text: "Continue Shopping",
             onPress: () => router.push("/(tabs)"),
           },
-        ]
+        ],
       );
     }, 1500);
   };
 
-  const formatAddress = () => {
-    return `${MOCK_ADDRESS.street}, ${MOCK_ADDRESS.city}, ${MOCK_ADDRESS.province} ${MOCK_ADDRESS.zipCode}`;
+  const navigateToAddresses = () => {
+    router.push("/(tabs)/addresses");
   };
+
+  const formatAddress = (address: any) => {
+    if (!address) return "";
+    return `${address.street}, ${address.barangay}, ${address.city}, ${address.province} ${address.zipCode}`;
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Checkout</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Checkout</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
         {/* Order Summary Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
-          
+
           {MOCK_ORDER_ITEMS.map((item, index) => (
             <View key={item.id} style={styles.orderItem}>
               <View style={styles.orderItemLeft}>
                 <Text style={styles.orderItemName}>{item.name}</Text>
-                <Text style={styles.orderItemQuantity}>Qty: {item.quantity}</Text>
+                <Text style={styles.orderItemQuantity}>
+                  Qty: {item.quantity}
+                </Text>
               </View>
               <Text style={styles.orderItemPrice}>₱{item.price}</Text>
             </View>
@@ -121,26 +173,51 @@ export default function CheckoutScreen() {
         {/* Delivery Address Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Address</Text>
-          
-          <View style={styles.addressCard}>
-            <View style={styles.addressHeader}>
-              <Ionicons name="location-outline" size={20} color="#C35822" />
-              <Text style={styles.addressName}>{MOCK_ADDRESS.name}</Text>
-            </View>
-            
-            <Text style={styles.addressPhone}>{MOCK_ADDRESS.phone}</Text>
-            <Text style={styles.addressText}>{formatAddress()}</Text>
-            
-            <TouchableOpacity style={styles.changeButton}>
-              <Text style={styles.changeButtonText}>Change</Text>
+
+          {addresses.length === 0 ? (
+            <TouchableOpacity
+              style={styles.addAddressButton}
+              onPress={navigateToAddresses}
+            >
+              <Ionicons name="add-circle-outline" size={24} color="#C35822" />
+              <Text style={styles.addAddressText}>Add New Address</Text>
             </TouchableOpacity>
-          </View>
+          ) : selectedAddress ? (
+            <TouchableOpacity
+              style={styles.addressCard}
+              onPress={navigateToAddresses}
+            >
+              <View style={styles.addressHeader}>
+                <Ionicons name="location-outline" size={20} color="#C35822" />
+                <Text style={styles.addressName}>
+                  {selectedAddress.fullName}
+                </Text>
+                {selectedAddress.isDefault && (
+                  <View style={styles.defaultBadge}>
+                    <Text style={styles.defaultBadgeText}>Default</Text>
+                  </View>
+                )}
+              </View>
+
+              <Text style={styles.addressPhone}>{selectedAddress.phone}</Text>
+              <Text style={styles.addressText}>
+                {formatAddress(selectedAddress)}
+              </Text>
+
+              <View style={styles.addressFooter}>
+                <Text style={styles.addressLabel}>{selectedAddress.label}</Text>
+                <TouchableOpacity onPress={navigateToAddresses}>
+                  <Text style={styles.changeButtonText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {/* Payment Method Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
-          
+
           {PAYMENT_METHODS.map((method) => (
             <TouchableOpacity
               key={method}
@@ -148,8 +225,15 @@ export default function CheckoutScreen() {
               onPress={() => setSelectedPayment(method)}
             >
               <View style={styles.paymentOptionLeft}>
-                <View style={[styles.radioButton, selectedPayment === method && styles.radioButtonSelected]}>
-                  {selectedPayment === method && <View style={styles.radioButtonInner} />}
+                <View
+                  style={[
+                    styles.radioButton,
+                    selectedPayment === method && styles.radioButtonSelected,
+                  ]}
+                >
+                  {selectedPayment === method && (
+                    <View style={styles.radioButtonInner} />
+                  )}
                 </View>
                 <Text style={styles.paymentOptionText}>{method}</Text>
               </View>
@@ -163,19 +247,19 @@ export default function CheckoutScreen() {
         {/* Price Breakdown Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Price Details</Text>
-          
+
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>Subtotal</Text>
             <Text style={styles.priceValue}>₱{subtotal}</Text>
           </View>
-          
+
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>Shipping Fee</Text>
             <Text style={styles.priceValue}>₱{shippingFee}</Text>
           </View>
-          
+
           <View style={styles.divider} />
-          
+
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
             <Text style={styles.totalValue}>₱{total}</Text>
@@ -189,9 +273,13 @@ export default function CheckoutScreen() {
       {/* Place Order Button */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={[styles.placeOrderButton, isProcessing && styles.placeOrderButtonDisabled]}
+          style={[
+            styles.placeOrderButton,
+            (!selectedAddress || isProcessing) &&
+              styles.placeOrderButtonDisabled,
+          ]}
           onPress={handlePlaceOrder}
-          disabled={isProcessing}
+          disabled={!selectedAddress || isProcessing}
         >
           {isProcessing ? (
             <View style={styles.processingContainer}>
@@ -235,6 +323,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#32221B",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   scrollContent: {
     padding: 16,
@@ -282,6 +375,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#C35822",
   },
+  addAddressButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    borderRadius: 12,
+    borderStyle: "dashed",
+    gap: 8,
+  },
+  addAddressText: {
+    color: "#C35822",
+    fontSize: 14,
+    fontWeight: "500",
+  },
   addressCard: {
     backgroundColor: "#FBF8F4",
     borderRadius: 12,
@@ -291,12 +400,25 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 8,
+    flexWrap: "wrap",
+    gap: 8,
   },
   addressName: {
     fontSize: 14,
     fontWeight: "600",
     color: "#32221B",
     marginLeft: 8,
+  },
+  defaultBadge: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  defaultBadgeText: {
+    color: "#FFF",
+    fontSize: 10,
+    fontWeight: "600",
   },
   addressPhone: {
     fontSize: 13,
@@ -311,10 +433,20 @@ const styles = StyleSheet.create({
     marginLeft: 28,
     marginBottom: 12,
   },
-  changeButton: {
-    alignSelf: "flex-end",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  addressFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginLeft: 28,
+  },
+  addressLabel: {
+    fontSize: 12,
+    color: "#8F796F",
+    fontWeight: "500",
+    backgroundColor: "#F0F0F0",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
   },
   changeButtonText: {
     color: "#C35822",
