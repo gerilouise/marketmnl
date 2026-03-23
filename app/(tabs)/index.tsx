@@ -350,7 +350,7 @@ export default function HomeScreen() {
       {/* AI Chatbot Floating Button */}
       <TouchableOpacity
         style={styles.chatButton}
-        onPress={() => router.push("/chat")}
+        onPress={() => router.push("/chatbot")}
         activeOpacity={0.8}
       >
         <View style={styles.chatButtonInner}>

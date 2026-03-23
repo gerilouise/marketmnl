@@ -81,6 +81,13 @@ export default function SellerLayout() {
           href: null, // This hides it from the tab bar
         }}
       />
+
+      <Tabs.Screen
+        name="chatbot"
+        options={{
+          href: null, // This hides it from the tab bar
+        }}
+      />
     </Tabs>
   );
 }

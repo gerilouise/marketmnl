@@ -1,61 +1,140 @@
 // app/(seller)/dashboard.tsx
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
+import React, { useState, useCallback, useEffect } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  RefreshControl,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Mock data for seller dashboard
-const SELLER_STATS = {
-  name: "Jan Carlo",
-  orders: 11,
-  revenue: 9029,
-  products: 3,
-  rating: 4.9,
-};
-
-const RECENT_ORDERS = [
-  {
-    id: "ORD-001",
-    customer: "Geri Hernia",
-    product: "Authentic Bottled Pastil",
-    quantity: 2,
-    status: "Pending",
-    total: 250.0,
-    date: "2024-02-28",
-  },
-  {
-    id: "ORD-002",
-    customer: "Gian Murao",
-    product: "Authentic Bottled Pastil",
-    quantity: 2,
-    status: "Confirmed",
-    total: 250.0,
-    date: "2024-02-27",
-  },
-  {
-    id: "ORD-003",
-    customer: "Maria Santos",
-    product: "Spicy Tuyo",
-    quantity: 3,
-    status: "Shipped",
-    total: 750.0,
-    date: "2024-02-26",
-  },
-];
+interface Order {
+  id: string;
+  orderNumber: string;
+  customer: string;
+  customerName?: string;
+  product: string;
+  productName?: string;
+  quantity: number;
+  status: string;
+  total: number;
+  date: string;
+  createdAt?: any;
+}
 
 export default function SellerDashboardScreen() {
   const [selectedTab, setSelectedTab] = useState("dashboard");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sellerName, setSellerName] = useState("");
+  const [stats, setStats] = useState({
+    orders: 0,
+    revenue: 0,
+    products: 0,
+    rating: 4.9,
+  });
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+
+  // Fetch seller data from Firebase
+  const fetchDashboardData = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        console.log("No user logged in");
+        setLoading(false);
+        return;
+      }
+
+      console.log("Fetching dashboard data for seller:", user.uid);
+
+      // 1. Get seller name from users collection
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setSellerName(userData.fullName?.split(' ')[0] || user.displayName || "Seller");
+      } else {
+        setSellerName(user.displayName || "Seller");
+      }
+
+      // 2. Get seller's products count
+      const productsRef = collection(db, 'products');
+      const productsQuery = query(productsRef, where('sellerId', '==', user.uid));
+      const productsSnapshot = await getDocs(productsQuery);
+      const productsCount = productsSnapshot.size;
+
+      // 3. Get seller's orders
+      const ordersRef = collection(db, 'orders');
+      const ordersQuery = query(
+        ordersRef,
+        where('sellerId', '==', user.uid),
+        orderBy('createdAt', 'desc'),
+        limit(5)
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
+
+      let totalRevenue = 0;
+      const ordersList: Order[] = [];
+
+      ordersSnapshot.forEach((doc) => {
+        const orderData = doc.data();
+        const orderTotal = orderData.total || 0;
+        totalRevenue += orderTotal;
+
+        ordersList.push({
+          id: doc.id,
+          orderNumber: orderData.orderNumber || doc.id.slice(-8).toUpperCase(),
+          customer: orderData.customerName || orderData.customer || "Customer",
+          product: orderData.productName || orderData.product || "Product",
+          quantity: orderData.quantity || 1,
+          status: orderData.status || "Pending",
+          total: orderTotal,
+          date: orderData.createdAt?.toDate?.()?.toLocaleDateString() || new Date().toLocaleDateString(),
+          createdAt: orderData.createdAt,
+        });
+      });
+
+      setStats({
+        orders: ordersSnapshot.size,
+        revenue: totalRevenue,
+        products: productsCount,
+        rating: 4.9,
+      });
+
+      setRecentOrders(ordersList);
+      console.log(`Dashboard loaded: ${productsCount} products, ${ordersSnapshot.size} orders, ₱${totalRevenue} revenue`);
+
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+      Alert.alert("Error", "Failed to load dashboard data");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Load data when screen mounts
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+    }, [])
+  );
 
   const handleAddProduct = () => {
-    router.push("/(seller)/products?action=add");
+    router.push("/(seller)/product-manage");
   };
 
   const handleViewOrders = () => {
@@ -63,31 +142,41 @@ export default function SellerDashboardScreen() {
   };
 
   const handleViewOrderDetails = (orderId: string) => {
-    router.push(`/(seller)/orders/${orderId}`);
+    router.push({
+      pathname: "/(seller)/orders",
+      params: { orderId: orderId }
+    });
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchDashboardData();
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Pending":
+    switch (status?.toLowerCase()) {
+      case "pending":
         return "#FFA500";
-      case "Confirmed":
+      case "confirmed":
         return "#4CAF50";
-      case "Shipped":
+      case "shipped":
         return "#2196F3";
-      case "Delivered":
+      case "delivered":
         return "#9C27B0";
+      case "cancelled":
+        return "#FF3B30";
       default:
         return "#666";
     }
   };
 
-  const renderOrderItem = ({ item }: { item: (typeof RECENT_ORDERS)[0] }) => (
+  const renderOrderItem = ({ item }: { item: Order }) => (
     <TouchableOpacity
       style={styles.orderCard}
       onPress={() => handleViewOrderDetails(item.id)}
     >
       <View style={styles.orderHeader}>
-        <Text style={styles.orderId}>{item.id}</Text>
+        <Text style={styles.orderId}>{item.orderNumber}</Text>
         <View
           style={[
             styles.statusBadge,
@@ -109,10 +198,30 @@ export default function SellerDashboardScreen() {
 
       <View style={styles.orderFooter}>
         <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
-        <Ionicons name="chevron-forward" size={20} color="#8F796F" />
+        <Text style={styles.orderDate}>{item.date}</Text>
       </View>
     </TouchableOpacity>
   );
+
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>Magandang Araw,</Text>
+            <Text style={styles.userName}>Loading...</Text>
+          </View>
+          <TouchableOpacity style={styles.notificationButton}>
+            <Ionicons name="notifications-outline" size={24} color="#32221B" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.separator} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -121,7 +230,7 @@ export default function SellerDashboardScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Magandang Araw,</Text>
-            <Text style={styles.userName}>{SELLER_STATS.name}</Text>
+            <Text style={styles.userName}>{sellerName || "Seller"}</Text>
           </View>
           <TouchableOpacity style={styles.notificationButton}>
             <Ionicons name="notifications-outline" size={24} color="#32221B" />
@@ -130,14 +239,24 @@ export default function SellerDashboardScreen() {
         <View style={styles.separator} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
+        }
+      >
         {/* Stats Cards */}
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
               <Ionicons name="bag-handle-outline" size={24} color="#C35822" />
             </View>
-            <Text style={styles.statNumber}>{SELLER_STATS.orders}</Text>
+            <Text style={styles.statNumber}>{stats.orders}</Text>
             <Text style={styles.statLabel}>Orders</Text>
           </View>
 
@@ -145,7 +264,7 @@ export default function SellerDashboardScreen() {
             <View style={styles.statIconContainer}>
               <Ionicons name="cash-outline" size={24} color="#C35822" />
             </View>
-            <Text style={styles.statNumber}>₱{SELLER_STATS.revenue}</Text>
+            <Text style={styles.statNumber}>₱{stats.revenue.toLocaleString()}</Text>
             <Text style={styles.statLabel}>Revenue</Text>
           </View>
 
@@ -153,7 +272,7 @@ export default function SellerDashboardScreen() {
             <View style={styles.statIconContainer}>
               <Ionicons name="cube-outline" size={24} color="#C35822" />
             </View>
-            <Text style={styles.statNumber}>{SELLER_STATS.products}</Text>
+            <Text style={styles.statNumber}>{stats.products}</Text>
             <Text style={styles.statLabel}>Products</Text>
           </View>
 
@@ -161,7 +280,7 @@ export default function SellerDashboardScreen() {
             <View style={styles.statIconContainer}>
               <Ionicons name="star" size={24} color="#FFD700" />
             </View>
-            <Text style={styles.statNumber}>{SELLER_STATS.rating}</Text>
+            <Text style={styles.statNumber}>{stats.rating}</Text>
             <Text style={styles.statLabel}>Rating</Text>
           </View>
         </View>
@@ -189,18 +308,30 @@ export default function SellerDashboardScreen() {
         <View style={styles.recentOrdersSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Orders</Text>
-            <TouchableOpacity onPress={handleViewOrders}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
+            {recentOrders.length > 0 && (
+              <TouchableOpacity onPress={handleViewOrders}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          <FlatList
-            data={RECENT_ORDERS}
-            renderItem={renderOrderItem}
-            keyExtractor={(item) => item.id}
-            scrollEnabled={false}
-            contentContainerStyle={styles.ordersList}
-          />
+          {recentOrders.length > 0 ? (
+            <FlatList
+              data={recentOrders}
+              renderItem={renderOrderItem}
+              keyExtractor={(item) => item.id}
+              scrollEnabled={false}
+              contentContainerStyle={styles.ordersList}
+            />
+          ) : (
+            <View style={styles.emptyOrdersContainer}>
+              <Ionicons name="receipt-outline" size={50} color="#E0DAD1" />
+              <Text style={styles.emptyOrdersText}>No orders yet</Text>
+              <Text style={styles.emptyOrdersSubtext}>
+                When customers place orders, they'll appear here
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Bottom Padding */}
@@ -210,7 +341,7 @@ export default function SellerDashboardScreen() {
       {/* AI Chatbot Floating Button */}
       <TouchableOpacity
         style={styles.chatButton}
-        onPress={() => router.push("/chat")}
+        onPress={() => router.push("/chatbot")}
         activeOpacity={0.8}
       >
         <View style={styles.chatButtonInner}>
@@ -225,6 +356,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FBF8F4",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   header: {
     flexDirection: "row",
@@ -371,6 +507,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     borderRadius: 16,
     padding: 16,
+    marginBottom: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -418,10 +555,33 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#C35822",
   },
-  bottomPadding: {
-    height: 80, // Extra padding for chat button
+  orderDate: {
+    fontSize: 11,
+    color: "#8F796F",
   },
-  // AI Chatbot Floating Button
+  emptyOrdersContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    marginTop: 8,
+  },
+  emptyOrdersText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginTop: 12,
+  },
+  emptyOrdersSubtext: {
+    fontSize: 13,
+    color: "#8F796F",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  bottomPadding: {
+    height: 80,
+  },
   chatButton: {
     position: "absolute",
     bottom: 30,

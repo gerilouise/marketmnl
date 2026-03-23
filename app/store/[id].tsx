@@ -1,5 +1,5 @@
 // app/store/[id].tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,150 +9,328 @@ import {
   Image,
   FlatList,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { auth, db } from '@/lib/firebase';
+import { 
+  doc, 
+  getDoc, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  addDoc, 
+  deleteDoc,
+  setDoc,
+  Timestamp 
+} from 'firebase/firestore';
 
-// Mock store data - would come from database
-const STORES_DATA = {
-  "1": {
-    id: "1",
-    name: "Janjan's Kitchen",
-    location: "Quezon City, Metro Manila",
-    rating: 4.9,
-    reviews: 280,
-    products: 8,
-    description: "Premium bottled preservatives and dried products.",
-    categories: ["Dried Fish", "Meat Jerky", "Bottled"],
-    isFollowing: false,
-    image: null,
-  },
-  "2": {
-    id: "2",
-    name: "Gian's Preserved Food",
-    location: "Manila, Metro Manila",
-    rating: 4.8,
-    reviews: 156,
-    products: 12,
-    description: "Authentic Filipino preserved foods since 2010.",
-    categories: ["Dried Fish", "Bottled", "Spicy"],
-    isFollowing: false,
-    image: null,
-  },
-};
+interface Store {
+  id: string;
+  storeName: string;
+  location?: string;
+  rating: number;
+  reviewsCount: number;
+  productCount: number;
+  description?: string;
+  categories: string[];
+  imageUrl?: string;
+  bannerUrl?: string;
+  createdAt: any;
+  uid: string;
+}
 
-// Mock products for this store
-const STORE_PRODUCTS = [
-  {
-    id: "1",
-    name: "Spicy Tuyo",
-    price: 250,
-    rating: 4.9,
-    image: null,
-  },
-  {
-    id: "2",
-    name: "Spicy Bangus",
-    price: 250,
-    rating: 4.9,
-    image: null,
-  },
-  {
-    id: "3",
-    name: "Spicy Tuyo",
-    price: 250,
-    rating: 4.9,
-    image: null,
-  },
-  {
-    id: "4",
-    name: "Spicy Tuyo",
-    price: 250,
-    rating: 4.9,
-    image: null,
-  },
-];
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  rating: number;
+  imageUrl?: string;
+  category: string;
+  sellerId: string;
+}
 
 export default function StoreScreen() {
   const { id } = useLocalSearchParams();
-  const [isFollowing, setIsFollowing] = useState(false);
+  const [store, setStore] = useState<Store | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("All");
-  const [wishlist, setWishlist] = useState({}); // Track wishlist items
+  const [loading, setLoading] = useState(true);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [wishlist, setWishlist] = useState<Set<string>>(new Set());
+  const [followingLoading, setFollowingLoading] = useState(false);
 
-  // Get store data based on ID
-  const store = STORES_DATA[id as keyof typeof STORES_DATA];
+  // Load store data and products
+  useEffect(() => {
+    loadStoreData();
+    loadProducts();
+    loadWishlist();
+    checkFollowStatus();
+  }, [id]);
 
-  // If store not found, show error
-  if (!store) {
-    return (
-      <View style={styles.errorContainer}>
-        <Ionicons name="storefront-outline" size={60} color="#C35822" />
-        <Text style={styles.errorText}>Store not found</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const loadStoreData = async () => {
+    if (!id) return;
+    
+    try {
+      const storeRef = doc(db, 'stores', id as string);
+      const storeSnap = await getDoc(storeRef);
+      
+      if (storeSnap.exists()) {
+        const storeData = { id: storeSnap.id, ...storeSnap.data() } as Store;
+        setStore(storeData);
+        
+        // Load categories from store or use default
+        if (!storeData.categories || storeData.categories.length === 0) {
+          // Fetch unique categories from products
+          const productsRef = collection(db, 'products');
+          const q = query(productsRef, where('sellerId', '==', id));
+          const productsSnap = await getDocs(q);
+          const categoriesSet = new Set<string>();
+          productsSnap.forEach((doc) => {
+            const product = doc.data();
+            if (product.category) {
+              categoriesSet.add(product.category);
+            }
+          });
+          setStore(prev => prev ? { ...prev, categories: Array.from(categoriesSet) } : null);
+        }
+      } else {
+        Alert.alert("Error", "Store not found");
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error loading store:', error);
+      Alert.alert("Error", "Failed to load store");
+    }
+  };
 
-  const handleFollow = () => {
-    setIsFollowing(!isFollowing);
-    Alert.alert(
-      isFollowing ? "Unfollowed" : "Following",
-      isFollowing 
-        ? `You are no longer following ${store.name}`
-        : `You are now following ${store.name}`
-    );
+  const loadProducts = async () => {
+    if (!id) return;
+    
+    try {
+      const productsRef = collection(db, 'products');
+      const q = query(productsRef, where('sellerId', '==', id));
+      const querySnapshot = await getDocs(q);
+      const productsList: Product[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        productsList.push({
+          id: doc.id,
+          name: data.name,
+          price: data.price,
+          rating: data.rating || 4.5,
+          imageUrl: data.imageUrl,
+          category: data.category,
+          sellerId: data.sellerId,
+        });
+      });
+      
+      setProducts(productsList);
+      setFilteredProducts(productsList);
+    } catch (error) {
+      console.error('Error loading products:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadWishlist = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    
+    try {
+      const wishlistRef = collection(db, 'wishlists');
+      const q = query(wishlistRef, where('userId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      const wishlistSet = new Set<string>();
+      querySnapshot.forEach((doc) => {
+        wishlistSet.add(doc.data().productId);
+      });
+      setWishlist(wishlistSet);
+    } catch (error) {
+      console.error('Error loading wishlist:', error);
+    }
+  };
+
+  const checkFollowStatus = async () => {
+    const user = auth.currentUser;
+    if (!user || !id) return;
+    
+    try {
+      const followsRef = collection(db, 'follows');
+      const q = query(
+        followsRef, 
+        where('userId', '==', user.uid),
+        where('shopId', '==', id)
+      );
+      const querySnapshot = await getDocs(q);
+      setIsFollowing(!querySnapshot.empty);
+    } catch (error) {
+      console.error('Error checking follow status:', error);
+    }
+  };
+
+  const handleFollow = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to follow stores", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
+
+    if (followingLoading) return;
+    
+    setFollowingLoading(true);
+    try {
+      const followsRef = collection(db, 'follows');
+      const followId = `${user.uid}_${id}`;
+      const docRef = doc(followsRef, followId);
+      
+      if (isFollowing) {
+        await deleteDoc(docRef);
+        setIsFollowing(false);
+        Alert.alert("Unfollowed", `You are no longer following ${store?.storeName}`);
+      } else {
+        await setDoc(docRef, {
+          id: followId,
+          userId: user.uid,
+          shopId: id,
+          shopName: store?.storeName,
+          followedAt: Timestamp.now()
+        });
+        setIsFollowing(true);
+        Alert.alert("Following", `You are now following ${store?.storeName}`);
+      }
+    } catch (error) {
+      console.error('Error toggling follow:', error);
+      Alert.alert("Error", "Failed to update follow status");
+    } finally {
+      setFollowingLoading(false);
+    }
   };
 
   const handleChat = () => {
-    Alert.alert("Chat", `Start chat with ${store.name}`);
-    // Navigate to chat screen
-  };
-
-  const handleShare = () => {
-    Alert.alert("Share", `Share ${store.name} store`);
-    // Implement share functionality
-  };
-
-  const toggleWishlist = (productId: string) => {
-    setWishlist(prev => ({
-      ...prev,
-      [productId]: !prev[productId]
-    }));
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to message the seller", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
     
-    const action = wishlist[productId] ? "removed from" : "added to";
-    Alert.alert("Wishlist", `Item ${action} wishlist`);
+    router.push({
+      pathname: "/(customer)/chat",
+      params: { 
+        sellerId: id,
+        sellerName: store?.storeName || "Seller"
+      }
+    });
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Check out ${store?.storeName} on MarketMNL!`,
+        title: store?.storeName,
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  };
+
+  const toggleWishlist = async (productId: string, product: Product) => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to add items to wishlist", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
+
+    try {
+      const wishlistRef = collection(db, 'wishlists');
+      const itemId = `${user.uid}_${productId}`;
+      const docRef = doc(wishlistRef, itemId);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        await deleteDoc(docRef);
+        setWishlist(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(productId);
+          return newSet;
+        });
+        Alert.alert('Removed', `${product.name} removed from wishlist`);
+      } else {
+        await setDoc(docRef, {
+          id: itemId,
+          userId: user.uid,
+          productId: productId,
+          productName: product.name,
+          productPrice: product.price,
+          sellerName: store?.storeName,
+          sellerId: id,
+          productImage: product.imageUrl || null,
+          addedAt: Timestamp.now(),
+        });
+        setWishlist(prev => new Set(prev).add(productId));
+        Alert.alert('Added', `${product.name} added to wishlist`);
+      }
+    } catch (error) {
+      console.error('Error toggling wishlist:', error);
+      Alert.alert('Error', 'Failed to update wishlist');
+    }
   };
 
   const navigateToProduct = (productId: string) => {
     router.push(`/product/${productId}`);
   };
 
-  const renderProductItem = ({ item }: { item: typeof STORE_PRODUCTS[0] }) => (
+  const filterProducts = (category: string) => {
+    setSelectedCategory(category);
+    if (category === "All") {
+      setFilteredProducts(products);
+    } else {
+      const filtered = products.filter(p => p.category === category);
+      setFilteredProducts(filtered);
+    }
+  };
+
+  const renderProductItem = ({ item }: { item: Product }) => (
     <TouchableOpacity 
       style={styles.productCard}
       onPress={() => navigateToProduct(item.id)}
     >
       <View style={styles.productImagePlaceholder}>
-        <Ionicons name="image-outline" size={30} color="#CCC" />
-        {/* Heart icon for wishlist */}
+        {item.imageUrl ? (
+          <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+        ) : (
+          <Ionicons name="image-outline" size={30} color="#CCC" />
+        )}
         <TouchableOpacity 
           style={styles.wishlistButton}
           onPress={(e) => {
-            e.stopPropagation(); // Prevent navigation
-            toggleWishlist(item.id);
+            e.stopPropagation();
+            toggleWishlist(item.id, item);
           }}
         >
           <Ionicons 
-            name={wishlist[item.id] ? "heart" : "heart-outline"} 
+            name={wishlist.has(item.id) ? "heart" : "heart-outline"} 
             size={18} 
-            color={wishlist[item.id] ? "#C35822" : "#8F796F"} 
+            color={wishlist.has(item.id) ? "#C35822" : "#8F796F"} 
           />
         </TouchableOpacity>
       </View>
-      <Text style={styles.productName}>{item.name}</Text>
+      <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
       <View style={styles.productRow}>
         <Text style={styles.productPrice}>₱{item.price}</Text>
         <View style={styles.productRating}>
@@ -163,9 +341,49 @@ export default function StoreScreen() {
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Store</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!store) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Store</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.errorContainer}>
+          <Ionicons name="storefront-outline" size={60} color="#C35822" />
+          <Text style={styles.errorText}>Store not found</Text>
+          <TouchableOpacity style={styles.goBackButton} onPress={() => router.back()}>
+            <Text style={styles.goBackButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const categories = ["All", ...(store.categories || [])];
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header with back button, title, and share */}
+      {/* Header with back button and share */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -177,56 +395,66 @@ export default function StoreScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Store Banner/Image Placeholder */}
+        {/* Store Banner */}
         <View style={styles.bannerPlaceholder}>
-          <Ionicons name="image-outline" size={50} color="#CCC" />
+          {store.bannerUrl ? (
+            <Image source={{ uri: store.bannerUrl }} style={styles.bannerImage} />
+          ) : (
+            <Ionicons name="image-outline" size={50} color="#CCC" />
+          )}
         </View>
 
         {/* Store Info */}
         <View style={styles.storeInfo}>
-          <Text style={styles.storeName}>{store.name}</Text>
+          <Text style={styles.storeName}>{store.storeName}</Text>
           
-          <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={16} color="#8F796F" />
-            <Text style={styles.infoText}> {store.location}</Text>
-          </View>
+          {store.location && (
+            <View style={styles.infoRow}>
+              <Ionicons name="location-outline" size={16} color="#8F796F" />
+              <Text style={styles.infoText}> {store.location}</Text>
+            </View>
+          )}
 
           <View style={styles.infoRow}>
             <Ionicons name="star" size={16} color="#FFD700" />
-            <Text style={styles.infoText}> {store.rating} ({store.reviews} reviews)</Text>
+            <Text style={styles.infoText}> {store.rating || 4.5} ({store.reviewsCount || 0} reviews)</Text>
           </View>
 
           <View style={styles.infoRow}>
             <Ionicons name="cube-outline" size={16} color="#8F796F" />
-            <Text style={styles.infoText}> {store.products} products</Text>
+            <Text style={styles.infoText}> {products.length} products</Text>
           </View>
 
-          <Text style={styles.description}>{store.description}</Text>
+          {store.description && (
+            <Text style={styles.description}>{store.description}</Text>
+          )}
 
           {/* Category Chips */}
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            style={styles.categoriesScroll}
-          >
-            <View style={styles.categoriesContainer}>
-              {store.categories.map((category, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.categoryChip,
-                    selectedCategory === category && styles.categoryChipActive
-                  ]}
-                  onPress={() => setSelectedCategory(category)}
-                >
-                  <Text style={[
-                    styles.categoryChipText,
-                    selectedCategory === category && styles.categoryChipTextActive
-                  ]}>{category}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
+          {categories.length > 1 && (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.categoriesScroll}
+            >
+              <View style={styles.categoriesContainer}>
+                {categories.map((category, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.categoryChip,
+                      selectedCategory === category && styles.categoryChipActive
+                    ]}
+                    onPress={() => filterProducts(category)}
+                  >
+                    <Text style={[
+                      styles.categoryChipText,
+                      selectedCategory === category && styles.categoryChipTextActive
+                    ]}>{category}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          )}
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
@@ -238,15 +466,22 @@ export default function StoreScreen() {
             <TouchableOpacity 
               style={[styles.followButton, isFollowing && styles.followingButton]} 
               onPress={handleFollow}
+              disabled={followingLoading}
             >
-              <Ionicons 
-                name={isFollowing ? "checkmark" : "add-outline"} 
-                size={18} 
-                color={isFollowing ? "#FFF" : "#C35822"} 
-              />
-              <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
-                {isFollowing ? "Following" : "Follow"}
-              </Text>
+              {followingLoading ? (
+                <ActivityIndicator size="small" color={isFollowing ? "#FFF" : "#C35822"} />
+              ) : (
+                <>
+                  <Ionicons 
+                    name={isFollowing ? "checkmark" : "add-outline"} 
+                    size={18} 
+                    color={isFollowing ? "#FFF" : "#C35822"} 
+                  />
+                  <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
+                    {isFollowing ? "Following" : "Follow"}
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -254,16 +489,23 @@ export default function StoreScreen() {
         {/* Products Section */}
         <View style={styles.productsSection}>
           <View style={styles.productsHeader}>
-            <Text style={styles.productsTitle}>Products ({store.products})</Text>
+            <Text style={styles.productsTitle}>Products ({filteredProducts.length})</Text>
           </View>
 
-          <View style={styles.productsGrid}>
-            {STORE_PRODUCTS.map((item) => (
-              <View key={item.id} style={styles.productWrapper}>
-                {renderProductItem({ item })}
+          <FlatList
+            data={filteredProducts}
+            renderItem={renderProductItem}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.productsGrid}
+            scrollEnabled={false}
+            ListEmptyComponent={
+              <View style={styles.emptyProducts}>
+                <Ionicons name="cube-outline" size={50} color="#E0DAD1" />
+                <Text style={styles.emptyProductsText}>No products found</Text>
               </View>
-            ))}
-          </View>
+            }
+          />
         </View>
 
         {/* Bottom Padding */}
@@ -278,11 +520,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FBF8F4",
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FBF8F4",
     padding: 20,
   },
   errorText: {
@@ -291,21 +537,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 20,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FFF",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+  goBackButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
   },
-  backButtonText: {
-    color: "#C35822",
+  goBackButtonText: {
+    color: "#FFF",
     fontSize: 16,
     fontWeight: "600",
   },
@@ -319,6 +558,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#FBF8F4",
+    justifyContent: "center",
+    alignItems: "center",
   },
   headerTitle: {
     fontSize: 18,
@@ -342,6 +589,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E0DAD1",
     borderStyle: "dashed",
+  },
+  bannerImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
   },
   storeInfo: {
     padding: 16,
@@ -461,14 +713,11 @@ const styles = StyleSheet.create({
   },
   productsGrid: {
     flexDirection: "row",
-    flexWrap: "wrap",
     justifyContent: "space-between",
-  },
-  productWrapper: {
-    width: "48%",
-    marginBottom: 12,
+    gap: 12,
   },
   productCard: {
+    flex: 1,
     backgroundColor: "#FFF",
     borderRadius: 12,
     padding: 12,
@@ -477,6 +726,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    marginBottom: 12,
   },
   productImagePlaceholder: {
     width: "100%",
@@ -490,6 +740,12 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     marginBottom: 8,
     position: "relative",
+  },
+  productImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 8,
+    resizeMode: "cover",
   },
   wishlistButton: {
     position: "absolute",
@@ -531,6 +787,16 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 12,
     color: "#666",
+  },
+  emptyProducts: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  emptyProductsText: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginTop: 8,
   },
   bottomPadding: {
     height: 20,

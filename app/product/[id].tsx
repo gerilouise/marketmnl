@@ -12,6 +12,8 @@ import {
   Share,
   Modal,
   TextInput,
+  Platform,
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -72,6 +74,9 @@ export default function ProductDetailsScreen() {
   const [storeName, setStoreName] = useState<string>("");
   const [reviews, setReviews] = useState<ProductReview[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
+  const [addingToCart, setAddingToCart] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const fadeAnim = useState(new Animated.Value(0))[0];
   
   // Review modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -91,6 +96,25 @@ export default function ProductDetailsScreen() {
     }
   }, [product?.id]);
 
+  const showSuccessMessage = () => {
+    setShowSuccessPopup(true);
+    Animated.sequence([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(2000),
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowSuccessPopup(false);
+    });
+  };
+
   const loadProduct = async () => {
     if (!id) return;
     
@@ -103,7 +127,6 @@ export default function ProductDetailsScreen() {
         const productData = { id: productSnap.id, ...productSnap.data() } as Product;
         setProduct(productData);
         
-        // Load store info from stores collection
         if (productData.sellerId) {
           const storeRef = doc(db, 'stores', productData.sellerId);
           const storeSnap = await getDoc(storeRef);
@@ -115,7 +138,6 @@ export default function ProductDetailsScreen() {
           }
         }
         
-        // Check if product is in wishlist
         await checkWishlistStatus();
       } else {
         Alert.alert("Error", "Product not found");
@@ -190,6 +212,9 @@ export default function ProductDetailsScreen() {
       return;
     }
 
+    if (addingToCart) return;
+    
+    setAddingToCart(true);
     try {
       const cartRef = collection(db, 'carts');
       const cartItemId = `${user.uid}_${product?.id}`;
@@ -197,10 +222,12 @@ export default function ProductDetailsScreen() {
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
+        const newQuantity = docSnap.data().quantity + quantity;
         await updateDoc(docRef, {
-          quantity: docSnap.data().quantity + quantity,
+          quantity: newQuantity,
           updatedAt: Timestamp.now()
         });
+        showSuccessMessage();
       } else {
         await setDoc(docRef, {
           id: cartItemId,
@@ -215,12 +242,13 @@ export default function ProductDetailsScreen() {
           addedAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
+        showSuccessMessage();
       }
-      
-      Alert.alert("Success", `${quantity} x ${product?.name} added to cart`);
     } catch (error) {
       console.error('Error adding to cart:', error);
       Alert.alert("Error", "Failed to add to cart");
+    } finally {
+      setAddingToCart(false);
     }
   };
 
@@ -321,6 +349,10 @@ export default function ProductDetailsScreen() {
     }
   };
 
+  const handleGoBack = () => {
+    router.back();
+  };
+
   const navigateToStore = () => {
     if (product?.sellerId) {
       router.push(`/store/${product.sellerId}`);
@@ -376,7 +408,7 @@ export default function ProductDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <View style={{ width: 40 }} />
@@ -392,7 +424,7 @@ export default function ProductDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <View style={{ width: 40 }} />
@@ -400,7 +432,7 @@ export default function ProductDetailsScreen() {
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle-outline" size={60} color="#C35822" />
           <Text style={styles.errorText}>Product not found</Text>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={handleGoBack}>
             <Text style={styles.backButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -413,7 +445,7 @@ export default function ProductDetailsScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <View style={styles.headerRight}>
@@ -459,7 +491,6 @@ export default function ProductDetailsScreen() {
           
           <Text style={styles.description}>{product.description}</Text>
           
-          {/* Net Weight and Calories Row */}
           <View style={styles.weightCalorieRow}>
             {product.netWeight && (
               <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
@@ -643,20 +674,48 @@ export default function ProductDetailsScreen() {
         </View>
       </ScrollView>
 
+      {/* Success Popup */}
+      {showSuccessPopup && (
+        <Animated.View style={[styles.successPopup, { opacity: fadeAnim }]}>
+          <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+          <Text style={styles.successText}>
+            Added {quantity} x {product?.name} to cart
+          </Text>
+        </Animated.View>
+      )}
+
       <View style={styles.bottomBar}>
         <View style={styles.quantityContainer}>
-          <TouchableOpacity onPress={decrementQuantity} style={styles.quantityButton}>
+          <TouchableOpacity 
+            onPress={decrementQuantity} 
+            style={styles.quantityButton}
+            disabled={addingToCart}
+          >
             <Ionicons name="remove" size={20} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.quantityText}>{quantity}</Text>
-          <TouchableOpacity onPress={incrementQuantity} style={styles.quantityButton}>
+          <TouchableOpacity 
+            onPress={incrementQuantity} 
+            style={styles.quantityButton}
+            disabled={addingToCart}
+          >
             <Ionicons name="add" size={20} color="#32221B" />
           </TouchableOpacity>
         </View>
         
-        <TouchableOpacity style={styles.addToCartButton} onPress={handleAddToCart}>
-          <Ionicons name="cart-outline" size={20} color="#FFF" />
-          <Text style={styles.addToCartText}>Add to Cart</Text>
+        <TouchableOpacity 
+          style={[styles.addToCartButton, addingToCart && styles.addToCartButtonDisabled]} 
+          onPress={handleAddToCart}
+          disabled={addingToCart}
+        >
+          {addingToCart ? (
+            <ActivityIndicator size="small" color="#FFF" />
+          ) : (
+            <>
+              <Ionicons name="cart-outline" size={20} color="#FFF" />
+              <Text style={styles.addToCartText}>Add to Cart</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -1300,10 +1359,37 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  addToCartButtonDisabled: {
+    opacity: 0.6,
+  },
   addToCartText: {
     color: "#FFF",
     fontSize: 16,
     fontWeight: "600",
     marginLeft: 8,
+  },
+  successPopup: {
+    position: "absolute",
+    top: 100,
+    left: 20,
+    right: 20,
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 1000,
+  },
+  successText: {
+    fontSize: 14,
+    color: "#32221B",
+    fontWeight: "500",
   },
 });

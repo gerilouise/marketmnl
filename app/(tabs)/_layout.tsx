@@ -78,7 +78,7 @@ export default function TabLayout() {
 
       {/* 👇 HIDE CHAT TAB FROM NAVBAR 👇 */}
       <Tabs.Screen
-        name="chat"
+        name="chatbot"
         options={{
           href: null, // Hide from tab bar
         }}

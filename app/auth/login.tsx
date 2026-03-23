@@ -1,4 +1,4 @@
-// app/auth/login.tsx - Update the handleForgotPassword function
+// app/auth/login.tsx
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -22,22 +22,32 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
-  const { loading, login } = useFirebaseAuth();
+  const { loading, login, resetPassword } = useFirebaseAuth();
 
   const handleLogin = async () => {
+    // Clear previous error
+    setLoginError("");
+    
     if (!email || !password) {
+      setLoginError("Please fill in all fields");
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
+      setLoginError("Please enter a valid email address");
       Alert.alert("Error", "Please enter a valid email address");
       return;
     }
 
-    await login(email, password);
+    const success = await login(email, password);
+    
+    if (!success) {
+      setLoginError("Invalid email or password. Please try again.");
+    }
   };
 
   const handleForgotPassword = () => {
@@ -73,6 +83,14 @@ export default function LoginScreen() {
               <Text style={styles.formTitle}>Login</Text>
             </View>
 
+            {/* Error Message Display */}
+            {loginError !== "" && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={20} color="#FF3B30" />
+                <Text style={styles.errorText}>{loginError}</Text>
+              </View>
+            )}
+
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Email Address</Text>
               <View style={styles.inputContainer}>
@@ -85,7 +103,10 @@ export default function LoginScreen() {
                 <TextInput
                   style={styles.input}
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    setLoginError(""); // Clear error when user types
+                  }}
                   placeholder="juan@email.com"
                   placeholderTextColor="#8F796F"
                   keyboardType="email-address"
@@ -107,7 +128,10 @@ export default function LoginScreen() {
                 <TextInput
                   style={[styles.input, styles.passwordInput]}
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setLoginError(""); // Clear error when user types
+                  }}
                   placeholder="Enter your password"
                   placeholderTextColor="#8F796F"
                   secureTextEntry={!showPassword}
@@ -244,6 +268,23 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
     color: "#32221B",
+  },
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFE5E5",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#FF3B30",
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#FF3B30",
+    lineHeight: 18,
   },
   inputWrapper: {
     marginBottom: 16,

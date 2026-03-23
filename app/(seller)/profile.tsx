@@ -54,18 +54,18 @@ export default function SellerProfileScreen() {
       if (userDoc.exists()) {
         const userData = userDoc.data();
         
-        // Get store data if exists
-        const storeDoc = await getDoc(doc(db, 'stores', user.uid));
-        const storeData = storeDoc.exists() ? storeDoc.data() : {};
+        // Get seller data from 'sellers' collection
+        const sellerDoc = await getDoc(doc(db, 'sellers', user.uid));
+        const sellerDataFromDb = sellerDoc.exists() ? sellerDoc.data() : {};
 
         setSellerData({
           fullName: userData.fullName || '',
           email: user.email || '',
           phone: userData.phone || '',
-          storeName: storeData.storeName || userData.storeName || 'My Store',
-          description: storeData.description || 'No description yet',
-          location: storeData.location || 'Not set',
-          avatar: storeData.logo || null,
+          storeName: sellerDataFromDb.storeName || userData.storeName || 'My Store',
+          description: sellerDataFromDb.storeDescription || 'No description yet',
+          location: sellerDataFromDb.location || 'Not set',
+          avatar: sellerDataFromDb.avatar || null,
           joinDate: userData.createdAt ? new Date(userData.createdAt).toLocaleDateString() : 'Recently',
         });
       }
@@ -103,6 +103,7 @@ export default function SellerProfileScreen() {
     );
   };
 
+  // THIS IS THE WORKING "VIEW MY STORE" FUNCTION
   const handleViewStore = () => {
     const user = auth.currentUser;
     if (user) {
@@ -169,7 +170,7 @@ export default function SellerProfileScreen() {
           <Text style={styles.sellerName}>{sellerData?.fullName || 'Seller Name'}</Text>
           <Text style={styles.sellerEmail}>{sellerData?.email || 'email@example.com'}</Text>
 
-          {/* View Store Button */}
+          {/* View Store Button - THIS IS THE BUTTON */}
           <TouchableOpacity style={styles.viewStoreButton} onPress={handleViewStore}>
             <Ionicons name="storefront-outline" size={16} color="#C35822" />
             <Text style={styles.viewStoreText}>View My Store</Text>
