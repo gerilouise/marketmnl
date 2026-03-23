@@ -94,7 +94,10 @@ export default function SignupSellerScreen() {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.container}
       >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.logoContainer}>
             <Image
               source={require("@/assets/images/logo.png")}
@@ -133,244 +136,247 @@ export default function SignupSellerScreen() {
           </View>
 
           <View style={styles.formContainer}>
-            <View style={styles.form}>
-              <View style={styles.inputWrapper}>
-                <Text style={styles.label}>Full Name</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="person-outline"
-                    size={20}
-                    color="#8F796F"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={fullName}
-                    onChangeText={setFullName}
-                    placeholder="Juan Dela Cruz"
-                    placeholderTextColor="#8F796F"
-                    editable={!loading}
-                  />
-                </View>
-              </View>
+            {/* Centered Create Account Text */}
+            <View style={styles.formHeader}>
+              <Text style={styles.formTitle}>Create Account</Text>
+            </View>
 
-              <View style={styles.inputWrapper}>
-                <Text style={styles.label}>Store Name</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="business-outline"
-                    size={20}
-                    color="#8F796F"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={storeName}
-                    onChangeText={setStoreName}
-                    placeholder="Your Store Name"
-                    placeholderTextColor="#8F796F"
-                    editable={!loading}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputWrapper}>
-                <Text style={styles.label}>Email Address</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="mail-outline"
-                    size={20}
-                    color="#8F796F"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="juan@email.com"
-                    placeholderTextColor="#8F796F"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    editable={!loading}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputWrapper}>
-                <Text style={styles.label}>Phone Number</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="call-outline"
-                    size={20}
-                    color="#8F796F"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={phone}
-                    onChangeText={setPhone}
-                    placeholder="+63 906 561 8297"
-                    placeholderTextColor="#8F796F"
-                    keyboardType="phone-pad"
-                    editable={!loading}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputWrapper}>
-                <Text style={styles.label}>Password</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="lock-closed-outline"
-                    size={20}
-                    color="#8F796F"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={[styles.input, styles.passwordInput]}
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Create a password"
-                    placeholderTextColor="#8F796F"
-                    secureTextEntry={!showPassword}
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowPassword(!showPassword)}
-                    style={styles.eyeIcon}
-                  >
-                    <Ionicons
-                      name={showPassword ? "eye-off-outline" : "eye-outline"}
-                      size={20}
-                      color="#8F796F"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.inputWrapper}>
-                <Text style={styles.label}>Confirm Password</Text>
-                <View style={styles.inputContainer}>
-                  <Ionicons
-                    name="lock-closed-outline"
-                    size={20}
-                    color="#8F796F"
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={[styles.input, styles.passwordInput]}
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    placeholder="Confirm your password"
-                    placeholderTextColor="#8F796F"
-                    secureTextEntry={!showConfirmPassword}
-                    editable={!loading}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    style={styles.eyeIcon}
-                  >
-                    <Ionicons
-                      name={
-                        showConfirmPassword ? "eye-off-outline" : "eye-outline"
-                      }
-                      size={20}
-                      color="#8F796F"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.noteContainer}>
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Full Name</Text>
+              <View style={styles.inputContainer}>
                 <Ionicons
-                  name="information-circle-outline"
+                  name="person-outline"
                   size={20}
-                  color="#C35822"
+                  color="#8F796F"
+                  style={styles.inputIcon}
                 />
-                <Text style={styles.noteText}>
-                  We'll send a verification link to your email
-                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={fullName}
+                  onChangeText={setFullName}
+                  placeholder="Juan Dela Cruz"
+                  placeholderTextColor="#8F796F"
+                  editable={!loading}
+                />
               </View>
+            </View>
 
-              <TouchableOpacity
-                style={styles.termsContainer}
-                onPress={() => setAgreeTerms(!agreeTerms)}
-                disabled={loading}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    agreeTerms && styles.checkboxChecked,
-                  ]}
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Store Name</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="business-outline"
+                  size={20}
+                  color="#8F796F"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={storeName}
+                  onChangeText={setStoreName}
+                  placeholder="Your Store Name"
+                  placeholderTextColor="#8F796F"
+                  editable={!loading}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Email Address</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="mail-outline"
+                  size={20}
+                  color="#8F796F"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="juan@email.com"
+                  placeholderTextColor="#8F796F"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  editable={!loading}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Phone Number</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="call-outline"
+                  size={20}
+                  color="#8F796F"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="+63 906 561 8297"
+                  placeholderTextColor="#8F796F"
+                  keyboardType="phone-pad"
+                  editable={!loading}
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Password</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={20}
+                  color="#8F796F"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Create a password"
+                  placeholderTextColor="#8F796F"
+                  secureTextEntry={!showPassword}
+                  editable={!loading}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.eyeIcon}
                 >
-                  {agreeTerms && (
-                    <Ionicons name="checkmark" size={16} color="#FFF" />
-                  )}
-                </View>
-                <Text style={styles.termsText}>
-                  I agree to the{" "}
-                  <Text
-                    style={styles.termsLink}
-                    onPress={() => router.push("/legal/terms-of-service")}
-                  >
-                    Terms of Service
-                  </Text>{" "}
-                  and{" "}
-                  <Text
-                    style={styles.termsLink}
-                    onPress={() => router.push("/legal/privacy-policy")}
-                  >
-                    Privacy Policy
-                  </Text>
-                </Text>
-              </TouchableOpacity>
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={20}
+                    color="#8F796F"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
 
-              <TouchableOpacity
-                style={styles.termsContainer}
-                onPress={() => setAgreeSellerAgreement(!agreeSellerAgreement)}
-                disabled={loading}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    agreeSellerAgreement && styles.checkboxChecked,
-                  ]}
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Confirm Password</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={20}
+                  color="#8F796F"
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Confirm your password"
+                  placeholderTextColor="#8F796F"
+                  secureTextEntry={!showConfirmPassword}
+                  editable={!loading}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                  style={styles.eyeIcon}
                 >
-                  {agreeSellerAgreement && (
-                    <Ionicons name="checkmark" size={16} color="#FFF" />
-                  )}
-                </View>
-                <Text style={styles.termsText}>
-                  I have read and agree to the{" "}
-                  <Text
-                    style={styles.termsLink}
-                    onPress={() => router.push("/legal/seller-agreement")}
-                  >
-                    Seller Agreement
-                  </Text>
-                </Text>
-              </TouchableOpacity>
+                  <Ionicons
+                    name={
+                      showConfirmPassword ? "eye-off-outline" : "eye-outline"
+                    }
+                    size={20}
+                    color="#8F796F"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.signupButton,
-                  (!allAgreed || loading) && styles.signupButtonDisabled,
-                ]}
-                onPress={handleSignup}
-                disabled={!allAgreed || loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.signupButtonText}>Create Account</Text>
-                )}
-              </TouchableOpacity>
-
-              <Text style={styles.footerNote}>
-                By creating a seller account, you enter into a legally binding
-                agreement with MarketMNL.
+            <View style={styles.noteContainer}>
+              <Ionicons
+                name="information-circle-outline"
+                size={20}
+                color="#C35822"
+              />
+              <Text style={styles.noteText}>
+                We'll send a verification link to your email
               </Text>
             </View>
+
+            <TouchableOpacity
+              style={styles.termsContainer}
+              onPress={() => setAgreeTerms(!agreeTerms)}
+              disabled={loading}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  agreeTerms && styles.checkboxChecked,
+                ]}
+              >
+                {agreeTerms && (
+                  <Ionicons name="checkmark" size={16} color="#FFF" />
+                )}
+              </View>
+              <Text style={styles.termsText}>
+                I agree to the{" "}
+                <Text
+                  style={styles.termsLink}
+                  onPress={() => router.push("/legal/terms-of-service")}
+                >
+                  Terms of Service
+                </Text>{" "}
+                and{" "}
+                <Text
+                  style={styles.termsLink}
+                  onPress={() => router.push("/legal/privacy-policy")}
+                >
+                  Privacy Policy
+                </Text>
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.termsContainer}
+              onPress={() => setAgreeSellerAgreement(!agreeSellerAgreement)}
+              disabled={loading}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  agreeSellerAgreement && styles.checkboxChecked,
+                ]}
+              >
+                {agreeSellerAgreement && (
+                  <Ionicons name="checkmark" size={16} color="#FFF" />
+                )}
+              </View>
+              <Text style={styles.termsText}>
+                I have read and agree to the{" "}
+                <Text
+                  style={styles.termsLink}
+                  onPress={() => router.push("/legal/seller-agreement")}
+                >
+                  Seller Agreement
+                </Text>
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.signupButton,
+                (!allAgreed || loading) && styles.signupButtonDisabled,
+              ]}
+              onPress={handleSignup}
+              disabled={!allAgreed || loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.signupButtonText}>Create Account</Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.footerNote}>
+              By creating a seller account, you enter into a legally binding
+              agreement with MarketMNL.
+            </Text>
           </View>
 
           <View style={styles.loginContainer}>
@@ -393,7 +399,7 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 30,
+    paddingTop: 20,
     paddingBottom: 20,
   },
   logoContainer: {
@@ -401,9 +407,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   logo: {
-    width: 250,
-    height: 250,
-    marginBottom: -70,
+    width: 200,
+    height: 200,
+    marginBottom: -40,
   },
   userTypeContainer: {
     flexDirection: "row",
@@ -411,13 +417,6 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     padding: 4,
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#E8E8E8",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
   },
   userTypeButton: {
     flex: 1,
@@ -444,22 +443,26 @@ const styles = StyleSheet.create({
   },
   formContainer: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 15,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#E8E8E8",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  form: {
-    width: "100%",
+  formHeader: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  formTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#32221B",
   },
   inputWrapper: {
-    marginBottom: 15,
+    marginBottom: 16,
   },
   label: {
     fontSize: 14,
@@ -470,10 +473,10 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E0DAD1",
-    borderRadius: 15,
+    backgroundColor: "#F5F0EB",
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E8E8E8",
+    borderColor: "#E0DAD1",
     paddingHorizontal: 12,
   },
   inputIcon: {
@@ -481,7 +484,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 15,
     color: "#32221B",
   },
@@ -491,7 +494,7 @@ const styles = StyleSheet.create({
   eyeIcon: {
     position: "absolute",
     right: 12,
-    top: 12,
+    top: 14,
   },
   noteContainer: {
     flexDirection: "row",
@@ -510,6 +513,7 @@ const styles = StyleSheet.create({
   termsContainer: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 10,
     marginBottom: 16,
   },
   checkbox: {
@@ -538,18 +542,19 @@ const styles = StyleSheet.create({
   },
   signupButton: {
     backgroundColor: "#C35822",
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 16,
     alignItems: "center",
     marginTop: 10,
     shadowColor: "#C35822",
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
   signupButtonDisabled: {
-    backgroundColor: "#FFB6A5",
+    backgroundColor: "#E0DAD1",
+    shadowOpacity: 0,
   },
   signupButtonText: {
     color: "#FFF",

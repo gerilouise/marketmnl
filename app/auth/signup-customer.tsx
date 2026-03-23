@@ -72,7 +72,6 @@ export default function SignupCustomerScreen() {
       userType: "buyer" as const,
     };
 
-    // Use signUp directly
     await signUp(email, password, userData);
   };
 
@@ -124,7 +123,10 @@ export default function SignupCustomerScreen() {
           </View>
 
           <View style={styles.formContainer}>
-            <Text style={styles.formTitle}>Create Account</Text>
+            {/* Centered Create Account Text */}
+            <View style={styles.formHeader}>
+              <Text style={styles.formTitle}>Create Account</Text>
+            </View>
 
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Full Name</Text>
@@ -270,7 +272,10 @@ export default function SignupCustomerScreen() {
               disabled={loading}
             >
               <View
-                style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}
+                style={[
+                  styles.checkbox,
+                  agreeTerms && styles.checkboxChecked,
+                ]}
               >
                 {agreeTerms && (
                   <Ionicons name="checkmark" size={16} color="#FFF" />
@@ -322,7 +327,6 @@ export default function SignupCustomerScreen() {
   );
 }
 
-// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -384,11 +388,14 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+  formHeader: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
   formTitle: {
     fontSize: 20,
     fontWeight: "bold",
     color: "#32221B",
-    marginBottom: 20,
   },
   inputWrapper: {
     marginBottom: 16,

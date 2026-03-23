@@ -36,6 +36,9 @@ export default function LoadingScreen() {
         style={styles.logo}
         resizeMode="contain"
       />
+      <Text style={styles.tagline}>
+        Bringing Filipino Flavors to Your Table
+      </Text>
       <ActivityIndicator size="large" color="#C35822" style={styles.loader} />
     </View>
   );
@@ -50,11 +53,19 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   logo: {
-    width: 250,
-    height: 250,
-    marginBottom: 20,
+    width: 300, 
+    height: 300, 
+    marginBottom: 16,
+  },
+  tagline: {
+    fontSize: 16,
+    color: '#8F796F',
+    textAlign: 'center',
+    marginBottom: 40,
+    fontWeight: '500',
+    letterSpacing: 0.5,
   },
   loader: {
-    marginTop: 20,
+    marginTop: 10,
   },
 });

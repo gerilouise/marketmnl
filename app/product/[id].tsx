@@ -10,12 +10,33 @@ import {
   Alert,
   ActivityIndicator,
   Share,
+  Modal,
+  TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { db, auth } from '@/lib/firebase';
-import { doc, getDoc, collection, addDoc, deleteDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, collection, setDoc, deleteDoc, updateDoc, addDoc, Timestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
+
+interface Recipe {
+  id: string;
+  name: string;
+  description: string;
+  prepTime: string;
+  difficulty: string;
+}
+
+interface ProductReview {
+  id: string;
+  userName: string;
+  userInitials: string;
+  userId: string;
+  rating: number;
+  date: string;
+  comment: string;
+  createdAt: any;
+}
 
 interface Product {
   id: string;
@@ -27,29 +48,48 @@ interface Product {
   imageUrl: string | null;
   sellerId: string;
   sellerName?: string;
-  storeName?: string; // Store name from stores collection
+  storeName?: string;
   rating?: number;
-  reviews?: number;
+  reviewsCount?: number;
   createdAt: any;
   netWeight?: string;
+  calories?: number;
   origin?: string;
   culturalBackground?: string;
   storage?: string;
   shelfLife?: string;
+  recipes?: Recipe[];
 }
 
 export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams();
   const [quantity, setQuantity] = useState(1);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
+  const [showAllReviews, setShowAllReviews] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [storeName, setStoreName] = useState<string>("");
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  
+  // Review modal state
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   // Load product data from Firebase
   useEffect(() => {
     loadProduct();
   }, [id]);
+
+  // Load reviews when product is loaded
+  useEffect(() => {
+    if (product?.id) {
+      loadReviews();
+    }
+  }, [product?.id]);
 
   const loadProduct = async () => {
     if (!id) return;
@@ -63,7 +103,7 @@ export default function ProductDetailsScreen() {
         const productData = { id: productSnap.id, ...productSnap.data() } as Product;
         setProduct(productData);
         
-        // Load store info from stores collection (not users)
+        // Load store info from stores collection
         if (productData.sellerId) {
           const storeRef = doc(db, 'stores', productData.sellerId);
           const storeSnap = await getDoc(storeRef);
@@ -86,6 +126,42 @@ export default function ProductDetailsScreen() {
       Alert.alert("Error", "Failed to load product");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadReviews = async () => {
+    if (!product?.id) return;
+    
+    setLoadingReviews(true);
+    try {
+      const reviewsRef = collection(db, 'product_reviews');
+      const q = query(
+        reviewsRef, 
+        where('productId', '==', product.id),
+        orderBy('createdAt', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      
+      const loadedReviews: ProductReview[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        loadedReviews.push({
+          id: doc.id,
+          userName: data.userName || "Anonymous",
+          userInitials: data.userInitials || "??",
+          userId: data.userId,
+          rating: data.rating,
+          date: data.createdAt?.toDate?.()?.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || new Date().toLocaleDateString(),
+          comment: data.comment,
+          createdAt: data.createdAt,
+        });
+      });
+      
+      setReviews(loadedReviews);
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+    } finally {
+      setLoadingReviews(false);
     }
   };
 
@@ -121,21 +197,19 @@ export default function ProductDetailsScreen() {
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
-        // Update quantity
-        const currentQty = docSnap.data().quantity;
         await updateDoc(docRef, {
-          quantity: currentQty + quantity,
+          quantity: docSnap.data().quantity + quantity,
           updatedAt: Timestamp.now()
         });
       } else {
-        // Add new item
-        await addDoc(cartRef, {
+        await setDoc(docRef, {
           id: cartItemId,
           userId: user.uid,
           productId: product?.id,
           productName: product?.name,
           productPrice: product?.price,
-          sellerName: storeName, // Use store name here
+          sellerName: storeName,
+          sellerId: product?.sellerId,
           quantity: quantity,
           imageUrl: product?.imageUrl,
           addedAt: Timestamp.now(),
@@ -167,19 +241,18 @@ export default function ProductDetailsScreen() {
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
-        // Remove from wishlist
         await deleteDoc(docRef);
         setIsWishlisted(false);
         Alert.alert("Removed", `${product?.name} removed from wishlist`);
       } else {
-        // Add to wishlist
-        await addDoc(wishlistRef, {
+        await setDoc(docRef, {
           id: itemId,
           userId: user.uid,
           productId: product?.id,
           productName: product?.name,
           productPrice: product?.price,
-          sellerName: storeName, // Use store name here
+          sellerName: storeName,
+          sellerId: product?.sellerId,
           imageUrl: product?.imageUrl,
           addedAt: Timestamp.now()
         });
@@ -203,6 +276,51 @@ export default function ProductDetailsScreen() {
     }
   };
 
+  const handleSubmitReview = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to write a review", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
+
+    if (!reviewComment.trim()) {
+      Alert.alert("Error", "Please write a comment");
+      return;
+    }
+
+    setSubmittingReview(true);
+    try {
+      const reviewsRef = collection(db, 'product_reviews');
+      const userInitials = user.email?.substring(0, 2).toUpperCase() || "U";
+      const userName = user.displayName || user.email?.split('@')[0] || "Anonymous";
+      
+      await addDoc(reviewsRef, {
+        productId: product?.id,
+        userId: user.uid,
+        userName: userName,
+        userInitials: userInitials,
+        rating: reviewRating,
+        comment: reviewComment.trim(),
+        createdAt: Timestamp.now(),
+      });
+      
+      await loadReviews();
+      setReviewRating(5);
+      setReviewComment("");
+      setShowReviewModal(false);
+      
+      Alert.alert("Success", "Your review has been submitted!");
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      Alert.alert("Error", "Failed to submit review");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   const navigateToStore = () => {
     if (product?.sellerId) {
       router.push(`/store/${product.sellerId}`);
@@ -211,6 +329,48 @@ export default function ProductDetailsScreen() {
 
   const incrementQuantity = () => setQuantity(prev => prev + 1);
   const decrementQuantity = () => setQuantity(prev => (prev > 1 ? prev - 1 : 1));
+
+  const toggleRecipe = (recipeId: string) => {
+    setExpandedRecipe(expandedRecipe === recipeId ? null : recipeId);
+  };
+
+  const renderStars = (rating: number) => {
+    return (
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Ionicons
+            key={star}
+            name={star <= rating ? "star" : "star-outline"}
+            size={14}
+            color="#FFD700"
+          />
+        ))}
+      </View>
+    );
+  };
+
+  const renderRatingStars = (rating: number, size: number = 20, interactive: boolean = false) => {
+    return (
+      <View style={styles.starsRow}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <TouchableOpacity
+            key={star}
+            onPress={() => interactive && setReviewRating(star)}
+            disabled={!interactive}
+          >
+            <Ionicons
+              name={star <= rating ? "star" : "star-outline"}
+              size={size}
+              color="#FFD700"
+              style={interactive && styles.interactiveStar}
+            />
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
+
+  const displayedReviews = showAllReviews ? reviews : reviews.slice(0, 3);
 
   if (loading) {
     return (
@@ -251,26 +411,20 @@ export default function ProductDetailsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with back button, wishlist and share */}
+        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <View style={styles.headerRight}>
-            <TouchableOpacity 
-              style={styles.headerButton}
-              onPress={handleToggleWishlist}
-            >
+            <TouchableOpacity style={styles.headerButton} onPress={handleToggleWishlist}>
               <Ionicons 
                 name={isWishlisted ? "heart" : "heart-outline"} 
                 size={24} 
                 color={isWishlisted ? "#C35822" : "#32221B"} 
               />
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.headerButton}
-              onPress={handleShare}
-            >
+            <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
               <Ionicons name="share-outline" size={24} color="#32221B" />
             </TouchableOpacity>
           </View>
@@ -291,7 +445,6 @@ export default function ProductDetailsScreen() {
 
         {/* Product Info */}
         <View style={styles.contentContainer}>
-          {/* Brand and Category */}
           <View style={styles.brandRow}>
             <Text style={styles.brand}>{storeName || "MarketMNL"}</Text>
             <View style={styles.categoryTag}>
@@ -299,29 +452,29 @@ export default function ProductDetailsScreen() {
             </View>
           </View>
           
-          {/* Product Name and Price Row */}
           <View style={styles.namePriceRow}>
             <Text style={styles.productName}>{product.name}</Text>
             <Text style={styles.price}>₱{product.price}</Text>
           </View>
           
-          {/* Description */}
           <Text style={styles.description}>{product.description}</Text>
           
-          {/* Net Weight */}
-          {product.netWeight && (
-            <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
-          )}
+          {/* Net Weight and Calories Row */}
+          <View style={styles.weightCalorieRow}>
+            {product.netWeight && (
+              <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
+            )}
+            {product.calories && (
+              <View style={styles.calorieBadge}>
+                <Ionicons name="flame-outline" size={14} color="#C35822" />
+                <Text style={styles.calorieText}>{product.calories} kcal</Text>
+              </View>
+            )}
+          </View>
 
-          {/* Divider */}
           <View style={styles.divider} />
 
-          {/* Seller and Rating - Clickable */}
-          <TouchableOpacity 
-            style={styles.sellerCard}
-            onPress={navigateToStore}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.sellerCard} onPress={navigateToStore} activeOpacity={0.7}>
             <View style={styles.sellerInfo}>
               <Text style={styles.sellerLabel}>Store</Text>
               <View style={styles.sellerNameContainer}>
@@ -331,12 +484,11 @@ export default function ProductDetailsScreen() {
             </View>
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={styles.ratingText}>{product.rating || 4.5}</Text>
-              <Text style={styles.reviewsText}>({product.reviews || 0})</Text>
+              <Text style={styles.ratingText}>{product.rating || reviews.length > 0 ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1) : "4.5"}</Text>
+              <Text style={styles.reviewsText}>({product.reviewsCount || reviews.length})</Text>
             </View>
           </TouchableOpacity>
 
-          {/* Product Details Section */}
           <View style={styles.detailsCard}>
             {product.origin && (
               <View style={styles.detailItem}>
@@ -387,11 +539,110 @@ export default function ProductDetailsScreen() {
             )}
           </View>
 
+          {/* Recipe Section */}
+          {product.recipes && product.recipes.length > 0 && (
+            <View style={styles.recipeSection}>
+              <View style={styles.recipeHeader}>
+                <View style={styles.recipeTitleContainer}>
+                  <Ionicons name="restaurant-outline" size={20} color="#C35822" />
+                  <Text style={styles.recipeSectionTitle}>Recipe Ideas</Text>
+                </View>
+                <Text style={styles.recipeCount}>{product.recipes.length} recipes</Text>
+              </View>
+
+              {product.recipes.map((recipe) => (
+                <View key={recipe.id} style={styles.recipeCard}>
+                  <TouchableOpacity style={styles.recipeCardHeader} onPress={() => toggleRecipe(recipe.id)}>
+                    <View style={styles.recipeInfo}>
+                      <Text style={styles.recipeName}>{recipe.name}</Text>
+                      <View style={styles.recipeMeta}>
+                        <View style={styles.recipeMetaItem}>
+                          <Ionicons name="time-outline" size={12} color="#8F796F" />
+                          <Text style={styles.recipeMetaText}>{recipe.prepTime}</Text>
+                        </View>
+                        <View style={styles.recipeMetaItem}>
+                          <Ionicons name="stats-chart-outline" size={12} color="#8F796F" />
+                          <Text style={styles.recipeMetaText}>{recipe.difficulty}</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <Ionicons name={expandedRecipe === recipe.id ? "chevron-up" : "chevron-down"} size={20} color="#8F796F" />
+                  </TouchableOpacity>
+
+                  {expandedRecipe === recipe.id && (
+                    <View style={styles.recipeExpanded}>
+                      <Text style={styles.recipeDescription}>{recipe.description}</Text>
+                      <TouchableOpacity style={styles.viewRecipeButton} onPress={() => Alert.alert("Recipe", `Full recipe for ${recipe.name} coming soon!`)}>
+                        <Text style={styles.viewRecipeButtonText}>View Full Recipe</Text>
+                        <Ionicons name="arrow-forward" size={16} color="#C35822" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Reviews Section */}
+          <View style={styles.reviewsSection}>
+            <View style={styles.reviewsHeader}>
+              <View style={styles.reviewsTitleContainer}>
+                <Ionicons name="star" size={20} color="#FFD700" />
+                <Text style={styles.reviewsTitle}>Customer Reviews</Text>
+              </View>
+              <Text style={styles.reviewsCount}>{reviews.length} reviews</Text>
+            </View>
+
+            <TouchableOpacity style={styles.writeReviewButton} onPress={() => setShowReviewModal(true)}>
+              <Ionicons name="create-outline" size={18} color="#C35822" />
+              <Text style={styles.writeReviewText}>Write a Review</Text>
+            </TouchableOpacity>
+
+            {loadingReviews && (
+              <View style={styles.loadingReviewsContainer}>
+                <ActivityIndicator size="small" color="#C35822" />
+              </View>
+            )}
+
+            {!loadingReviews && displayedReviews.map((review) => (
+              <View key={review.id} style={styles.reviewCard}>
+                <View style={styles.reviewHeader}>
+                  <View style={styles.reviewerInfo}>
+                    <View style={styles.reviewerAvatar}>
+                      <Text style={styles.reviewerInitials}>{review.userInitials}</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.reviewerName}>{review.userName}</Text>
+                      <Text style={styles.reviewDate}>{review.date}</Text>
+                    </View>
+                  </View>
+                  {renderStars(review.rating)}
+                </View>
+                <Text style={styles.reviewComment}>{review.comment}</Text>
+              </View>
+            ))}
+
+            {!loadingReviews && reviews.length === 0 && (
+              <View style={styles.emptyReviewsContainer}>
+                <Ionicons name="chatbubble-outline" size={40} color="#E0DAD1" />
+                <Text style={styles.emptyReviewsText}>No reviews yet. Be the first to review!</Text>
+              </View>
+            )}
+
+            {reviews.length > 3 && (
+              <TouchableOpacity style={styles.viewAllButton} onPress={() => setShowAllReviews(!showAllReviews)}>
+                <Text style={styles.viewAllText}>
+                  {showAllReviews ? "Show Less" : `View All ${reviews.length} Reviews`}
+                </Text>
+                <Ionicons name={showAllReviews ? "chevron-up" : "chevron-down"} size={16} color="#C35822" />
+              </TouchableOpacity>
+            )}
+          </View>
+
           <View style={styles.bottomPadding} />
         </View>
       </ScrollView>
 
-      {/* Fixed Bottom Bar with Quantity and Add to Cart */}
       <View style={styles.bottomBar}>
         <View style={styles.quantityContainer}>
           <TouchableOpacity onPress={decrementQuantity} style={styles.quantityButton}>
@@ -408,6 +659,49 @@ export default function ProductDetailsScreen() {
           <Text style={styles.addToCartText}>Add to Cart</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal visible={showReviewModal} animationType="slide" transparent={true} onRequestClose={() => setShowReviewModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Write a Review</Text>
+              <TouchableOpacity onPress={() => setShowReviewModal(false)}>
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBody}>
+              <Text style={styles.modalLabel}>Rating</Text>
+              {renderRatingStars(reviewRating, 32, true)}
+              
+              <Text style={[styles.modalLabel, { marginTop: 20 }]}>Your Review</Text>
+              <TextInput
+                style={styles.reviewInput}
+                placeholder="Share your experience with this product..."
+                placeholderTextColor="#8F796F"
+                value={reviewComment}
+                onChangeText={setReviewComment}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+            </View>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowReviewModal(false)}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.submitButton, submittingReview && styles.submitButtonDisabled]} onPress={handleSubmitReview} disabled={submittingReview}>
+                {submittingReview ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Submit</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -542,10 +836,31 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 4,
   },
+  weightCalorieRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
   netWeight: {
     fontSize: 14,
     color: "#8F796F",
-    marginBottom: 20,
+  },
+  calorieBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  calorieText: {
+    fontSize: 12,
+    color: "#32221B",
+    fontWeight: "500",
+    marginLeft: 4,
   },
   divider: {
     height: 1,
@@ -640,6 +955,288 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#32221B",
     lineHeight: 20,
+  },
+  recipeSection: {
+    marginBottom: 20,
+  },
+  recipeHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  recipeTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  recipeSectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  recipeCount: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  recipeCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    overflow: "hidden",
+  },
+  recipeCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+  },
+  recipeInfo: {
+    flex: 1,
+  },
+  recipeName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 6,
+  },
+  recipeMeta: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  recipeMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  recipeMetaText: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  recipeExpanded: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  recipeDescription: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  viewRecipeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4,
+  },
+  viewRecipeButtonText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  reviewsSection: {
+    marginBottom: 20,
+  },
+  reviewsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  reviewsTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  reviewsTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  reviewsCount: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  writeReviewButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    marginBottom: 16,
+    gap: 6,
+  },
+  writeReviewText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  reviewCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 8,
+  },
+  reviewerInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  reviewerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#E0DAD1",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reviewerInitials: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  reviewerName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 2,
+  },
+  reviewDate: {
+    fontSize: 11,
+    color: "#8F796F",
+  },
+  starsContainer: {
+    flexDirection: "row",
+    gap: 2,
+  },
+  starsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  interactiveStar: {
+    marginRight: 4,
+  },
+  reviewComment: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 20,
+  },
+  loadingReviewsContainer: {
+    padding: 20,
+    alignItems: "center",
+  },
+  emptyReviewsContainer: {
+    padding: 40,
+    alignItems: "center",
+  },
+  emptyReviewsText: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginTop: 12,
+    textAlign: "center",
+  },
+  viewAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+    gap: 4,
+  },
+  viewAllText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    minHeight: 400,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  modalBody: {
+    flex: 1,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  reviewInput: {
+    backgroundColor: "#FBF8F4",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 14,
+    color: "#32221B",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    minHeight: 100,
+  },
+  modalFooter: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 20,
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    alignItems: "center",
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: "#8F796F",
+    fontWeight: "500",
+  },
+  submitButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 25,
+    backgroundColor: "#C35822",
+    alignItems: "center",
+  },
+  submitButtonDisabled: {
+    backgroundColor: "#FFB6A5",
+  },
+  submitButtonText: {
+    fontSize: 14,
+    color: "#FFF",
+    fontWeight: "600",
   },
   bottomPadding: {
     height: 100,

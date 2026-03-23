@@ -274,7 +274,7 @@ export default function SellerAgreementScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>9. Limitation of Liability</Text>
           <Text style={styles.text}>
-            To the maximum extent permitted by law, Markotsi's Markets, Ltd. shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses, resulting from:
+            To the maximum extent permitted by law, MarketMNL shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses, resulting from:
           </Text>
           <View style={styles.listItem}>
             <Text style={styles.bullet}>•</Text>
@@ -303,8 +303,8 @@ export default function SellerAgreementScreen() {
           <Text style={styles.sectionTitle}>11. Contact Information</Text>
           <Text style={styles.text}>For questions about this Agreement, please contact:</Text>
           <View style={styles.contactBox}>
-            <Text style={styles.contactText}>MarketMNL, Ltd.</Text>
-            <Text style={styles.contactText}>Email: sellers@markotsi.com</Text>
+            <Text style={styles.contactText}>MarketMNL</Text>
+            <Text style={styles.contactText}>Email: sellers@marketmnl.com</Text>
             <Text style={styles.contactText}>Phone: +63 (2) 1234 5678</Text>
             <Text style={styles.contactText}>Address: 11 Chico St., Brgy. Quirino 2-A, Quezon City, Metro Manila 1102</Text>
           </View>
@@ -419,7 +419,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     borderWidth: 1,
     borderColor: "#C35822",
-    backgroundColor: "#FFF8F0",
   },
   acceptanceText: {
     fontSize: 14,

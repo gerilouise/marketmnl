@@ -16,20 +16,72 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { auth, db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+
+interface FollowedShop {
+  id: string;
+  storeName: string;
+  storeImage?: string;
+}
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const { profile, addresses, loading, fetchProfile, fetchAddresses } =
-    useFirebaseProfile();
+  const [followedShops, setFollowedShops] = useState<FollowedShop[]>([]);
+  const [loadingFollowed, setLoadingFollowed] = useState(false);
+  const { profile, addresses, loading, fetchProfile, fetchAddresses } = useFirebaseProfile();
   const { logout } = useFirebaseAuth();
 
   useEffect(() => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (auth.currentUser) {
+      loadFollowedShops();
+    }
+  }, [auth.currentUser]);
+
   const loadData = async () => {
     await fetchProfile();
-    await fetchAddresses(); // This is the key fix - fetch addresses!
+    await fetchAddresses();
+  };
+
+  const loadFollowedShops = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setLoadingFollowed(true);
+    try {
+      const followsRef = collection(db, 'follows');
+      const q = query(followsRef, where('userId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      
+      const shops: FollowedShop[] = [];
+      
+      for (const docSnapshot of querySnapshot.docs) {
+        const followData = docSnapshot.data();
+        const shopId = followData.shopId;
+        
+        const storeRef = doc(db, 'stores', shopId);
+        const storeSnap = await getDoc(storeRef);
+        
+        if (storeSnap.exists()) {
+          const storeData = storeSnap.data();
+          shops.push({
+            id: shopId,
+            storeName: storeData.storeName || "Unknown Store",
+            storeImage: storeData.imageUrl,
+          });
+        }
+      }
+      
+      setFollowedShops(shops);
+    } catch (error) {
+      console.error('Error loading followed shops:', error);
+    } finally {
+      setLoadingFollowed(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -57,13 +109,17 @@ export default function ProfileScreen() {
     router.push("/(tabs)/edit-profile");
   };
 
+  const navigateToStore = (storeId: string) => {
+    router.push(`/store/${storeId}`);
+  };
+
   const navigateTo = (screen: string) => {
     switch (screen) {
       case "addresses":
         router.push("/(tabs)/addresses");
         break;
       case "orders":
-        router.push("/(tabs)/orders"); // 👈 Changed from Alert to navigate
+        router.push("/(tabs)/orders");
         break;
       case "reviews":
         Alert.alert("Coming Soon", "Reviews screen will be available soon!");
@@ -192,7 +248,72 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Default Address Section - Now shows if there's a default address */}
+        {/* Following Section - Added from second code */}
+        <View style={styles.followingSection}>
+          <View style={styles.followingHeader}>
+            <View style={styles.followingHeaderLeft}>
+              <Ionicons name="heart-outline" size={20} color="#C35822" />
+              <Text style={styles.followingTitle}>Following</Text>
+              <Text style={styles.followingCount}>{followedShops.length} shops</Text>
+            </View>
+          </View>
+
+          {loadingFollowed ? (
+            <View style={styles.loadingFollowedContainer}>
+              <ActivityIndicator size="small" color="#C35822" />
+            </View>
+          ) : followedShops.length > 0 ? (
+            <View>
+              {followedShops.slice(0, 3).map((shop) => (
+                <TouchableOpacity 
+                  key={shop.id}
+                  style={styles.followedShopItem}
+                  onPress={() => navigateToStore(shop.id)}
+                >
+                  {shop.storeImage ? (
+                    <Image source={{ uri: shop.storeImage }} style={styles.shopAvatar} />
+                  ) : (
+                    <View style={styles.shopAvatarPlaceholder}>
+                      <Ionicons name="storefront-outline" size={24} color="#8F796F" />
+                    </View>
+                  )}
+                  
+                  <View style={styles.shopInfo}>
+                    <Text style={styles.shopName}>{shop.storeName}</Text>
+                  </View>
+                  
+                  <Ionicons name="chevron-forward" size={20} color="#8F796F" />
+                </TouchableOpacity>
+              ))}
+              
+              {followedShops.length > 3 && (
+                <TouchableOpacity 
+                  style={styles.viewMoreButton}
+                  onPress={() => Alert.alert("Following", `You follow ${followedShops.length} shops. View all feature coming soon!`)}
+                >
+                  <Text style={styles.viewMoreText}>
+                    View {followedShops.length - 3} more {followedShops.length - 3 === 1 ? 'shop' : 'shops'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <View style={styles.emptyFollowing}>
+              <Ionicons name="heart-outline" size={32} color="#E0DAD1" />
+              <Text style={styles.emptyFollowingText}>
+                You're not following any shops yet
+              </Text>
+              <TouchableOpacity 
+                style={styles.browseShopsButton}
+                onPress={() => router.push("/(tabs)/browse")}
+              >
+                <Text style={styles.browseShopsText}>Browse Shops</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Default Address Section */}
         {defaultAddress ? (
           <TouchableOpacity
             style={styles.defaultAddressCard}
@@ -455,6 +576,110 @@ const styles = StyleSheet.create({
     width: 1,
     height: "100%",
     backgroundColor: "#F0F0F0",
+  },
+  // Following Section Styles
+  followingSection: {
+    backgroundColor: "#FFF",
+    marginHorizontal: 20,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  followingHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  followingHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  followingTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  followingCount: {
+    fontSize: 12,
+    color: "#8F796F",
+    backgroundColor: "#F5F5F5",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  followedShopItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F5F5F5",
+  },
+  shopAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 12,
+  },
+  shopAvatarPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FBF8F4",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  shopInfo: {
+    flex: 1,
+  },
+  shopName: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#32221B",
+  },
+  viewMoreButton: {
+    paddingTop: 12,
+    alignItems: "center",
+  },
+  viewMoreText: {
+    fontSize: 13,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  loadingFollowedContainer: {
+    paddingVertical: 20,
+    alignItems: "center",
+  },
+  emptyFollowing: {
+    alignItems: "center",
+    paddingVertical: 16,
+  },
+  emptyFollowingText: {
+    fontSize: 13,
+    color: "#8F796F",
+    marginTop: 8,
+  },
+  browseShopsButton: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  browseShopsText: {
+    fontSize: 13,
+    color: "#C35822",
+    fontWeight: "500",
   },
   defaultAddressCard: {
     backgroundColor: "#FFF",

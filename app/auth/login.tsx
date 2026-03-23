@@ -1,4 +1,4 @@
-// app/auth/login.tsx
+// app/auth/login.tsx - Update the handleForgotPassword function
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -23,7 +23,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  const { loading, login, resetPassword } = useFirebaseAuth();
+  const { loading, login } = useFirebaseAuth();
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -41,20 +41,8 @@ export default function LoginScreen() {
   };
 
   const handleForgotPassword = () => {
-    if (!email) {
-      Alert.alert("Error", "Please enter your email address first");
-      return;
-    }
-
-    Alert.alert("Reset Password", `Send password reset link to ${email}?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Send",
-        onPress: async () => {
-          await resetPassword(email);
-        },
-      },
-    ]);
+    // Navigate to forgot password screen
+    router.push("/auth/forgot-password");
   };
 
   const handleBrowseAsGuest = () => {
@@ -79,12 +67,12 @@ export default function LoginScreen() {
             />
           </View>
 
-          <View style={styles.titleContainer}>
-            <Text style={styles.title}>Welcome Back!</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
-          </View>
-
           <View style={styles.formContainer}>
+            {/* Centered Login Text */}
+            <View style={styles.formHeader}>
+              <Text style={styles.formTitle}>Login</Text>
+            </View>
+
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Email Address</Text>
               <View style={styles.inputContainer}>
@@ -231,26 +219,11 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: -75,
   },
   logo: {
-    width: 180,
-    height: 180,
-  },
-  titleContainer: {
-    marginBottom: 30,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#32221B",
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 16,
-    color: "#8F796F",
-    textAlign: "center",
-    marginTop: 8,
+    width: 250,
+    height: 300,
   },
   formContainer: {
     backgroundColor: "#FFFFFF",
@@ -262,6 +235,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
+  },
+  formHeader: {
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  formTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#32221B",
   },
   inputWrapper: {
     marginBottom: 16,

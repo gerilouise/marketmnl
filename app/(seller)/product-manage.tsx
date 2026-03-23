@@ -23,6 +23,15 @@ import { collection, addDoc, doc, getDoc, updateDoc, Timestamp } from 'firebase/
 
 const CATEGORIES = ["Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
 
+// Recipe interface
+interface Recipe {
+  id: string;
+  name: string;
+  description: string;
+  prepTime: string;
+  difficulty: string;
+}
+
 export default function SellerProductsManageScreen() {
   const { productId } = useLocalSearchParams();
   const isEditing = !!productId;
@@ -34,6 +43,7 @@ export default function SellerProductsManageScreen() {
   const [category, setCategory] = useState("Bottled");
   const [stock, setStock] = useState("");
   const [weight, setWeight] = useState("");
+  const [calories, setCalories] = useState(""); // NEW FIELD
   const [origin, setOrigin] = useState("");
   const [culturalBackground, setCulturalBackground] = useState("");
   const [storage, setStorage] = useState("");
@@ -41,9 +51,37 @@ export default function SellerProductsManageScreen() {
   const [image, setImage] = useState<string | null>(null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   
+  // Recipes state
+  const [recipes, setRecipes] = useState<Recipe[]>([
+    { id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }
+  ]);
+  const [originalRecipes, setOriginalRecipes] = useState<Recipe[]>([]);
+  
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Recipe functions
+  const addRecipe = () => {
+    setRecipes([
+      ...recipes,
+      { id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }
+    ]);
+  };
+
+  const updateRecipe = (id: string, field: string, value: string) => {
+    setRecipes(recipes.map(recipe => 
+      recipe.id === id ? { ...recipe, [field]: value } : recipe
+    ));
+  };
+
+  const removeRecipe = (id: string) => {
+    if (recipes.length > 1) {
+      setRecipes(recipes.filter(recipe => recipe.id !== id));
+    } else {
+      Alert.alert("Error", "You need at least one recipe");
+    }
+  };
 
   // Reset form function
   const resetForm = () => {
@@ -53,12 +91,15 @@ export default function SellerProductsManageScreen() {
     setCategory("Bottled");
     setStock("");
     setWeight("");
+    setCalories("");
     setOrigin("");
     setCulturalBackground("");
     setStorage("");
     setShelfLife("");
     setImage(null);
     setOriginalImage(null);
+    setRecipes([{ id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }]);
+    setOriginalRecipes([]);
   };
 
   // Load product data if editing
@@ -84,12 +125,28 @@ export default function SellerProductsManageScreen() {
         setCategory(product.category || "Bottled");
         setStock(product.stockQuantity?.toString() || "");
         setWeight(product.netWeight || "");
+        setCalories(product.calories?.toString() || ""); // NEW FIELD
         setOrigin(product.origin || "");
         setCulturalBackground(product.culturalBackground || "");
         setStorage(product.storage || "");
         setShelfLife(product.shelfLife || "");
         setImage(product.imageUrl || null);
         setOriginalImage(product.imageUrl || null);
+        
+        // Load recipes if they exist
+        if (product.recipes && Array.isArray(product.recipes) && product.recipes.length > 0) {
+          const loadedRecipes = product.recipes.map((recipe: any, index: number) => ({
+            id: recipe.id || Date.now().toString() + index,
+            name: recipe.name || "",
+            description: recipe.description || "",
+            prepTime: recipe.prepTime || "",
+            difficulty: recipe.difficulty || "Easy"
+          }));
+          setRecipes(loadedRecipes);
+          setOriginalRecipes(loadedRecipes);
+        } else {
+          setRecipes([{ id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }]);
+        }
       } else {
         Alert.alert("Error", "Product not found");
         router.replace("/(seller)/products");
@@ -104,7 +161,6 @@ export default function SellerProductsManageScreen() {
   };
 
   const handleGoBack = () => {
-    // Go directly to products page
     router.replace("/(seller)/products");
   };
 
@@ -220,6 +276,9 @@ export default function SellerProductsManageScreen() {
 
       const now = Timestamp.now();
 
+      // Filter out empty recipes (where name is empty)
+      const validRecipes = recipes.filter(recipe => recipe.name.trim() !== "");
+
       const productData = {
         name: name.trim(),
         description: description.trim() || `${name} - Authentic Filipino delicacy`,
@@ -227,11 +286,13 @@ export default function SellerProductsManageScreen() {
         category,
         stockQuantity: parseInt(stock),
         netWeight: weight.trim(),
+        calories: calories ? parseFloat(calories) : null, // NEW FIELD
         imageUrl: imageUrl || null,
         origin: origin.trim() || null,
         culturalBackground: culturalBackground.trim() || null,
         storage: storage.trim() || null,
         shelfLife: shelfLife.trim() || null,
+        recipes: validRecipes.length > 0 ? validRecipes : null, // NEW FIELD
         sellerId: user.uid,
         createdAt: now,
         updatedAt: now,
@@ -252,7 +313,6 @@ export default function SellerProductsManageScreen() {
         Alert.alert("Success", "Product added successfully!");
       }
       
-      // Navigate directly to products page
       router.replace("/(seller)/products");
       
     } catch (error) {
@@ -396,16 +456,32 @@ export default function SellerProductsManageScreen() {
               </View>
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Net Weight <Text style={styles.required}>*</Text></Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., 250g"
-                placeholderTextColor="#8F796F"
-                value={weight}
-                onChangeText={setWeight}
-                editable={!submitting}
-              />
+            <View style={styles.rowInputs}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.label}>Net Weight <Text style={styles.required}>*</Text></Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., 250g"
+                  placeholderTextColor="#8F796F"
+                  value={weight}
+                  onChangeText={setWeight}
+                  editable={!submitting}
+                />
+              </View>
+
+              {/* NEW: Calories Field */}
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.label}>Calories (kcal)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., 350"
+                  placeholderTextColor="#8F796F"
+                  value={calories}
+                  onChangeText={setCalories}
+                  keyboardType="numeric"
+                  editable={!submitting}
+                />
+              </View>
             </View>
           </View>
 
@@ -431,6 +507,98 @@ export default function SellerProductsManageScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+          </View>
+
+          {/* NEW: Recipes Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recipes</Text>
+            
+            {recipes.map((recipe, index) => (
+              <View key={recipe.id} style={styles.recipeContainer}>
+                <View style={styles.recipeHeader}>
+                  <Text style={styles.recipeTitle}>Recipe {index + 1}</Text>
+                  {recipes.length > 1 && (
+                    <TouchableOpacity onPress={() => removeRecipe(recipe.id)} disabled={submitting}>
+                      <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Recipe Name</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g., Spicy Tuyo Fried Rice"
+                    placeholderTextColor="#8F796F"
+                    value={recipe.name}
+                    onChangeText={(text) => updateRecipe(recipe.id, "name", text)}
+                    editable={!submitting}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Description</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    placeholder="Brief description of the recipe"
+                    placeholderTextColor="#8F796F"
+                    value={recipe.description}
+                    onChangeText={(text) => updateRecipe(recipe.id, "description", text)}
+                    multiline
+                    numberOfLines={2}
+                    editable={!submitting}
+                  />
+                </View>
+
+                <View style={styles.rowInputs}>
+                  <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                    <Text style={styles.label}>Prep Time</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., 15 mins"
+                      placeholderTextColor="#8F796F"
+                      value={recipe.prepTime}
+                      onChangeText={(text) => updateRecipe(recipe.id, "prepTime", text)}
+                      editable={!submitting}
+                    />
+                  </View>
+
+                  <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                    <Text style={styles.label}>Difficulty</Text>
+                    <View style={styles.difficultyContainer}>
+                      {["Easy", "Medium", "Hard"].map((level) => (
+                        <TouchableOpacity
+                          key={level}
+                          style={[
+                            styles.difficultyChip,
+                            recipe.difficulty === level && styles.difficultyChipActive
+                          ]}
+                          onPress={() => updateRecipe(recipe.id, "difficulty", level)}
+                          disabled={submitting}
+                        >
+                          <Text style={[
+                            styles.difficultyChipText,
+                            recipe.difficulty === level && styles.difficultyChipTextActive
+                          ]}>
+                            {level}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ))}
+
+            {/* Add Recipe Button */}
+            <TouchableOpacity 
+              style={styles.addRecipeButton} 
+              onPress={addRecipe}
+              disabled={submitting}
+            >
+              <Ionicons name="add-circle-outline" size={20} color="#C35822" />
+              <Text style={styles.addRecipeText}>Add Another Recipe</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.section}>
@@ -662,6 +830,66 @@ const styles = StyleSheet.create({
   },
   categoryChipTextActive: {
     color: "#FFF",
+  },
+  // Recipe styles
+  recipeContainer: {
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  recipeHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  recipeTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  difficultyContainer: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 4,
+  },
+  difficultyChip: {
+    flex: 1,
+    paddingVertical: 8,
+    backgroundColor: "#FBF8F4",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    alignItems: "center",
+  },
+  difficultyChipActive: {
+    backgroundColor: "#C35822",
+    borderColor: "#C35822",
+  },
+  difficultyChipText: {
+    fontSize: 12,
+    color: "#8F796F",
+    fontWeight: "500",
+  },
+  difficultyChipTextActive: {
+    color: "#FFF",
+  },
+  addRecipeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    borderRadius: 10,
+    borderStyle: "dashed",
+    gap: 6,
+  },
+  addRecipeText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
   },
   bottomPadding: {
     height: 20,

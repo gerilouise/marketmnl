@@ -399,7 +399,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     borderWidth: 1,
     borderColor: "#C35822",
-    backgroundColor: "#FFF8F0",
   },
   acceptanceText: {
     fontSize: 14,

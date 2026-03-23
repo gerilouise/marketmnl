@@ -33,6 +33,19 @@ export default function HomeScreen() {
     loadProfile();
   }, []);
 
+  // Navigate to chat screen
+  const navigateToChat = () => {
+    const user = getCurrentUser();
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to view your messages", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") }
+      ]);
+      return;
+    }
+    router.push("/(customer)/chat-list");
+  };
+
   // Sample data for categories
   const categories = [
     { id: "1", name: "Specials", icon: "🎉" },
@@ -208,7 +221,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with greeting and separator line */}
+        {/* Header with greeting and icons */}
         <View>
           <View style={styles.header}>
             <View>
@@ -220,13 +233,25 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            <TouchableOpacity>
-              <Ionicons
-                name="notifications-outline"
-                size={24}
-                color="#8F796F"
-              />
-            </TouchableOpacity>
+            <View style={styles.headerIcons}>
+              {/* Notifications Icon */}
+              <TouchableOpacity>
+                <Ionicons
+                  name="notifications-outline"
+                  size={24}
+                  color="#8F796F"
+                />
+              </TouchableOpacity>
+              
+              {/* Chat Icon - Right of Notifications */}
+              <TouchableOpacity onPress={navigateToChat}>
+                <Ionicons
+                  name="chatbubble-outline"
+                  size={24}
+                  color="#8F796F"
+                />
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={styles.separator} />
         </View>
@@ -338,7 +363,6 @@ export default function HomeScreen() {
 
 // Add this to your styles
 const styles = StyleSheet.create({
-  // ... all your existing styles
   container: {
     flex: 1,
     backgroundColor: "#FAF8F4",
@@ -350,6 +374,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 15,
+  },
+  headerIcons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
   },
   greeting: {
     fontSize: 16,

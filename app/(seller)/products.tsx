@@ -41,7 +41,7 @@ export default function SellerProductsScreen() {
   const [products, setProducts] = useState<any[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(false);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
 
   // Fetch ALL products from Firebase
   const fetchProducts = async () => {
@@ -101,29 +101,66 @@ export default function SellerProductsScreen() {
     }
   };
 
-  // Delete product function
+  // Delete product function with confirmation and proper error handling
   const deleteProduct = async (productId: string, productName: string) => {
-    if (deleting) return;
-
-    setDeleting(true);
-    try {
-      console.log("🗑️ Deleting product:", productName);
-
-      const productRef = doc(db, "products", productId);
-      await deleteDoc(productRef);
-
-      console.log("✅ Product deleted:", productName);
-
-      // Refresh the list
-      await fetchProducts();
-
-      Alert.alert("Success", `"${productName}" has been deleted`);
-    } catch (error: any) {
-      console.error("❌ Delete error:", error);
-      Alert.alert("Error", error.message || "Failed to delete product");
-    } finally {
-      setDeleting(false);
+    console.log("Delete product called with ID:", productId, "Name:", productName);
+    
+    if (deletingProductId) {
+      console.log("Already deleting a product, skipping...");
+      return;
     }
+
+    Alert.alert(
+      "Delete Product",
+      `Are you sure you want to delete "${productName}"?\n\nThis action cannot be undone.`,
+      [
+        { 
+          text: "Cancel", 
+          style: "cancel",
+          onPress: () => console.log("Delete cancelled")
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            console.log("User confirmed deletion for:", productName);
+            setDeletingProductId(productId);
+            
+            try {
+              const productRef = doc(db, "products", productId);
+              console.log("Product reference created for:", productId);
+              
+              await deleteDoc(productRef);
+              console.log("✅ Product deleted from database:", productName);
+              
+              const updatedProducts = products.filter(p => p.id !== productId);
+              setProducts(updatedProducts);
+              
+              if (selectedCategory === "All") {
+                setFilteredProducts(updatedProducts);
+              } else {
+                const filtered = updatedProducts.filter(
+                  (product) => product.category === selectedCategory,
+                );
+                setFilteredProducts(filtered);
+              }
+
+              Alert.alert("Success", `"${productName}" has been deleted permanently.`);
+            } catch (error: any) {
+              console.error("❌ Delete error details:", error);
+              Alert.alert(
+                "Delete Failed", 
+                error.message || "Failed to delete product. Please try again."
+              );
+              
+              await fetchProducts();
+            } finally {
+              setDeletingProductId(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   // Fetch products when screen loads
@@ -156,81 +193,77 @@ export default function SellerProductsScreen() {
     setRefreshing(false);
   };
 
-  const renderProductItem = ({ item }: { item: any }) => (
-    <View style={styles.productCard}>
-      {/* Product Image */}
-      <View style={styles.productImagePlaceholder}>
-        {item.imageUrl ? (
-          <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
-        ) : (
-          <Ionicons name="image-outline" size={40} color="#CCC" />
-        )}
-      </View>
-
-      {/* Product Details */}
-      <View style={styles.productDetails}>
-        <Text style={styles.productName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.productDescription} numberOfLines={2}>
-          {item.description || "No description"}
-        </Text>
-
-        {/* Price and Stock Row */}
-        <View style={styles.priceStockRow}>
-          <Text style={styles.productPrice}>
-            ₱{item.price?.toFixed(2) || "0.00"}
-          </Text>
-          <Text style={styles.productStock}>
-            Stock: {item.stockQuantity || 0}
-          </Text>
+  const renderProductItem = ({ item }: { item: any }) => {
+    return (
+      <View style={styles.productCard}>
+        {/* Product Image */}
+        <View style={styles.productImagePlaceholder}>
+          {item.imageUrl ? (
+            <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+          ) : (
+            <Ionicons name="image-outline" size={40} color="#CCC" />
+          )}
         </View>
 
-        {/* Category Tag */}
-        <View style={styles.categoryTag}>
-          <Text style={styles.categoryTagText}>{item.category}</Text>
+        {/* Product Details */}
+        <View style={styles.productDetails}>
+          <Text style={styles.productName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <Text style={styles.productDescription} numberOfLines={2}>
+            {item.description || "No description"}
+          </Text>
+
+          {/* Price and Stock Row */}
+          <View style={styles.priceStockRow}>
+            <Text style={styles.productPrice}>
+              ₱{item.price?.toFixed(2) || "0.00"}
+            </Text>
+            <Text style={styles.productStock}>
+              Stock: {item.stockQuantity || 0}
+            </Text>
+          </View>
+
+          {/* Category Tag */}
+          <View style={styles.categoryTag}>
+            <Text style={styles.categoryTagText}>{item.category}</Text>
+          </View>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => handleEditProduct(item.id)}
+            disabled={deletingProductId !== null}
+          >
+            <Ionicons name="create-outline" size={20} color="#FFF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.deleteButton,
+              deletingProductId === item.id && styles.disabledButton
+            ]}
+            onPress={() => deleteProduct(item.id, item.name)}
+            disabled={deletingProductId !== null}
+          >
+            {deletingProductId === item.id ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="trash-outline" size={20} color="#FFF" />
+            )}
+          </TouchableOpacity>
         </View>
       </View>
-
-      {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => handleEditProduct(item.id)}
-          disabled={deleting}
-        >
-          <Ionicons name="create-outline" size={20} color="#FFF" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.deleteButton, deleting && styles.disabledButton]}
-          onPress={() => {
-            Alert.alert(
-              "Delete Product",
-              `Are you sure you want to delete "${item.name}"?`,
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Delete",
-                  style: "destructive",
-                  onPress: () => deleteProduct(item.id, item.name),
-                },
-              ],
-            );
-          }}
-          disabled={deleting}
-        >
-          <Ionicons name="trash-outline" size={20} color="#FFF" />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Products</Text>
+          <Text style={styles.headerTitle}>My Products</Text>
           <TouchableOpacity style={styles.addButton} onPress={handleAddProduct}>
             <Ionicons name="add" size={24} color="#FFF" />
           </TouchableOpacity>
@@ -247,20 +280,19 @@ export default function SellerProductsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Products</Text>
+        <Text style={styles.headerTitle}>My Products</Text>
         <TouchableOpacity style={styles.addButton} onPress={handleAddProduct}>
           <Ionicons name="add" size={24} color="#FFF" />
         </TouchableOpacity>
       </View>
 
-      {/* Category Filters */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.categoriesScroll}
-        contentContainerStyle={styles.categoriesScrollContent}
-      >
-        <View style={styles.categoriesContainer}>
+      {/* Category Filters - FIXED with proper spacing like second code */}
+      <View style={styles.categoriesWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesScrollContent}
+        >
           {CATEGORIES.map((category) => (
             <TouchableOpacity
               key={category}
@@ -281,8 +313,8 @@ export default function SellerProductsScreen() {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* Product Count */}
       <Text style={styles.productCount}>
@@ -368,29 +400,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#8F796F",
   },
-  categoriesScroll: {
-    maxHeight: 50,
-    marginBottom: 8,
+  // FIXED: Categories styles matching second code
+  categoriesWrapper: {
+    marginBottom: 16,
+    marginTop: 8,
   },
   categoriesScrollContent: {
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
-  categoriesContainer: {
     flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 4,
   },
   categoryChip: {
     paddingHorizontal: 20,
-    paddingVertical: 8,
+    paddingVertical: 10,
     backgroundColor: "#FFF",
-    borderRadius: 20,
+    borderRadius: 30,
     borderWidth: 1,
     borderColor: "#E0DAD1",
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 80,
+    minWidth: 85,
   },
   categoryChipActive: {
     backgroundColor: "#C35822",
