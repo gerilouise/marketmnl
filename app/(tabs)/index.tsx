@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
+  Alert, // Add this import
   FlatList,
   Image,
   ScrollView,
@@ -43,7 +44,7 @@ export default function HomeScreen() {
       ]);
       return;
     }
-    router.push("/(customer)/chat-list");
+    router.push("/(tabs)/chat-list");
   };
 
   // Sample data for categories
@@ -361,7 +362,6 @@ export default function HomeScreen() {
   );
 }
 
-// Add this to your styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,

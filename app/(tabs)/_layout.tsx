@@ -112,6 +112,20 @@ export default function TabLayout() {
           href: null, // Hide from tab bar
         }}
       />
+
+       <Tabs.Screen
+        name="chat-list"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+
+      <Tabs.Screen
+        name="chat-detail"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
     </Tabs>
   );
 }

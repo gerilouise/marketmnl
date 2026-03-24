@@ -49,7 +49,7 @@ export default function SellerLayout() {
       />
 
       <Tabs.Screen
-        name="chat"
+        name="chat-list"
         options={{
           title: "Chat",
           tabBarIcon: ({ color, size }) => (
@@ -84,6 +84,13 @@ export default function SellerLayout() {
 
       <Tabs.Screen
         name="chatbot"
+        options={{
+          href: null, // This hides it from the tab bar
+        }}
+      />
+
+      <Tabs.Screen
+        name="chat-detail"
         options={{
           href: null, // This hides it from the tab bar
         }}
