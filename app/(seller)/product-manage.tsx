@@ -1,29 +1,35 @@
 // app/(seller)/product-manage.tsx
-import { auth, db } from '@/lib/firebase';
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams } from "expo-router";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  Timestamp,
+  updateDoc,
+} from "firebase/firestore";
+import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  KeyboardAvoidingView,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import * as ImagePicker from 'expo-image-picker';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc, doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
 
 const CATEGORIES = ["Specials", "Spicy", "Seafood", "Meat", "Bottled", "Dried"];
 
-// Recipe interface
 interface Recipe {
   id: string;
   name: string;
@@ -35,7 +41,7 @@ interface Recipe {
 export default function SellerProductsManageScreen() {
   const { productId } = useLocalSearchParams();
   const isEditing = !!productId;
-  
+
   // Form fields
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -43,47 +49,101 @@ export default function SellerProductsManageScreen() {
   const [category, setCategory] = useState("Bottled");
   const [stock, setStock] = useState("");
   const [weight, setWeight] = useState("");
-  const [calories, setCalories] = useState(""); // NEW FIELD
+  const [calories, setCalories] = useState("");
   const [origin, setOrigin] = useState("");
   const [culturalBackground, setCulturalBackground] = useState("");
   const [storage, setStorage] = useState("");
   const [shelfLife, setShelfLife] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
-  
+  const [uploading, setUploading] = useState(false);
+
   // Recipes state
   const [recipes, setRecipes] = useState<Recipe[]>([
-    { id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }
+    {
+      id: Date.now().toString(),
+      name: "",
+      description: "",
+      prepTime: "",
+      difficulty: "Easy",
+    },
   ]);
-  const [originalRecipes, setOriginalRecipes] = useState<Recipe[]>([]);
-  
-  const [uploading, setUploading] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // ========== SIMPLE IMAGE PICKER - COPY FROM WORKING PROFILE SCREEN ==========
+  const pickImage = async () => {
+    console.log("🔵 pickImage called");
+
+    try {
+      // Request permission
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      console.log("Permission status:", status);
+
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Please grant camera roll permissions to upload images.",
+        );
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      console.log("Picker result:", result);
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        console.log("Image selected:", result.assets[0].uri);
+        setImage(result.assets[0].uri);
+        Alert.alert("Success", "Image selected!");
+      } else {
+        console.log("User cancelled");
+      }
+    } catch (error) {
+      console.error("Error picking image:", error);
+      Alert.alert("Error", "Failed to pick image");
+    }
+  };
+  // ====================================================================
 
   // Recipe functions
   const addRecipe = () => {
     setRecipes([
       ...recipes,
-      { id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }
+      {
+        id: Date.now().toString(),
+        name: "",
+        description: "",
+        prepTime: "",
+        difficulty: "Easy",
+      },
     ]);
   };
 
   const updateRecipe = (id: string, field: string, value: string) => {
-    setRecipes(recipes.map(recipe => 
-      recipe.id === id ? { ...recipe, [field]: value } : recipe
-    ));
+    setRecipes(
+      recipes.map((recipe) =>
+        recipe.id === id ? { ...recipe, [field]: value } : recipe,
+      ),
+    );
   };
 
   const removeRecipe = (id: string) => {
     if (recipes.length > 1) {
-      setRecipes(recipes.filter(recipe => recipe.id !== id));
+      setRecipes(recipes.filter((recipe) => recipe.id !== id));
     } else {
       Alert.alert("Error", "You need at least one recipe");
     }
   };
 
-  // Reset form function
   const resetForm = () => {
     setName("");
     setDescription("");
@@ -98,25 +158,30 @@ export default function SellerProductsManageScreen() {
     setShelfLife("");
     setImage(null);
     setOriginalImage(null);
-    setRecipes([{ id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }]);
-    setOriginalRecipes([]);
+    setRecipes([
+      {
+        id: Date.now().toString(),
+        name: "",
+        description: "",
+        prepTime: "",
+        difficulty: "Easy",
+      },
+    ]);
   };
 
-  // Load product data if editing
   useEffect(() => {
     if (isEditing && productId) {
       loadProductData();
     } else {
-      resetForm(); // Reset form when adding new product
+      resetForm();
     }
   }, [productId, isEditing]);
 
   const loadProductData = async () => {
     setLoading(true);
     try {
-      const productRef = doc(db, 'products', productId as string);
+      const productRef = doc(db, "products", productId as string);
       const productSnap = await getDoc(productRef);
-      
       if (productSnap.exists()) {
         const product = productSnap.data();
         setName(product.name || "");
@@ -125,35 +190,37 @@ export default function SellerProductsManageScreen() {
         setCategory(product.category || "Bottled");
         setStock(product.stockQuantity?.toString() || "");
         setWeight(product.netWeight || "");
-        setCalories(product.calories?.toString() || ""); // NEW FIELD
+        setCalories(product.calories?.toString() || "");
         setOrigin(product.origin || "");
         setCulturalBackground(product.culturalBackground || "");
         setStorage(product.storage || "");
         setShelfLife(product.shelfLife || "");
         setImage(product.imageUrl || null);
         setOriginalImage(product.imageUrl || null);
-        
-        // Load recipes if they exist
-        if (product.recipes && Array.isArray(product.recipes) && product.recipes.length > 0) {
-          const loadedRecipes = product.recipes.map((recipe: any, index: number) => ({
-            id: recipe.id || Date.now().toString() + index,
-            name: recipe.name || "",
-            description: recipe.description || "",
-            prepTime: recipe.prepTime || "",
-            difficulty: recipe.difficulty || "Easy"
-          }));
+
+        if (
+          product.recipes &&
+          Array.isArray(product.recipes) &&
+          product.recipes.length > 0
+        ) {
+          const loadedRecipes = product.recipes.map(
+            (recipe: any, index: number) => ({
+              id: recipe.id || Date.now().toString() + index,
+              name: recipe.name || "",
+              description: recipe.description || "",
+              prepTime: recipe.prepTime || "",
+              difficulty: recipe.difficulty || "Easy",
+            }),
+          );
           setRecipes(loadedRecipes);
-          setOriginalRecipes(loadedRecipes);
-        } else {
-          setRecipes([{ id: Date.now().toString(), name: "", description: "", prepTime: "", difficulty: "Easy" }]);
         }
       } else {
         Alert.alert("Error", "Product not found");
         router.replace("/(seller)/products");
       }
     } catch (error) {
-      console.error('Error loading product:', error);
-      Alert.alert('Error', 'Failed to load product data');
+      console.error("Error loading product:", error);
+      Alert.alert("Error", "Failed to load product data");
       router.replace("/(seller)/products");
     } finally {
       setLoading(false);
@@ -164,74 +231,26 @@ export default function SellerProductsManageScreen() {
     router.replace("/(seller)/products");
   };
 
-  const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Please grant camera roll permissions to upload images.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-    }
-  };
-
-  const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Please grant camera permissions to take photos.");
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-    }
-  };
-
-  const showImageOptions = () => {
-    Alert.alert(
-      "Upload Image",
-      "Choose an option",
-      [
-        { text: "Take Photo", onPress: takePhoto },
-        { text: "Choose from Gallery", onPress: pickImage },
-        { text: "Cancel", style: "cancel" },
-      ]
-    );
-  };
-
   const uploadImage = async (uri: string): Promise<string | null> => {
     try {
       setUploading(true);
+      console.log("Starting upload for:", uri);
+
       const response = await fetch(uri);
       const blob = await response.blob();
-      
+
       const storage = getStorage();
-      const filename = `products/${auth.currentUser?.uid}/${Date.now()}.jpg`;
+      const filename = `product_images/${Date.now()}.jpg`;
       const imageRef = ref(storage, filename);
-      
+
       await uploadBytes(imageRef, blob);
       const downloadUrl = await getDownloadURL(imageRef);
-      
+
+      console.log("✅ Image uploaded to:", downloadUrl);
       return downloadUrl;
     } catch (error) {
-      console.error('Error uploading image:', error);
-      Alert.alert('Error', 'Failed to upload image');
+      console.error("Error uploading image:", error);
+      Alert.alert("Error", "Failed to upload image");
       return null;
     } finally {
       setUploading(false);
@@ -239,7 +258,6 @@ export default function SellerProductsManageScreen() {
   };
 
   const handleSubmit = async () => {
-    // Validate required fields
     if (!name || !price || !stock || !weight) {
       Alert.alert("Error", "Please fill in all required fields");
       return;
@@ -265,58 +283,60 @@ export default function SellerProductsManageScreen() {
         return;
       }
 
-      // Upload image if selected and changed
-      let imageUrl = originalImage;
-      if (image && image !== originalImage) {
+      let imageUrl = null;
+      if (image) {
         const uploadedUrl = await uploadImage(image);
         if (uploadedUrl) {
           imageUrl = uploadedUrl;
         }
+      } else if (originalImage) {
+        imageUrl = originalImage;
       }
 
       const now = Timestamp.now();
-
-      // Filter out empty recipes (where name is empty)
-      const validRecipes = recipes.filter(recipe => recipe.name.trim() !== "");
+      const validRecipes = recipes.filter(
+        (recipe) => recipe.name.trim() !== "",
+      );
 
       const productData = {
         name: name.trim(),
-        description: description.trim() || `${name} - Authentic Filipino delicacy`,
+        description:
+          description.trim() || `${name} - Authentic Filipino delicacy`,
         price: parseFloat(price),
         category,
         stockQuantity: parseInt(stock),
         netWeight: weight.trim(),
-        calories: calories ? parseFloat(calories) : null, // NEW FIELD
-        imageUrl: imageUrl || null,
+        calories: calories ? parseFloat(calories) : null,
+        imageUrl: imageUrl,
         origin: origin.trim() || null,
         culturalBackground: culturalBackground.trim() || null,
         storage: storage.trim() || null,
         shelfLife: shelfLife.trim() || null,
-        recipes: validRecipes.length > 0 ? validRecipes : null, // NEW FIELD
+        recipes: validRecipes.length > 0 ? validRecipes : null,
         sellerId: user.uid,
+        sellerName: user.displayName || "MarketMNL Seller",
         createdAt: now,
         updatedAt: now,
       };
 
-      console.log('Saving product:', productData);
+      console.log("Saving product with image URL:", productData.imageUrl);
 
       if (isEditing) {
-        const productRef = doc(db, 'products', productId as string);
+        const productRef = doc(db, "products", productId as string);
         await updateDoc(productRef, {
           ...productData,
           updatedAt: Timestamp.now(),
         });
         Alert.alert("Success", "Product updated successfully!");
       } else {
-        const productsRef = collection(db, 'products');
+        const productsRef = collection(db, "products");
         await addDoc(productsRef, productData);
         Alert.alert("Success", "Product added successfully!");
       }
-      
+
       router.replace("/(seller)/products");
-      
     } catch (error) {
-      console.error('Error saving product:', error);
+      console.error("Error saving product:", error);
       Alert.alert("Error", "Failed to save product. Please try again.");
     } finally {
       setSubmitting(false);
@@ -356,8 +376,8 @@ export default function SellerProductsManageScreen() {
           <Text style={styles.headerTitle}>
             {isEditing ? "Edit Product" : "Add Product"}
           </Text>
-          <TouchableOpacity 
-            onPress={handleSubmit} 
+          <TouchableOpacity
+            onPress={handleSubmit}
             style={[styles.saveButton, submitting && styles.saveButtonDisabled]}
             disabled={submitting}
           >
@@ -369,40 +389,63 @@ export default function SellerProductsManageScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView 
+        <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Image Upload Section - SIMPLE WORKING VERSION */}
           <View style={styles.imageSection}>
             <Text style={styles.label}>Product Image</Text>
-            <TouchableOpacity 
-              style={styles.imageUploader} 
-              onPress={showImageOptions}
+            <TouchableOpacity
+              style={styles.imageUploader}
+              onPress={() => {
+                console.log("🟢 Image area clicked!");
+                pickImage();
+              }}
+              activeOpacity={0.7}
               disabled={submitting}
             >
               {image ? (
                 <Image source={{ uri: image }} style={styles.previewImage} />
               ) : (
                 <View style={styles.imagePlaceholder}>
-                  <Ionicons name="camera-outline" size={40} color="#8F796F" />
-                  <Text style={styles.imageUploadText}>Upload Image</Text>
+                  <Ionicons name="camera-outline" size={50} color="#8F796F" />
+                  <Text style={styles.imageUploadText}>Tap to add image</Text>
+                  <Text style={styles.imageUploadSubText}>
+                    Select from gallery
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
             {uploading && (
               <View style={styles.uploadingContainer}>
                 <ActivityIndicator size="small" color="#C35822" />
-                <Text style={styles.uploadingText}>Uploading...</Text>
+                <Text style={styles.uploadingText}>Uploading image...</Text>
               </View>
+            )}
+            {image && !uploading && (
+              <TouchableOpacity
+                style={styles.removeImageButton}
+                onPress={() => {
+                  setImage(null);
+                  console.log("Image removed");
+                }}
+              >
+                <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                <Text style={styles.removeImageText}>Remove Image</Text>
+              </TouchableOpacity>
             )}
           </View>
 
+          {/* Rest of your form sections */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Product Information</Text>
-            
+
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Product Name <Text style={styles.required}>*</Text></Text>
+              <Text style={styles.label}>
+                Product Name <Text style={styles.required}>*</Text>
+              </Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g., Authentic Bottled Spicy Tuyo"
@@ -430,7 +473,9 @@ export default function SellerProductsManageScreen() {
 
             <View style={styles.rowInputs}>
               <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.label}>Price (₱) <Text style={styles.required}>*</Text></Text>
+                <Text style={styles.label}>
+                  Price (₱) <Text style={styles.required}>*</Text>
+                </Text>
                 <TextInput
                   style={styles.input}
                   placeholder="250.00"
@@ -443,7 +488,9 @@ export default function SellerProductsManageScreen() {
               </View>
 
               <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                <Text style={styles.label}>Stock <Text style={styles.required}>*</Text></Text>
+                <Text style={styles.label}>
+                  Stock <Text style={styles.required}>*</Text>
+                </Text>
                 <TextInput
                   style={styles.input}
                   placeholder="100"
@@ -458,7 +505,9 @@ export default function SellerProductsManageScreen() {
 
             <View style={styles.rowInputs}>
               <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.label}>Net Weight <Text style={styles.required}>*</Text></Text>
+                <Text style={styles.label}>
+                  Net Weight <Text style={styles.required}>*</Text>
+                </Text>
                 <TextInput
                   style={styles.input}
                   placeholder="e.g., 250g"
@@ -469,7 +518,6 @@ export default function SellerProductsManageScreen() {
                 />
               </View>
 
-              {/* NEW: Calories Field */}
               <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
                 <Text style={styles.label}>Calories (kcal)</Text>
                 <TextInput
@@ -493,15 +541,17 @@ export default function SellerProductsManageScreen() {
                   key={cat}
                   style={[
                     styles.categoryChip,
-                    category === cat && styles.categoryChipActive
+                    category === cat && styles.categoryChipActive,
                   ]}
                   onPress={() => setCategory(cat)}
                   disabled={submitting}
                 >
-                  <Text style={[
-                    styles.categoryChipText,
-                    category === cat && styles.categoryChipTextActive
-                  ]}>
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      category === cat && styles.categoryChipTextActive,
+                    ]}
+                  >
                     {cat}
                   </Text>
                 </TouchableOpacity>
@@ -509,16 +559,19 @@ export default function SellerProductsManageScreen() {
             </View>
           </View>
 
-          {/* NEW: Recipes Section */}
+          {/* Recipes Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Recipes</Text>
-            
+
             {recipes.map((recipe, index) => (
               <View key={recipe.id} style={styles.recipeContainer}>
                 <View style={styles.recipeHeader}>
                   <Text style={styles.recipeTitle}>Recipe {index + 1}</Text>
                   {recipes.length > 1 && (
-                    <TouchableOpacity onPress={() => removeRecipe(recipe.id)} disabled={submitting}>
+                    <TouchableOpacity
+                      onPress={() => removeRecipe(recipe.id)}
+                      disabled={submitting}
+                    >
                       <Ionicons name="close-circle" size={24} color="#FF3B30" />
                     </TouchableOpacity>
                   )}
@@ -531,7 +584,9 @@ export default function SellerProductsManageScreen() {
                     placeholder="e.g., Spicy Tuyo Fried Rice"
                     placeholderTextColor="#8F796F"
                     value={recipe.name}
-                    onChangeText={(text) => updateRecipe(recipe.id, "name", text)}
+                    onChangeText={(text) =>
+                      updateRecipe(recipe.id, "name", text)
+                    }
                     editable={!submitting}
                   />
                 </View>
@@ -543,7 +598,9 @@ export default function SellerProductsManageScreen() {
                     placeholder="Brief description of the recipe"
                     placeholderTextColor="#8F796F"
                     value={recipe.description}
-                    onChangeText={(text) => updateRecipe(recipe.id, "description", text)}
+                    onChangeText={(text) =>
+                      updateRecipe(recipe.id, "description", text)
+                    }
                     multiline
                     numberOfLines={2}
                     editable={!submitting}
@@ -551,14 +608,18 @@ export default function SellerProductsManageScreen() {
                 </View>
 
                 <View style={styles.rowInputs}>
-                  <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                  <View
+                    style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}
+                  >
                     <Text style={styles.label}>Prep Time</Text>
                     <TextInput
                       style={styles.input}
                       placeholder="e.g., 15 mins"
                       placeholderTextColor="#8F796F"
                       value={recipe.prepTime}
-                      onChangeText={(text) => updateRecipe(recipe.id, "prepTime", text)}
+                      onChangeText={(text) =>
+                        updateRecipe(recipe.id, "prepTime", text)
+                      }
                       editable={!submitting}
                     />
                   </View>
@@ -571,15 +632,21 @@ export default function SellerProductsManageScreen() {
                           key={level}
                           style={[
                             styles.difficultyChip,
-                            recipe.difficulty === level && styles.difficultyChipActive
+                            recipe.difficulty === level &&
+                              styles.difficultyChipActive,
                           ]}
-                          onPress={() => updateRecipe(recipe.id, "difficulty", level)}
+                          onPress={() =>
+                            updateRecipe(recipe.id, "difficulty", level)
+                          }
                           disabled={submitting}
                         >
-                          <Text style={[
-                            styles.difficultyChipText,
-                            recipe.difficulty === level && styles.difficultyChipTextActive
-                          ]}>
+                          <Text
+                            style={[
+                              styles.difficultyChipText,
+                              recipe.difficulty === level &&
+                                styles.difficultyChipTextActive,
+                            ]}
+                          >
                             {level}
                           </Text>
                         </TouchableOpacity>
@@ -590,9 +657,8 @@ export default function SellerProductsManageScreen() {
               </View>
             ))}
 
-            {/* Add Recipe Button */}
-            <TouchableOpacity 
-              style={styles.addRecipeButton} 
+            <TouchableOpacity
+              style={styles.addRecipeButton}
               onPress={addRecipe}
               disabled={submitting}
             >
@@ -602,8 +668,10 @@ export default function SellerProductsManageScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Additional Details (Optional)</Text>
-            
+            <Text style={styles.sectionTitle}>
+              Additional Details (Optional)
+            </Text>
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Origin</Text>
               <TextInput
@@ -730,7 +798,7 @@ const styles = StyleSheet.create({
   },
   imageUploader: {
     width: "100%",
-    height: 150,
+    height: 180,
     backgroundColor: "#FFF",
     borderRadius: 16,
     borderWidth: 2,
@@ -749,9 +817,15 @@ const styles = StyleSheet.create({
     resizeMode: "cover",
   },
   imageUploadText: {
-    fontSize: 14,
+    fontSize: 16,
     color: "#8F796F",
-    marginTop: 8,
+    marginTop: 12,
+    fontWeight: "500",
+  },
+  imageUploadSubText: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 4,
   },
   uploadingContainer: {
     flexDirection: "row",
@@ -763,6 +837,17 @@ const styles = StyleSheet.create({
   uploadingText: {
     fontSize: 12,
     color: "#8F796F",
+  },
+  removeImageButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+    gap: 4,
+  },
+  removeImageText: {
+    fontSize: 12,
+    color: "#FF3B30",
   },
   section: {
     backgroundColor: "#FFF",
@@ -831,7 +916,6 @@ const styles = StyleSheet.create({
   categoryChipTextActive: {
     color: "#FFF",
   },
-  // Recipe styles
   recipeContainer: {
     marginBottom: 20,
     paddingBottom: 16,

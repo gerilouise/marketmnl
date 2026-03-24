@@ -1,10 +1,14 @@
 // app/(tabs)/index.tsx
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
+import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   ScrollView,
@@ -18,11 +22,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function HomeScreen() {
   const [showChat, setShowChat] = useState(false);
   const [wishlist, setWishlist] = useState({});
+  const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
+  const [newArrivals, setNewArrivals] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const { getCurrentUser } = useFirebaseAuth();
-  const { profile, loading, fetchProfile } = useFirebaseProfile();
+  const {
+    profile,
+    loading: profileLoading,
+    fetchProfile,
+  } = useFirebaseProfile();
 
-  // Fetch profile when screen loads and when user changes
+  // Fetch profile when screen loads
   useEffect(() => {
     const loadProfile = async () => {
       const user = getCurrentUser();
@@ -33,58 +44,44 @@ export default function HomeScreen() {
     loadProfile();
   }, []);
 
-  // Navigate to chat screen
-  const navigateToChat = () => {
-    const user = getCurrentUser();
-    if (!user) {
-      Alert.alert("Login Required", "Please log in to view your messages", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") }
-      ]);
-      return;
+  // Fetch products from Firebase
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const productsRef = collection(db, "products");
+
+      // Get latest 10 products for featured
+      const featuredQuery = query(
+        productsRef,
+        orderBy("createdAt", "desc"),
+        limit(10),
+      );
+      const featuredSnapshot = await getDocs(featuredQuery);
+      const productsList: any[] = [];
+
+      featuredSnapshot.forEach((doc) => {
+        productsList.push({ id: doc.id, ...doc.data() });
+      });
+
+      setFeaturedProducts(productsList.slice(0, 4)); // First 4 for featured
+      setNewArrivals(productsList.slice(4, 7)); // Next 3 for new arrivals
+    } catch (error) {
+      console.error("Error fetching products:", error);
+    } finally {
+      setLoading(false);
     }
-    router.push("/(customer)/chat-list");
   };
 
-  // Sample data for categories
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  // Categories data
   const categories = [
     { id: "1", name: "Specials", icon: "🎉" },
     { id: "2", name: "Spicy", icon: "🌶️" },
     { id: "3", name: "Seafood", icon: "🦐" },
     { id: "4", name: "Meat", icon: "🥩" },
-  ];
-
-  // Sample data for featured products (without images)
-  const featuredProducts = [
-    { id: "1", name: "Spicy Tuyo", price: 250, rating: 4.9 },
-    { id: "2", name: "Spicy Tinapa", price: 250, rating: 4.9 },
-    { id: "3", name: "Spicy Bangus", price: 250, rating: 4.9 },
-    { id: "4", name: "Spicy Tapa", price: 250, rating: 4.9 },
-  ];
-
-  // Sample data for new arrivals (without images)
-  const newArrivals = [
-    {
-      id: "1",
-      name: "Spicy Bangus",
-      seller: "Jangan's Kitchen",
-      price: 250,
-      rating: 4.9,
-    },
-    {
-      id: "2",
-      name: "Spicy Tapa",
-      seller: "Gian's Preserved Food",
-      price: 250,
-      rating: 4.9,
-    },
-    {
-      id: "3",
-      name: "Spicy Tuyo",
-      seller: "Spicy Tuna",
-      price: 250,
-      rating: 4.9,
-    },
   ];
 
   const toggleWishlist = (productId) => {
@@ -112,26 +109,27 @@ export default function HomeScreen() {
     });
   };
 
+  const navigateToChat = () => {
+    const user = getCurrentUser();
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to view your messages", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") },
+      ]);
+      return;
+    }
+    router.push("/(customer)/chat-list");
+  };
+
   // Get user's name from profile
   const getUserName = () => {
     const user = getCurrentUser();
-    if (!user) {
-      return "Guest"; // Not logged in
-    }
-
-    if (profile?.fullName) {
-      // Return first name only
-      return profile.fullName.split(" ")[0];
-    }
-
-    // User is logged in but profile not loaded yet
+    if (!user) return "Guest";
+    if (profile?.fullName) return profile.fullName.split(" ")[0];
     return "Loading...";
   };
 
-  // Check if user is logged in
-  const isLoggedIn = () => {
-    return getCurrentUser() !== null;
-  };
+  const isLoggedIn = () => getCurrentUser() !== null;
 
   const renderCategoryItem = ({ item }) => (
     <TouchableOpacity
@@ -151,7 +149,11 @@ export default function HomeScreen() {
       onPress={() => navigateToProduct(item.id)}
     >
       <View style={styles.productImagePlaceholder}>
-        <Ionicons name="image-outline" size={30} color="#CCC" />
+        {item.imageUrl ? (
+          <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+        ) : (
+          <Ionicons name="image-outline" size={30} color="#CCC" />
+        )}
         <TouchableOpacity
           style={styles.wishlistButton}
           onPress={(e) => {
@@ -171,7 +173,7 @@ export default function HomeScreen() {
       </Text>
       <View style={styles.productRating}>
         <Ionicons name="star" size={14} color="#FFD700" />
-        <Text style={styles.ratingText}>{item.rating}</Text>
+        <Text style={styles.ratingText}>{item.rating || 4.5}</Text>
       </View>
       <Text style={styles.productPrice}>₱{item.price}</Text>
     </TouchableOpacity>
@@ -183,7 +185,14 @@ export default function HomeScreen() {
       onPress={() => navigateToProduct(item.id)}
     >
       <View style={styles.newArrivalImagePlaceholder}>
-        <Ionicons name="image-outline" size={30} color="#CCC" />
+        {item.imageUrl ? (
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={styles.newArrivalImage}
+          />
+        ) : (
+          <Ionicons name="image-outline" size={30} color="#CCC" />
+        )}
       </View>
       <View style={styles.newArrivalInfo}>
         <Text
@@ -198,11 +207,11 @@ export default function HomeScreen() {
           numberOfLines={1}
           ellipsizeMode="tail"
         >
-          {item.seller}
+          {item.sellerName || "MarketMNL"}
         </Text>
         <View style={styles.newArrivalRating}>
           <Ionicons name="star" size={14} color="#FFD700" />
-          <Text style={styles.ratingText}>{item.rating}</Text>
+          <Text style={styles.ratingText}>{item.rating || 4.5}</Text>
         </View>
         <Text style={styles.newArrivalPrice}>₱{item.price}</Text>
       </View>
@@ -218,10 +227,20 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+          <Text style={styles.loadingText}>Loading products...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header with greeting and icons */}
         <View>
           <View style={styles.header}>
             <View>
@@ -234,7 +253,6 @@ export default function HomeScreen() {
               )}
             </View>
             <View style={styles.headerIcons}>
-              {/* Notifications Icon */}
               <TouchableOpacity>
                 <Ionicons
                   name="notifications-outline"
@@ -242,21 +260,14 @@ export default function HomeScreen() {
                   color="#8F796F"
                 />
               </TouchableOpacity>
-              
-              {/* Chat Icon - Right of Notifications */}
               <TouchableOpacity onPress={navigateToChat}>
-                <Ionicons
-                  name="chatbubble-outline"
-                  size={24}
-                  color="#8F796F"
-                />
+                <Ionicons name="chatbubble-outline" size={24} color="#8F796F" />
               </TouchableOpacity>
             </View>
           </View>
           <View style={styles.separator} />
         </View>
 
-        {/* Featured Promo Banner with Image */}
         <TouchableOpacity
           style={styles.promoContainer}
           onPress={() => navigateToSeeAll("promo")}
@@ -313,14 +324,20 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.featuredContainer}>
-          <FlatList
-            data={featuredProducts}
-            renderItem={renderFeaturedItem}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.featuredList}
-          />
+          {featuredProducts.length > 0 ? (
+            <FlatList
+              data={featuredProducts}
+              renderItem={renderFeaturedItem}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.featuredList}
+            />
+          ) : (
+            <View style={styles.emptyFeatured}>
+              <Text style={styles.emptyText}>No products yet</Text>
+            </View>
+          )}
         </View>
 
         {/* New Arrivals Section */}
@@ -336,14 +353,19 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.newArrivalsList}>
-          {newArrivals.map((item) => (
-            <View key={item.id} style={styles.newArrivalItem}>
-              {renderNewArrivalItem({ item })}
+          {newArrivals.length > 0 ? (
+            newArrivals.map((item) => (
+              <View key={item.id} style={styles.newArrivalItem}>
+                {renderNewArrivalItem({ item })}
+              </View>
+            ))
+          ) : (
+            <View style={styles.emptyNewArrivals}>
+              <Text style={styles.emptyText}>No new arrivals</Text>
             </View>
-          ))}
+          )}
         </View>
 
-        {/* Bottom padding */}
         <View style={styles.bottomPadding} />
       </ScrollView>
 
@@ -361,11 +383,20 @@ export default function HomeScreen() {
   );
 }
 
-// Add this to your styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FAF8F4",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#8F796F",
   },
   header: {
     flexDirection: "row",
@@ -535,6 +566,12 @@ const styles = StyleSheet.create({
     borderColor: "#E0E0E0",
     borderStyle: "dashed",
     position: "relative",
+    overflow: "hidden",
+  },
+  productImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 8,
   },
   wishlistButton: {
     position: "absolute",
@@ -602,7 +639,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E0E0E0",
     borderStyle: "dashed",
-    position: "relative",
+    overflow: "hidden",
+  },
+  newArrivalImage: {
+    width: 70,
+    height: 70,
+    borderRadius: 8,
   },
   newArrivalInfo: {
     flex: 1,
@@ -658,5 +700,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 8,
+  },
+  emptyFeatured: {
+    width: "100%",
+    padding: 40,
+    alignItems: "center",
+  },
+  emptyNewArrivals: {
+    width: "100%",
+    padding: 20,
+    alignItems: "center",
+  },
+  emptyText: {
+    fontSize: 14,
+    color: "#8F796F",
   },
 });
