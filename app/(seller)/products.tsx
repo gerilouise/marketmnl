@@ -1,4 +1,4 @@
-// app/(seller)/products.tsx
+// app/(seller)/products.tsx - Final version with manual sorting
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
@@ -7,8 +7,8 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  orderBy,
   query,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -22,6 +22,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -43,7 +44,7 @@ export default function SellerProductsScreen() {
   const [loading, setLoading] = useState(true);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
 
-  // Fetch ALL products from Firebase
+  // Fetch ONLY the logged-in user's products
   const fetchProducts = async () => {
     setLoading(true);
     try {
@@ -56,10 +57,14 @@ export default function SellerProductsScreen() {
         return;
       }
 
-      console.log("Fetching ALL products...");
+      console.log("Fetching products for seller ID:", user.uid);
 
+      // Query without orderBy to avoid index requirement
       const productsRef = collection(db, "products");
-      const q = query(productsRef, orderBy("createdAt", "desc"));
+      const q = query(
+        productsRef,
+        where("sellerId", "==", user.uid)
+      );
 
       const querySnapshot = await getDocs(q);
       const productsList: any[] = [];
@@ -68,7 +73,15 @@ export default function SellerProductsScreen() {
         productsList.push({ id: doc.id, ...doc.data() });
       });
 
-      console.log("Products fetched:", productsList.length);
+      // Sort manually in JavaScript
+      productsList.sort((a, b) => {
+        if (a.createdAt && b.createdAt) {
+          return b.createdAt.seconds - a.createdAt.seconds;
+        }
+        return 0;
+      });
+
+      console.log(`✅ Found ${productsList.length} products for seller ${user.uid}`);
       setProducts(productsList);
 
       // Apply filter
@@ -101,37 +114,23 @@ export default function SellerProductsScreen() {
     }
   };
 
-  // Delete product function with confirmation and proper error handling
+  // Delete product function
   const deleteProduct = async (productId: string, productName: string) => {
-    console.log("Delete product called with ID:", productId, "Name:", productName);
-    
-    if (deletingProductId) {
-      console.log("Already deleting a product, skipping...");
-      return;
-    }
+    if (deletingProductId) return;
 
     Alert.alert(
       "Delete Product",
       `Are you sure you want to delete "${productName}"?\n\nThis action cannot be undone.`,
       [
-        { 
-          text: "Cancel", 
-          style: "cancel",
-          onPress: () => console.log("Delete cancelled")
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            console.log("User confirmed deletion for:", productName);
             setDeletingProductId(productId);
-            
             try {
               const productRef = doc(db, "products", productId);
-              console.log("Product reference created for:", productId);
-              
               await deleteDoc(productRef);
-              console.log("✅ Product deleted from database:", productName);
               
               const updatedProducts = products.filter(p => p.id !== productId);
               setProducts(updatedProducts);
@@ -147,12 +146,8 @@ export default function SellerProductsScreen() {
 
               Alert.alert("Success", `"${productName}" has been deleted permanently.`);
             } catch (error: any) {
-              console.error("❌ Delete error details:", error);
-              Alert.alert(
-                "Delete Failed", 
-                error.message || "Failed to delete product. Please try again."
-              );
-              
+              console.error("Delete error:", error);
+              Alert.alert("Delete Failed", error.message || "Failed to delete product");
               await fetchProducts();
             } finally {
               setDeletingProductId(null);
@@ -171,7 +166,6 @@ export default function SellerProductsScreen() {
   // Fetch products when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      console.log("Screen focused, refreshing products...");
       fetchProducts();
     }, []),
   );
@@ -196,7 +190,6 @@ export default function SellerProductsScreen() {
   const renderProductItem = ({ item }: { item: any }) => {
     return (
       <View style={styles.productCard}>
-        {/* Product Image */}
         <View style={styles.productImagePlaceholder}>
           {item.imageUrl ? (
             <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
@@ -205,7 +198,6 @@ export default function SellerProductsScreen() {
           )}
         </View>
 
-        {/* Product Details */}
         <View style={styles.productDetails}>
           <Text style={styles.productName} numberOfLines={1}>
             {item.name}
@@ -214,7 +206,6 @@ export default function SellerProductsScreen() {
             {item.description || "No description"}
           </Text>
 
-          {/* Price and Stock Row */}
           <View style={styles.priceStockRow}>
             <Text style={styles.productPrice}>
               ₱{item.price?.toFixed(2) || "0.00"}
@@ -224,13 +215,11 @@ export default function SellerProductsScreen() {
             </Text>
           </View>
 
-          {/* Category Tag */}
           <View style={styles.categoryTag}>
             <Text style={styles.categoryTagText}>{item.category}</Text>
           </View>
         </View>
 
-        {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={styles.editButton}
@@ -278,7 +267,6 @@ export default function SellerProductsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Products</Text>
         <TouchableOpacity style={styles.addButton} onPress={handleAddProduct}>
@@ -286,7 +274,6 @@ export default function SellerProductsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Category Filters - FIXED with proper spacing like second code */}
       <View style={styles.categoriesWrapper}>
         <ScrollView
           horizontal
@@ -316,13 +303,11 @@ export default function SellerProductsScreen() {
         </ScrollView>
       </View>
 
-      {/* Product Count */}
       <Text style={styles.productCount}>
         {filteredProducts.length}{" "}
         {filteredProducts.length === 1 ? "product" : "products"} found
       </Text>
 
-      {/* Products List */}
       <FlatList
         data={filteredProducts}
         renderItem={renderProductItem}
@@ -400,7 +385,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#8F796F",
   },
-  // FIXED: Categories styles matching second code
   categoriesWrapper: {
     marginBottom: 16,
     marginTop: 8,

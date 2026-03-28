@@ -10,6 +10,7 @@ import {
   FlatList,
   Alert,
   ActivityIndicator,
+  Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -37,10 +38,10 @@ interface Store {
   productCount: number;
   description?: string;
   categories: string[];
-  imageUrl?: string;
-  bannerUrl?: string;
+  avatar?: string;
   createdAt: any;
   uid: string;
+  storeDescription?: string;
 }
 
 interface Product {
@@ -61,6 +62,7 @@ export default function StoreScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
   const [wishlist, setWishlist] = useState<Set<string>>(new Set());
   const [followingLoading, setFollowingLoading] = useState(false);
 
@@ -69,6 +71,7 @@ export default function StoreScreen() {
     loadStoreData();
     loadProducts();
     loadWishlist();
+    checkIfOwner();
     checkFollowStatus();
   }, [id]);
 
@@ -76,16 +79,30 @@ export default function StoreScreen() {
     if (!id) return;
     
     try {
-      const storeRef = doc(db, 'stores', id as string);
-      const storeSnap = await getDoc(storeRef);
+      console.log("Loading store data for ID:", id);
       
-      if (storeSnap.exists()) {
-        const storeData = { id: storeSnap.id, ...storeSnap.data() } as Store;
-        setStore(storeData);
+      const sellerRef = doc(db, 'sellers', id as string);
+      const sellerSnap = await getDoc(sellerRef);
+      
+      if (sellerSnap.exists()) {
+        const sellerData = sellerSnap.data();
+        console.log("Store found in sellers collection:", sellerData.storeName);
         
-        // Load categories from store or use default
-        if (!storeData.categories || storeData.categories.length === 0) {
-          // Fetch unique categories from products
+        setStore({
+          id: id as string,
+          storeName: sellerData.storeName || 'Store',
+          location: sellerData.location || '',
+          rating: sellerData.rating || 4.5,
+          reviewsCount: sellerData.reviewsCount || 0,
+          productCount: products.length,
+          description: sellerData.storeDescription || sellerData.description || '',
+          categories: sellerData.categories || [],
+          avatar: sellerData.avatar || null,
+          createdAt: sellerData.createdAt,
+          uid: id as string,
+        });
+        
+        if (!sellerData.categories || sellerData.categories.length === 0) {
           const productsRef = collection(db, 'products');
           const q = query(productsRef, where('sellerId', '==', id));
           const productsSnap = await getDocs(q);
@@ -99,6 +116,7 @@ export default function StoreScreen() {
           setStore(prev => prev ? { ...prev, categories: Array.from(categoriesSet) } : null);
         }
       } else {
+        console.log("Store not found in sellers collection");
         Alert.alert("Error", "Store not found");
         router.back();
       }
@@ -112,6 +130,7 @@ export default function StoreScreen() {
     if (!id) return;
     
     try {
+      console.log("Loading products for seller ID:", id);
       const productsRef = collection(db, 'products');
       const q = query(productsRef, where('sellerId', '==', id));
       const querySnapshot = await getDocs(q);
@@ -130,6 +149,7 @@ export default function StoreScreen() {
         });
       });
       
+      console.log(`Found ${productsList.length} products`);
       setProducts(productsList);
       setFilteredProducts(productsList);
     } catch (error) {
@@ -157,7 +177,19 @@ export default function StoreScreen() {
     }
   };
 
+  const checkIfOwner = () => {
+    const user = auth.currentUser;
+    if (user && user.uid === id) {
+      setIsOwner(true);
+      console.log("User is viewing their own store");
+    } else {
+      setIsOwner(false);
+    }
+  };
+
   const checkFollowStatus = async () => {
+    if (isOwner) return;
+    
     const user = auth.currentUser;
     if (!user || !id) return;
     
@@ -176,6 +208,11 @@ export default function StoreScreen() {
   };
 
   const handleFollow = async () => {
+    if (isOwner) {
+      Alert.alert("Info", "You cannot follow your own store");
+      return;
+    }
+    
     const user = auth.currentUser;
     if (!user) {
       Alert.alert("Login Required", "Please log in to follow stores", [
@@ -226,8 +263,13 @@ export default function StoreScreen() {
       return;
     }
     
+    if (isOwner) {
+      Alert.alert("Info", "You cannot chat with yourself");
+      return;
+    }
+    
     router.push({
-      pathname: "/(customer)/chat",
+      pathname: "/(tabs)/chat-detail",
       params: { 
         sellerId: id,
         sellerName: store?.storeName || "Seller"
@@ -395,74 +437,81 @@ export default function StoreScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Store Banner */}
-        <View style={styles.bannerPlaceholder}>
-          {store.bannerUrl ? (
-            <Image source={{ uri: store.bannerUrl }} style={styles.bannerImage} />
-          ) : (
-            <Ionicons name="image-outline" size={50} color="#CCC" />
-          )}
+        {/* Store Info Card with Avatar */}
+        <View style={styles.storeCard}>
+          {/* Avatar on left side */}
+          <View style={styles.avatarContainer}>
+            {store.avatar ? (
+              <Image source={{ uri: store.avatar }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Ionicons name="storefront-outline" size={40} color="#8F796F" />
+              </View>
+            )}
+          </View>
+
+          {/* Store Details */}
+          <View style={styles.storeDetails}>
+            <Text style={styles.storeName}>{store.storeName}</Text>
+            
+            {store.location && (
+              <View style={styles.infoRow}>
+                <Ionicons name="location-outline" size={14} color="#8F796F" />
+                <Text style={styles.infoText}>{store.location}</Text>
+              </View>
+            )}
+
+            <View style={styles.infoRow}>
+              <Ionicons name="star" size={14} color="#FFD700" />
+              <Text style={styles.infoText}>{store.rating || 4.5} ({store.reviewsCount || 0} reviews)</Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Ionicons name="cube-outline" size={14} color="#8F796F" />
+              <Text style={styles.infoText}>{products.length} products</Text>
+            </View>
+
+            {/* Description inside the same card */}
+            {store.description && (
+              <Text style={styles.description}>{store.description}</Text>
+            )}
+          </View>
         </View>
 
-        {/* Store Info */}
-        <View style={styles.storeInfo}>
-          <Text style={styles.storeName}>{store.storeName}</Text>
+        {/* Category Chips */}
+        {categories.length > 1 && (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            style={styles.categoriesScroll}
+            contentContainerStyle={styles.categoriesScrollContent}
+          >
+            {categories.map((category, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[
+                  styles.categoryChip,
+                  selectedCategory === category && styles.categoryChipActive
+                ]}
+                onPress={() => filterProducts(category)}
+              >
+                <Text style={[
+                  styles.categoryChipText,
+                  selectedCategory === category && styles.categoryChipTextActive
+                ]}>{category}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity style={styles.chatButton} onPress={handleChat}>
+            <Ionicons name="chatbubble-outline" size={18} color="#FFF" />
+            <Text style={styles.chatButtonText}>Chat Now</Text>
+          </TouchableOpacity>
           
-          {store.location && (
-            <View style={styles.infoRow}>
-              <Ionicons name="location-outline" size={16} color="#8F796F" />
-              <Text style={styles.infoText}> {store.location}</Text>
-            </View>
-          )}
-
-          <View style={styles.infoRow}>
-            <Ionicons name="star" size={16} color="#FFD700" />
-            <Text style={styles.infoText}> {store.rating || 4.5} ({store.reviewsCount || 0} reviews)</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Ionicons name="cube-outline" size={16} color="#8F796F" />
-            <Text style={styles.infoText}> {products.length} products</Text>
-          </View>
-
-          {store.description && (
-            <Text style={styles.description}>{store.description}</Text>
-          )}
-
-          {/* Category Chips */}
-          {categories.length > 1 && (
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={styles.categoriesScroll}
-            >
-              <View style={styles.categoriesContainer}>
-                {categories.map((category, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={[
-                      styles.categoryChip,
-                      selectedCategory === category && styles.categoryChipActive
-                    ]}
-                    onPress={() => filterProducts(category)}
-                  >
-                    <Text style={[
-                      styles.categoryChipText,
-                      selectedCategory === category && styles.categoryChipTextActive
-                    ]}>{category}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.chatButton} onPress={handleChat}>
-              <Ionicons name="chatbubble-outline" size={18} color="#FFF" />
-              <Text style={styles.chatButtonText}>Chat Now</Text>
-            </TouchableOpacity>
-            
+          {!isOwner && (
             <TouchableOpacity 
               style={[styles.followButton, isFollowing && styles.followingButton]} 
               onPress={handleFollow}
@@ -483,7 +532,18 @@ export default function StoreScreen() {
                 </>
               )}
             </TouchableOpacity>
-          </View>
+          )}
+          
+          {/* Edit Store Button */}
+          {isOwner && (
+            <TouchableOpacity 
+              style={[styles.followButton, styles.editStoreButton]} 
+              onPress={() => router.push("/(seller)/edit-profile")}
+            >
+              <Ionicons name="create-outline" size={18} color="#FFF" />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Products Section */}
@@ -563,7 +623,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#FBF8F4",
+    backgroundColor: "#FFF",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -576,30 +636,17 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#FBF8F4",
+    backgroundColor: "#FFF",
     justifyContent: "center",
     alignItems: "center",
   },
-  bannerPlaceholder: {
-    width: "100%",
-    height: 150,
-    backgroundColor: "#EFEAE4",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-    borderStyle: "dashed",
-  },
-  bannerImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-  storeInfo: {
-    padding: 16,
+  storeCard: {
+    flexDirection: "row",
     backgroundColor: "#FFF",
     marginHorizontal: 16,
-    marginTop: -20,
+    marginTop: 16,
+    marginBottom: 12,
+    padding: 16,
     borderRadius: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -607,11 +654,36 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
+  avatarContainer: {
+    marginRight: 16,
+  },
+  avatarImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#C35822",
+  },
+  avatarPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: "#F0F0F0",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    borderStyle: "dashed",
+  },
+  storeDetails: {
+    flex: 1,
+    justifyContent: "center",
+  },
   storeName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "bold",
     color: "#32221B",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   infoRow: {
     flexDirection: "row",
@@ -619,23 +691,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   infoText: {
-    fontSize: 14,
-    color: "#666",
+    fontSize: 12,
+    color: "#8F796F",
     marginLeft: 4,
   },
   description: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#666",
+    lineHeight: 18,
     marginTop: 8,
-    marginBottom: 12,
-    lineHeight: 20,
+    marginBottom: 4,
   },
   categoriesScroll: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  categoriesContainer: {
-    flexDirection: "row",
-    gap: 8,
+  categoriesScrollContent: {
+    paddingHorizontal: 16,
   },
   categoryChip: {
     paddingHorizontal: 16,
@@ -658,13 +729,15 @@ const styles = StyleSheet.create({
   actionButtons: {
     flexDirection: "row",
     gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
   },
   chatButton: {
     flex: 1,
     flexDirection: "row",
     backgroundColor: "#C35822",
     borderRadius: 25,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     alignItems: "center",
     justifyContent: "center",
@@ -680,7 +753,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "#FFF",
     borderRadius: 25,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     alignItems: "center",
     justifyContent: "center",
@@ -692,6 +765,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#C35822",
     borderColor: "#C35822",
   },
+  editStoreButton: {
+    backgroundColor: "#C35822",
+    borderColor: "#C35822",
+  },
   followButtonText: {
     color: "#C35822",
     fontSize: 14,
@@ -700,14 +777,20 @@ const styles = StyleSheet.create({
   followingButtonText: {
     color: "#FFF",
   },
+  editButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "600",
+  },
   productsSection: {
     padding: 16,
   },
   productsHeader: {
     marginBottom: 12,
+    paddingHorizontal: 8,
   },
   productsTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "600",
     color: "#32221B",
   },

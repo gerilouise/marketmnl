@@ -1,5 +1,5 @@
 // app/(seller)/profile.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -34,12 +34,8 @@ export default function SellerProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [sellerData, setSellerData] = useState<SellerData | null>(null);
 
-  // Load seller data from Firebase when screen opens
-  useEffect(() => {
-    loadSellerData();
-  }, []);
-
   const loadSellerData = async () => {
+    setLoading(true);
     try {
       const user = auth.currentUser;
       if (!user) {
@@ -58,6 +54,21 @@ export default function SellerProfileScreen() {
         const sellerDoc = await getDoc(doc(db, 'sellers', user.uid));
         const sellerDataFromDb = sellerDoc.exists() ? sellerDoc.data() : {};
 
+        // Format join date
+        let formattedJoinDate = 'Recently';
+        if (userData.createdAt) {
+          try {
+            const date = userData.createdAt.toDate ? userData.createdAt.toDate() : new Date(userData.createdAt);
+            formattedJoinDate = date.toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            });
+          } catch (e) {
+            formattedJoinDate = 'Recently';
+          }
+        }
+
         setSellerData({
           fullName: userData.fullName || '',
           email: user.email || '',
@@ -66,7 +77,7 @@ export default function SellerProfileScreen() {
           description: sellerDataFromDb.storeDescription || 'No description yet',
           location: sellerDataFromDb.location || 'Not set',
           avatar: sellerDataFromDb.avatar || null,
-          joinDate: userData.createdAt ? new Date(userData.createdAt).toLocaleDateString() : 'Recently',
+          joinDate: formattedJoinDate,
         });
       }
     } catch (error) {
@@ -76,6 +87,18 @@ export default function SellerProfileScreen() {
       setLoading(false);
     }
   };
+
+  // Load seller data when screen opens
+  useEffect(() => {
+    loadSellerData();
+  }, []);
+
+  // Refresh when screen comes into focus (after editing)
+  useFocusEffect(
+    useCallback(() => {
+      loadSellerData();
+    }, [])
+  );
 
   const handleEditProfile = () => {
     router.push("/(seller)/edit-profile");
@@ -103,7 +126,6 @@ export default function SellerProfileScreen() {
     );
   };
 
-  // THIS IS THE WORKING "VIEW MY STORE" FUNCTION
   const handleViewStore = () => {
     const user = auth.currentUser;
     if (user) {
@@ -170,7 +192,7 @@ export default function SellerProfileScreen() {
           <Text style={styles.sellerName}>{sellerData?.fullName || 'Seller Name'}</Text>
           <Text style={styles.sellerEmail}>{sellerData?.email || 'email@example.com'}</Text>
 
-          {/* View Store Button - THIS IS THE BUTTON */}
+          {/* View Store Button */}
           <TouchableOpacity style={styles.viewStoreButton} onPress={handleViewStore}>
             <Ionicons name="storefront-outline" size={16} color="#C35822" />
             <Text style={styles.viewStoreText}>View My Store</Text>

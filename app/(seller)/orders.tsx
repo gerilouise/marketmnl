@@ -1,5 +1,5 @@
 // app/(seller)/orders.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { auth, db } from '@/lib/firebase';
 import { 
   collection, 
@@ -22,7 +22,6 @@ import {
   getDocs, 
   doc, 
   updateDoc,
-  orderBy,
   Timestamp 
 } from 'firebase/firestore';
 
@@ -59,7 +58,7 @@ interface Order {
   sellerId: string;
 }
 
-const STATUS_CATEGORIES = ["All", "Pending", "Confirmed", "Shipped", "Delivered"];
+const STATUS_CATEGORIES = ["All", "Pending", "Confirmed", "Shipped", "Delivered", "Cancelled"];
 
 export default function OrdersScreen() {
   const [selectedStatus, setSelectedStatus] = useState("All");
@@ -69,11 +68,8 @@ export default function OrdersScreen() {
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
   // Load orders from Firebase when screen opens
-  useEffect(() => {
-    loadOrders();
-  }, []);
-
   const loadOrders = async () => {
+    setLoading(true);
     try {
       const user = auth.currentUser;
       if (!user) {
@@ -82,22 +78,36 @@ export default function OrdersScreen() {
         return;
       }
 
-      // Query orders where sellerId matches current user
       const ordersRef = collection(db, 'orders');
       const q = query(
         ordersRef, 
-        where('sellerId', '==', user.uid),
-        orderBy('createdAt', 'desc')
+        where('sellerId', '==', user.uid)
       );
       
       const querySnapshot = await getDocs(q);
       const ordersList: Order[] = [];
       
       querySnapshot.forEach((doc) => {
-        ordersList.push({ id: doc.id, ...doc.data() } as Order);
+        const data = doc.data();
+        // Convert status to proper capitalization for display
+        const status = data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
+        ordersList.push({ 
+          id: doc.id, 
+          ...data,
+          status: status || 'Pending'
+        } as Order);
+      });
+      
+      // Sort by date (newest first)
+      ordersList.sort((a, b) => {
+        if (a.createdAt && b.createdAt) {
+          return b.createdAt.seconds - a.createdAt.seconds;
+        }
+        return 0;
       });
       
       setOrders(ordersList);
+      
     } catch (error) {
       console.error('Error loading orders:', error);
       Alert.alert('Error', 'Failed to load orders');
@@ -107,17 +117,26 @@ export default function OrdersScreen() {
     }
   };
 
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadOrders();
+    }, [])
+  );
+
   // Update order status in Firebase
   const updateOrderStatus = async (orderId: string, newStatus: Order['status']) => {
     setUpdatingOrderId(orderId);
     try {
       const orderRef = doc(db, 'orders', orderId);
+      // Save status in lowercase for database consistency
+      const dbStatus = newStatus.toLowerCase();
+      
       await updateDoc(orderRef, {
-        status: newStatus,
+        status: dbStatus,
         updatedAt: Timestamp.now()
       });
 
-      // Update local state
       setOrders(prev => 
         prev.map(order => 
           order.id === orderId 
@@ -141,10 +160,7 @@ export default function OrdersScreen() {
       "Are you sure you want to confirm this order?",
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Confirm",
-          onPress: () => updateOrderStatus(orderId, 'Confirmed'),
-        },
+        { text: "Confirm", onPress: () => updateOrderStatus(orderId, 'Confirmed') },
       ]
     );
   };
@@ -155,10 +171,7 @@ export default function OrdersScreen() {
       "Are you sure you want to mark this order as shipped?",
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Mark as Shipped",
-          onPress: () => updateOrderStatus(orderId, 'Shipped'),
-        },
+        { text: "Mark as Shipped", onPress: () => updateOrderStatus(orderId, 'Shipped') },
       ]
     );
   };
@@ -169,11 +182,7 @@ export default function OrdersScreen() {
       "Are you sure you want to cancel this order?",
       [
         { text: "No", style: "cancel" },
-        {
-          text: "Yes, Cancel",
-          style: "destructive",
-          onPress: () => updateOrderStatus(orderId, 'Cancelled'),
-        },
+        { text: "Yes, Cancel", style: "destructive", onPress: () => updateOrderStatus(orderId, 'Cancelled') },
       ]
     );
   };
@@ -184,10 +193,7 @@ export default function OrdersScreen() {
       "Mark this order as delivered?",
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Yes",
-          onPress: () => updateOrderStatus(orderId, 'Delivered'),
-        },
+        { text: "Yes", onPress: () => updateOrderStatus(orderId, 'Delivered') },
       ]
     );
   };
@@ -222,12 +228,11 @@ export default function OrdersScreen() {
 
   const renderOrderItem = ({ item }: { item: Order }) => {
     const isUpdating = updatingOrderId === item.id;
-    const mainProduct = item.items[0]; // Show first product as main
+    const mainProduct = item.items[0];
     const otherItemsCount = item.items.length - 1;
 
     return (
       <View style={styles.orderCard}>
-        {/* Order Header */}
         <View style={styles.orderHeader}>
           <Text style={styles.orderNumber}>{item.orderNumber}</Text>
           <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + "20" }]}>
@@ -237,20 +242,17 @@ export default function OrdersScreen() {
           </View>
         </View>
 
-        {/* Customer and Product */}
         <Text style={styles.customerName}>{item.customerName}</Text>
         <Text style={styles.productName}>
           {mainProduct.productName} x{mainProduct.quantity}
           {otherItemsCount > 0 && ` +${otherItemsCount} more`}
         </Text>
 
-        {/* Date and Price Row */}
         <View style={styles.datePriceRow}>
           <Text style={styles.orderDate}>{formatDate(item.createdAt)}</Text>
           <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
         </View>
 
-        {/* Action Buttons */}
         <View style={styles.actionButtonsContainer}>
           {isUpdating ? (
             <ActivityIndicator size="small" color="#C35822" />
@@ -258,47 +260,30 @@ export default function OrdersScreen() {
             <>
               {item.status === "Pending" && (
                 <>
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.confirmButton]}
-                    onPress={() => handleConfirmOrder(item.id)}
-                  >
+                  <TouchableOpacity style={[styles.actionButton, styles.confirmButton]} onPress={() => handleConfirmOrder(item.id)}>
                     <Text style={styles.actionButtonText}>Confirm</Text>
                   </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.cancelButton]}
-                    onPress={() => handleCancelOrder(item.id)}
-                  >
+                  <TouchableOpacity style={[styles.actionButton, styles.cancelButton]} onPress={() => handleCancelOrder(item.id)}>
                     <Text style={styles.actionButtonText}>Cancel</Text>
                   </TouchableOpacity>
                 </>
               )}
-
               {item.status === "Confirmed" && (
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.shippedButton]}
-                  onPress={() => handleMarkAsShipped(item.id)}
-                >
+                <TouchableOpacity style={[styles.actionButton, styles.shippedButton]} onPress={() => handleMarkAsShipped(item.id)}>
                   <Text style={styles.actionButtonText}>Mark as Shipped</Text>
                 </TouchableOpacity>
               )}
-
               {item.status === "Shipped" && (
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.deliveredButton]}
-                  onPress={() => handleMarkAsDelivered(item.id)}
-                >
+                <TouchableOpacity style={[styles.actionButton, styles.deliveredButton]} onPress={() => handleMarkAsDelivered(item.id)}>
                   <Text style={styles.actionButtonText}>Mark as Delivered</Text>
                 </TouchableOpacity>
               )}
-
               {item.status === "Delivered" && (
                 <View style={styles.statusMessage}>
                   <Ionicons name="checkmark-done-circle" size={20} color="#9C27B0" />
                   <Text style={styles.statusMessageText}>Delivered</Text>
                 </View>
               )}
-
               {item.status === "Cancelled" && (
                 <View style={styles.statusMessage}>
                   <Ionicons name="close-circle" size={20} color="#FF3B30" />
@@ -314,7 +299,7 @@ export default function OrdersScreen() {
 
   const filteredOrders = getFilteredOrders();
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
@@ -327,34 +312,40 @@ export default function OrdersScreen() {
     );
   }
 
+  if (!auth.currentUser) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Orders</Text>
+        </View>
+        <View style={styles.notLoggedInContainer}>
+          <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
+          <Text style={styles.notLoggedInText}>Please log in to view orders</Text>
+          <TouchableOpacity style={styles.loginButton} onPress={() => router.push("/auth/login")}>
+            <Text style={styles.loginButtonText}>Log In</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Orders</Text>
+        <Text style={styles.orderCount}>{filteredOrders.length} orders</Text>
       </View>
 
-      {/* Status Categories */}
       <View style={styles.categoriesWrapper}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoriesScrollContent}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoriesScrollContent}>
           <View style={styles.categoriesContainer}>
             {STATUS_CATEGORIES.map((status) => (
               <TouchableOpacity
                 key={status}
-                style={[
-                  styles.categoryChip,
-                  selectedStatus === status && styles.categoryChipActive
-                ]}
+                style={[styles.categoryChip, selectedStatus === status && styles.categoryChipActive]}
                 onPress={() => setSelectedStatus(status)}
               >
-                <Text style={[
-                  styles.categoryChipText,
-                  selectedStatus === status && styles.categoryChipTextActive
-                ]}>
+                <Text style={[styles.categoryChipText, selectedStatus === status && styles.categoryChipTextActive]}>
                   {status}
                 </Text>
               </TouchableOpacity>
@@ -363,7 +354,6 @@ export default function OrdersScreen() {
         </ScrollView>
       </View>
 
-      {/* Orders List */}
       <FlatList
         data={filteredOrders}
         renderItem={renderOrderItem}
@@ -385,6 +375,11 @@ export default function OrdersScreen() {
           <View style={styles.emptyContainer}>
             <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
             <Text style={styles.emptyText}>No orders found</Text>
+            {selectedStatus !== "All" && (
+              <TouchableOpacity style={styles.clearFilterButton} onPress={() => setSelectedStatus("All")}>
+                <Text style={styles.clearFilterText}>Clear Filter</Text>
+              </TouchableOpacity>
+            )}
           </View>
         }
       />
@@ -398,6 +393,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#FBF8F4",
   },
   header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 15,
@@ -407,10 +405,38 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#32221B",
   },
+  orderCount: {
+    fontSize: 14,
+    color: "#8F796F",
+  },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  notLoggedInContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  notLoggedInText: {
+    fontSize: 16,
+    color: "#8F796F",
+    textAlign: "center",
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  loginButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  loginButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   categoriesWrapper: {
     marginBottom: 16,
@@ -528,16 +554,16 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   confirmButton: {
-    backgroundColor: "#4CAF50", // Green for Confirm
+    backgroundColor: "#4CAF50",
   },
   cancelButton: {
-    backgroundColor: "#FF3B30", // Red for Cancel
+    backgroundColor: "#FF3B30",
   },
   shippedButton: {
-    backgroundColor: "#2196F3", // Blue for Shipped
+    backgroundColor: "#2196F3",
   },
   deliveredButton: {
-    backgroundColor: "#9C27B0", // Purple for Delivered
+    backgroundColor: "#9C27B0",
   },
   statusMessage: {
     flexDirection: "row",
@@ -560,5 +586,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#8F796F",
     marginTop: 12,
+  },
+  clearFilterButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#FFF",
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: "#C35822",
+  },
+  clearFilterText: {
+    color: "#C35822",
+    fontSize: 14,
+    fontWeight: "500",
   },
 });

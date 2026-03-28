@@ -21,7 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
 export default function CheckoutScreen() {
-  const { selectedItems, setSelectedItems } = useCart();
+  const { selectedItems, setSelectedItems, loadCart } = useCart();
   const { addresses, loading, fetchAddresses } = useFirebaseProfile();
   const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
@@ -44,6 +44,8 @@ export default function CheckoutScreen() {
 
   useEffect(() => {
     loadAddresses();
+    // Log selected items to verify sellerId
+    console.log("🛒 Selected items in checkout:", JSON.stringify(selectedItems, null, 2));
     setCheckoutItems(selectedItems);
   }, []);
 
@@ -95,19 +97,35 @@ export default function CheckoutScreen() {
     }
   };
 
-  // In app/checkout/index.tsx - Update the processOrder function
-
   const processOrder = async (paymentDetails?: any) => {
     setIsProcessing(true);
 
     try {
+      // Verify all items have sellerId
+      const missingSellerId = checkoutItems.some(item => !item.sellerId);
+      if (missingSellerId) {
+        console.error("❌ Some items are missing sellerId:", checkoutItems);
+        Alert.alert(
+          "Error",
+          "Some items are missing seller information. Please remove them from cart and try again."
+        );
+        return;
+      }
+
+      // Log the items with sellerId
+      console.log("📦 Processing order with items:", checkoutItems.map(item => ({
+        name: item.productName,
+        sellerId: item.sellerId,
+        sellerName: item.sellerName
+      })));
+
       const orderData = {
         items: checkoutItems.map((item) => ({
           productId: item.productId,
           productName: item.productName,
           productPrice: item.productPrice,
           quantity: item.quantity,
-          sellerId: item.sellerId || item.userId,
+          sellerId: item.sellerId, // ← This must be present
           sellerName: item.sellerName,
           imageUrl: item.imageUrl,
         })),
@@ -115,8 +133,7 @@ export default function CheckoutScreen() {
         shippingFee,
         total,
         paymentMethod: selectedPayment,
-        // Only include paymentDetails if it exists
-        paymentDetails: paymentDetails || null, // 👈 FIX: Use null instead of undefined
+        paymentDetails: paymentDetails || null,
         address: {
           fullName: selectedAddress.fullName,
           phone: selectedAddress.phone,
@@ -129,18 +146,22 @@ export default function CheckoutScreen() {
         },
       };
 
-      console.log("Order data being sent:", orderData); // Debug log
+      console.log("🚀 Sending order to createOrder:", JSON.stringify(orderData, null, 2));
 
       const result = await createOrder(orderData);
 
       if (result.success) {
         setOrderNumber(result.orderNumber);
         setShowOrderSuccess(true);
+        
         // Clear selected items after successful order
         setSelectedItems([]);
+        
+        // Reload cart to refresh the list
+        await loadCart();
       }
     } catch (error: any) {
-      console.error("Order error:", error);
+      console.error("❌ Order error:", error);
       Alert.alert(
         "Error",
         error.message || "Failed to place order. Please try again.",
@@ -149,6 +170,7 @@ export default function CheckoutScreen() {
       setIsProcessing(false);
       setShowPaymentModal(false);
       setShowCreditCardModal(false);
+      // Reset form fields
       setPhoneNumber("");
       setReferenceNumber("");
       setCardNumber("");
@@ -277,6 +299,11 @@ export default function CheckoutScreen() {
                   <Text style={styles.orderItemQuantity}>
                     Qty: {item.quantity}
                   </Text>
+                  {item.sellerName && (
+                    <Text style={styles.sellerNameText}>
+                      from: {item.sellerName}
+                    </Text>
+                  )}
                 </View>
                 <Text style={styles.orderItemPrice}>
                   ₱{item.productPrice * item.quantity}
@@ -560,9 +587,7 @@ export default function CheckoutScreen() {
   );
 }
 
-// Add all styles from previous version plus new modal styles
 const styles = StyleSheet.create({
-  // ... keep all previous styles ...
   container: { flex: 1, backgroundColor: "#FBF8F4" },
   header: {
     flexDirection: "row",
@@ -628,6 +653,11 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   orderItemQuantity: { fontSize: 12, color: "#8F796F" },
+  sellerNameText: {
+    fontSize: 11,
+    color: "#C35822",
+    marginTop: 2,
+  },
   orderItemPrice: { fontSize: 14, fontWeight: "600", color: "#C35822" },
   addAddressButton: {
     flexDirection: "row",

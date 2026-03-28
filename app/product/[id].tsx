@@ -127,14 +127,25 @@ export default function ProductDetailsScreen() {
         const productData = { id: productSnap.id, ...productSnap.data() } as Product;
         setProduct(productData);
         
+        // Get store name from sellers collection (where seller data is saved during signup)
         if (productData.sellerId) {
-          const storeRef = doc(db, 'stores', productData.sellerId);
-          const storeSnap = await getDoc(storeRef);
-          if (storeSnap.exists()) {
-            const storeData = storeSnap.data();
-            setStoreName(storeData.storeName || productData.sellerName || "MarketMNL");
+          // Try to load from sellers collection first
+          const sellerRef = doc(db, 'sellers', productData.sellerId);
+          const sellerSnap = await getDoc(sellerRef);
+          
+          if (sellerSnap.exists()) {
+            const sellerData = sellerSnap.data();
+            setStoreName(sellerData.storeName || productData.sellerName || "MarketMNL");
           } else {
-            setStoreName(productData.sellerName || "MarketMNL");
+            // Fallback to stores collection
+            const storeRef = doc(db, 'stores', productData.sellerId);
+            const storeSnap = await getDoc(storeRef);
+            if (storeSnap.exists()) {
+              const storeData = storeSnap.data();
+              setStoreName(storeData.storeName || productData.sellerName || "MarketMNL");
+            } else {
+              setStoreName(productData.sellerName || "MarketMNL");
+            }
           }
         }
         

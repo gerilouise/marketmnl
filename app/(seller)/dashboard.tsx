@@ -32,7 +32,6 @@ interface Order {
 }
 
 export default function SellerDashboardScreen() {
-  const [selectedTab, setSelectedTab] = useState("dashboard");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sellerName, setSellerName] = useState("");
@@ -40,7 +39,7 @@ export default function SellerDashboardScreen() {
     orders: 0,
     revenue: 0,
     products: 0,
-    rating: 4.9,
+    rating: 0,
   });
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
 
@@ -54,7 +53,7 @@ export default function SellerDashboardScreen() {
         return;
       }
 
-      console.log("Fetching dashboard data for seller:", user.uid);
+      console.log("📊 Fetching dashboard data for seller:", user.uid);
 
       // 1. Get seller name from users collection
       const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -70,8 +69,41 @@ export default function SellerDashboardScreen() {
       const productsQuery = query(productsRef, where('sellerId', '==', user.uid));
       const productsSnapshot = await getDocs(productsQuery);
       const productsCount = productsSnapshot.size;
-
-      // 3. Get seller's orders
+      
+      // Log products found
+      console.log(`📦 Found ${productsCount} products`);
+      productsSnapshot.forEach((doc) => {
+        const product = doc.data();
+        console.log(`  - ${product.name} (ID: ${doc.id})`);
+      });
+      
+      // 3. Get all product IDs for this seller
+      const productIds: string[] = [];
+      productsSnapshot.forEach((doc) => {
+        productIds.push(doc.id);
+      });
+      
+      // 4. Calculate average rating from product reviews
+      let totalRatingSum = 0;
+      let totalReviewsCount = 0;
+      
+      // Fetch reviews for each product
+      for (const productId of productIds) {
+        const reviewsRef = collection(db, 'product_reviews');
+        const reviewsQuery = query(reviewsRef, where('productId', '==', productId));
+        const reviewsSnapshot = await getDocs(reviewsQuery);
+        
+        reviewsSnapshot.forEach((reviewDoc) => {
+          const reviewData = reviewDoc.data();
+          totalRatingSum += reviewData.rating || 0;
+          totalReviewsCount++;
+        });
+      }
+      
+      const averageRating = totalReviewsCount > 0 ? totalRatingSum / totalReviewsCount : 0;
+      console.log(`⭐ Rating: ${averageRating.toFixed(1)} from ${totalReviewsCount} reviews`);
+      
+      // 5. Get seller's orders
       const ordersRef = collection(db, 'orders');
       const ordersQuery = query(
         ordersRef,
@@ -84,10 +116,13 @@ export default function SellerDashboardScreen() {
       let totalRevenue = 0;
       const ordersList: Order[] = [];
 
+      console.log(`📋 Found ${ordersSnapshot.size} orders`);
       ordersSnapshot.forEach((doc) => {
         const orderData = doc.data();
         const orderTotal = orderData.total || 0;
         totalRevenue += orderTotal;
+        
+        console.log(`  - Order ${orderData.orderNumber}: ₱${orderTotal} (${orderData.status})`);
 
         ordersList.push({
           id: doc.id,
@@ -106,14 +141,14 @@ export default function SellerDashboardScreen() {
         orders: ordersSnapshot.size,
         revenue: totalRevenue,
         products: productsCount,
-        rating: 4.9,
+        rating: averageRating,
       });
 
       setRecentOrders(ordersList);
-      console.log(`Dashboard loaded: ${productsCount} products, ${ordersSnapshot.size} orders, ₱${totalRevenue} revenue`);
+      console.log(`✅ Dashboard summary: ${productsCount} products, ${ordersSnapshot.size} orders, ₱${totalRevenue} revenue, ${averageRating.toFixed(1)}⭐ rating`);
 
     } catch (error) {
-      console.error("Error fetching dashboard data:", error);
+      console.error("❌ Error fetching dashboard data:", error);
       Alert.alert("Error", "Failed to load dashboard data");
     } finally {
       setLoading(false);
@@ -203,6 +238,9 @@ export default function SellerDashboardScreen() {
     </TouchableOpacity>
   );
 
+  // Format rating to 1 decimal place
+  const formattedRating = stats.rating > 0 ? stats.rating.toFixed(1) : "0.0";
+
   if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container}>
@@ -280,8 +318,11 @@ export default function SellerDashboardScreen() {
             <View style={styles.statIconContainer}>
               <Ionicons name="star" size={24} color="#FFD700" />
             </View>
-            <Text style={styles.statNumber}>{stats.rating}</Text>
+            <Text style={styles.statNumber}>{formattedRating}</Text>
             <Text style={styles.statLabel}>Rating</Text>
+            {stats.rating === 0 && (
+              <Text style={styles.noRatingText}>No reviews yet</Text>
+            )}
           </View>
         </View>
 
@@ -436,6 +477,12 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     color: "#8F796F",
+  },
+  noRatingText: {
+    fontSize: 10,
+    color: "#C35822",
+    marginTop: 4,
+    fontStyle: "italic",
   },
   actionButtons: {
     flexDirection: "row",

@@ -11,6 +11,7 @@ import {
     query,
     Timestamp,
     where,
+    orderBy,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
@@ -44,7 +45,7 @@ interface Order {
   total: number;
   paymentMethod: string;
   address: any;
-  status: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
+  status: string; // pending, confirmed, shipped, delivered, cancelled
   createdAt: Timestamp;
   updatedAt: Timestamp;
   userId: string;
@@ -56,19 +57,19 @@ interface Order {
 
 type OrderStatus =
   | "all"
-  | "to_ship"
-  | "to_receive"
-  | "to_review"
-  | "cancelled"
-  | "refund_return";
+  | "pending"
+  | "confirmed"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
 
 const STATUS_TABS: { id: OrderStatus; label: string; icon: string }[] = [
   { id: "all", label: "All", icon: "list-outline" },
-  { id: "to_ship", label: "To Ship", icon: "cube-outline" },
-  { id: "to_receive", label: "To Receive", icon: "gift-outline" },
-  { id: "to_review", label: "To Review", icon: "star-outline" },
+  { id: "pending", label: "Pending", icon: "time-outline" },
+  { id: "confirmed", label: "Confirmed", icon: "checkmark-circle-outline" },
+  { id: "shipped", label: "Shipped", icon: "car-outline" },
+  { id: "delivered", label: "Delivered", icon: "checkmark-done-circle-outline" },
   { id: "cancelled", label: "Cancelled", icon: "close-circle-outline" },
-  { id: "refund_return", label: "Refund/Return", icon: "refresh-outline" },
 ];
 
 export default function OrdersScreen() {
@@ -95,7 +96,7 @@ export default function OrdersScreen() {
 
       // Fetch from orders collection (active orders)
       const ordersRef = collection(db, "orders");
-      const q = query(ordersRef, where("userId", "==", user.uid));
+      const q = query(ordersRef, where("userId", "==", user.uid), orderBy("createdAt", "desc"));
       const ordersSnapshot = await getDocs(q);
 
       // Fetch from cancelled_orders collection
@@ -103,6 +104,7 @@ export default function OrdersScreen() {
       const cancelledQ = query(
         cancelledOrdersRef,
         where("userId", "==", user.uid),
+        orderBy("createdAt", "desc")
       );
       const cancelledSnapshot = await getDocs(cancelledQ);
 
@@ -121,14 +123,6 @@ export default function OrdersScreen() {
       });
 
       console.log("Total orders found:", ordersList.length);
-      console.log("Active orders:", ordersSnapshot.size);
-      console.log("Cancelled orders:", cancelledSnapshot.size);
-
-      // Sort manually in JavaScript (newest first)
-      ordersList.sort((a, b) => {
-        if (!a.createdAt || !b.createdAt) return 0;
-        return b.createdAt.toDate().getTime() - a.createdAt.toDate().getTime();
-      });
 
       setOrders(ordersList);
       filterOrders(activeTab, ordersList);
@@ -142,47 +136,17 @@ export default function OrdersScreen() {
   };
 
   const filterOrders = (status: OrderStatus, ordersList: Order[]) => {
-    let filtered: Order[] = [];
-
-    switch (status) {
-      case "all":
-        filtered = ordersList;
-        break;
-      case "to_ship":
-        // Show orders that are pending or confirmed (active orders, not cancelled)
-        filtered = ordersList.filter(
-          (o) =>
-            (o.status === "pending" || o.status === "confirmed") &&
-            o.status !== "cancelled",
-        );
-        break;
-      case "to_receive":
-        filtered = ordersList.filter((o) => o.status === "shipped");
-        break;
-      case "to_review":
-        filtered = ordersList.filter((o) => o.status === "delivered");
-        break;
-      case "cancelled":
-        // Show orders with cancelled status (from cancelled_orders collection)
-        filtered = ordersList.filter((o) => o.status === "cancelled");
-        break;
-      case "refund_return":
-        filtered = ordersList.filter(
-          (o) =>
-            o.status === "cancelled" && o.paymentMethod !== "Cash on Delivery",
-        );
-        break;
-      default:
-        filtered = ordersList;
+    if (status === "all") {
+      setFilteredOrders(ordersList);
+    } else {
+      setFilteredOrders(ordersList.filter((o) => o.status === status));
     }
-
-    setFilteredOrders(filtered);
   };
 
   useFocusEffect(
     useCallback(() => {
       loadOrders();
-    }, []),
+    }, [])
   );
 
   const handleTabChange = (tabId: OrderStatus) => {
@@ -215,11 +179,11 @@ export default function OrdersScreen() {
   const getStatusLabel = (status: string) => {
     switch (status) {
       case "pending":
-        return "To Ship";
+        return "Pending";
       case "confirmed":
-        return "To Ship";
+        return "Confirmed";
       case "shipped":
-        return "To Receive";
+        return "Shipped";
       case "delivered":
         return "Delivered";
       case "cancelled":
@@ -229,12 +193,26 @@ export default function OrdersScreen() {
     }
   };
 
+  const getStatusMessage = (status: string) => {
+    switch (status) {
+      case "pending":
+        return "Waiting for seller to confirm your order";
+      case "confirmed":
+        return "Order confirmed! Preparing your items for shipment";
+      case "shipped":
+        return "Your order is on the way!";
+      case "delivered":
+        return "Order delivered. Thank you for shopping!";
+      case "cancelled":
+        return "Order cancelled";
+      default:
+        return "";
+    }
+  };
+
   const getActionButton = (order: Order) => {
-    // Only show cancel button for orders that are in "to_ship" status and not cancelled
-    if (
-      (order.status === "pending" || order.status === "confirmed") &&
-      order.status !== "cancelled"
-    ) {
+    // Show cancel button for pending orders only
+    if (order.status === "pending") {
       return (
         <TouchableOpacity
           style={styles.cancelButton}
@@ -245,33 +223,31 @@ export default function OrdersScreen() {
       );
     }
 
-    // If order is cancelled, no action button
-    if (order.status === "cancelled") {
-      return null;
+    // Show track button for shipped orders
+    if (order.status === "shipped") {
+      return (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.secondaryButton]}
+          onPress={() => handleTrackOrder(order)}
+        >
+          <Text style={styles.secondaryButtonText}>Track Package</Text>
+        </TouchableOpacity>
+      );
     }
 
-    switch (order.status) {
-      case "shipped":
-        return (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.secondaryButton]}
-            onPress={() => handleTrackOrder(order)}
-          >
-            <Text style={styles.secondaryButtonText}>Track Package</Text>
-          </TouchableOpacity>
-        );
-      case "delivered":
-        return (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.reviewButton]}
-            onPress={() => handleWriteReview(order)}
-          >
-            <Text style={styles.reviewButtonText}>Write a Review</Text>
-          </TouchableOpacity>
-        );
-      default:
-        return null;
+    // Show review button for delivered orders
+    if (order.status === "delivered") {
+      return (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.reviewButton]}
+          onPress={() => handleWriteReview(order)}
+        >
+          <Text style={styles.reviewButtonText}>Write a Review</Text>
+        </TouchableOpacity>
+      );
     }
+
+    return null;
   };
 
   const handleTrackOrder = (order: Order) => {
@@ -332,7 +308,7 @@ export default function OrdersScreen() {
 
               Alert.alert(
                 "Success",
-                `Order ${order.orderNumber} has been cancelled`,
+                `Order ${order.orderNumber} has been cancelled`
               );
             } catch (error) {
               console.error("Error cancelling order:", error);
@@ -342,14 +318,18 @@ export default function OrdersScreen() {
             }
           },
         },
-      ],
+      ]
     );
   };
 
   const formatDate = (timestamp: Timestamp) => {
     if (!timestamp) return "N/A";
     const date = timestamp.toDate();
-    return `${date.toLocaleDateString()} • ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    return date.toLocaleDateString('en-US', { 
+      month: 'long', 
+      day: 'numeric',
+      year: 'numeric'
+    });
   };
 
   const openOrderDetails = (order: Order) => {
@@ -369,10 +349,7 @@ export default function OrdersScreen() {
       activeOpacity={0.7}
     >
       <View style={styles.orderHeader}>
-        <View style={styles.orderInfo}>
-          <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-          <Text style={styles.orderDate}>{formatDate(item.createdAt)}</Text>
-        </View>
+        <Text style={styles.orderNumber}>{item.orderNumber}</Text>
         <View
           style={[
             styles.statusBadge,
@@ -386,6 +363,8 @@ export default function OrdersScreen() {
           </Text>
         </View>
       </View>
+
+      <Text style={styles.orderDate}>{formatDate(item.createdAt)}</Text>
 
       <View style={styles.orderItems}>
         {item.items &&
@@ -417,11 +396,25 @@ export default function OrdersScreen() {
       <View style={styles.orderFooter}>
         <View style={styles.totalContainer}>
           <Text style={styles.totalLabel}>Total:</Text>
-          <Text style={styles.totalAmount}>₱{item.total}</Text>
+          <Text style={styles.totalAmount}>₱{item.total.toFixed(2)}</Text>
         </View>
         <View style={styles.actionButtonsContainer}>
           {getActionButton(item)}
         </View>
+      </View>
+
+      {/* Status Message */}
+      <View style={styles.statusMessageContainer}>
+        <Ionicons 
+          name={item.status === "delivered" ? "checkmark-done-circle" : 
+                item.status === "shipped" ? "car" :
+                item.status === "cancelled" ? "close-circle" : "time-outline"} 
+          size={14} 
+          color={getStatusColor(item.status)} 
+        />
+        <Text style={[styles.statusMessageText, { color: getStatusColor(item.status) }]}>
+          {getStatusMessage(item.status)}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -430,9 +423,7 @@ export default function OrdersScreen() {
   const OrderDetailsModal = () => {
     if (!selectedOrder) return null;
 
-    const canCancel =
-      selectedOrder.status === "pending" ||
-      selectedOrder.status === "confirmed";
+    const canCancel = selectedOrder.status === "pending";
 
     return (
       <View style={styles.modalOverlay}>
@@ -499,6 +490,20 @@ export default function OrdersScreen() {
               </View>
             </View>
 
+            {/* Status Message */}
+            <View style={styles.modalStatusMessage}>
+              <Ionicons 
+                name={selectedOrder.status === "delivered" ? "checkmark-done-circle" : 
+                      selectedOrder.status === "shipped" ? "car" :
+                      selectedOrder.status === "cancelled" ? "close-circle" : "time-outline"} 
+                size={16} 
+                color={getStatusColor(selectedOrder.status)} 
+              />
+              <Text style={[styles.modalStatusMessageText, { color: getStatusColor(selectedOrder.status) }]}>
+                {getStatusMessage(selectedOrder.status)}
+              </Text>
+            </View>
+
             {/* Cancellation Info */}
             {selectedOrder.status === "cancelled" &&
               selectedOrder.cancelledAt && (
@@ -530,6 +535,9 @@ export default function OrdersScreen() {
                   <Text style={styles.orderSummaryQuantity}>
                     Qty: {item.quantity}
                   </Text>
+                  <Text style={styles.orderSummarySeller}>
+                    Seller: {item.sellerName}
+                  </Text>
                 </View>
                 <Text style={styles.orderSummaryPrice}>
                   ₱{item.productPrice * item.quantity}
@@ -543,14 +551,14 @@ export default function OrdersScreen() {
             {/* Subtotal */}
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Subtotal</Text>
-              <Text style={styles.detailValue}>₱{selectedOrder.subtotal}</Text>
+              <Text style={styles.detailValue}>₱{selectedOrder.subtotal.toFixed(2)}</Text>
             </View>
 
             {/* Shipping Fee */}
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Shipping Fee</Text>
               <Text style={styles.detailValue}>
-                ₱{selectedOrder.shippingFee}
+                ₱{selectedOrder.shippingFee.toFixed(2)}
               </Text>
             </View>
 
@@ -558,26 +566,26 @@ export default function OrdersScreen() {
             <View style={[styles.detailRow, styles.totalRow]}>
               <Text style={styles.totalLabelModal}>Total</Text>
               <Text style={styles.totalAmountModal}>
-                ₱{selectedOrder.total}
+                ₱{selectedOrder.total.toFixed(2)}
               </Text>
             </View>
 
             {/* Address Section */}
-            <View style={styles.addressSection}>
-              <Text style={styles.addressTitle}>Shipping Address</Text>
-              <Text style={styles.addressName}>
-                {selectedOrder.address?.fullName}
-              </Text>
-              <Text style={styles.addressPhone}>
-                {selectedOrder.address?.phone}
-              </Text>
-              <Text style={styles.addressText} numberOfLines={3}>
-                {selectedOrder.address?.street},{" "}
-                {selectedOrder.address?.barangay}, {selectedOrder.address?.city}
-                , {selectedOrder.address?.province}{" "}
-                {selectedOrder.address?.zipCode}
-              </Text>
-            </View>
+            {selectedOrder.address && (
+              <View style={styles.addressSection}>
+                <Text style={styles.addressTitle}>Shipping Address</Text>
+                <Text style={styles.addressName}>
+                  {selectedOrder.address.fullName}
+                </Text>
+                <Text style={styles.addressPhone}>
+                  {selectedOrder.address.phone}
+                </Text>
+                <Text style={styles.addressText} numberOfLines={3}>
+                  {selectedOrder.address.street}, {selectedOrder.address.barangay}, {selectedOrder.address.city}
+                  , {selectedOrder.address.province} {selectedOrder.address.zipCode}
+                </Text>
+              </View>
+            )}
           </ScrollView>
 
           {/* Action Buttons */}
@@ -735,7 +743,7 @@ export default function OrdersScreen() {
             <Text style={styles.emptyText}>
               {activeTab === "all"
                 ? "Your orders will appear here"
-                : `No ${activeTab.replace("_", " ")} orders found`}
+                : `No ${activeTab} orders found`}
             </Text>
             <TouchableOpacity
               style={styles.shopButton}
@@ -858,25 +866,18 @@ const styles = StyleSheet.create({
   orderHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  orderInfo: {
-    flex: 1,
-    marginRight: 12,
+    alignItems: "center",
+    marginBottom: 8,
   },
   orderNumber: {
     fontSize: 14,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 4,
   },
   orderDate: {
-    fontSize: 11,
+    fontSize: 12,
     color: "#8F796F",
+    marginBottom: 12,
   },
   statusBadge: {
     paddingHorizontal: 10,
@@ -935,6 +936,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
+    marginBottom: 12,
   },
   totalContainer: {
     flexDirection: "row",
@@ -955,15 +957,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionButton: {
-    backgroundColor: "#C35822",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-  },
-  actionButtonText: {
-    color: "#FFF",
-    fontSize: 12,
-    fontWeight: "600",
   },
   secondaryButton: {
     backgroundColor: "#F5F0EB",
@@ -997,6 +993,19 @@ const styles = StyleSheet.create({
     color: "#F44336",
     fontSize: 12,
     fontWeight: "600",
+  },
+  statusMessageContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  statusMessageText: {
+    fontSize: 12,
+    fontWeight: "500",
+    flex: 1,
   },
   emptyContainer: {
     alignItems: "center",
@@ -1096,7 +1105,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 8,
+    marginBottom: 12,
   },
   orderSummaryLeft: {
     flex: 1,
@@ -1106,10 +1115,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
     color: "#32221B",
+    marginBottom: 2,
   },
   orderSummaryQuantity: {
     fontSize: 12,
     color: "#8F796F",
+    marginTop: 2,
+  },
+  orderSummarySeller: {
+    fontSize: 11,
+    color: "#C35822",
     marginTop: 2,
   },
   orderSummaryPrice: {
@@ -1202,6 +1217,21 @@ const styles = StyleSheet.create({
   cancellationText: {
     fontSize: 12,
     color: "#F44336",
+    flex: 1,
+  },
+  modalStatusMessage: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 10,
+    backgroundColor: "#F5F5F5",
+    borderRadius: 8,
+  },
+  modalStatusMessageText: {
+    fontSize: 13,
+    fontWeight: "500",
     flex: 1,
   },
 });

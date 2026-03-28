@@ -13,14 +13,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { auth, db } from '@/lib/firebase';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export default function EditProfileScreen() {
-  const params = useLocalSearchParams();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   
@@ -44,11 +43,11 @@ export default function EditProfileScreen() {
       const user = auth.currentUser;
       if (!user) {
         Alert.alert('Error', 'Please log in');
-        router.back();
+        router.replace('/(seller)/profile');
         return;
       }
 
-      // Get user data from Firestore
+      // Get user data from Firestore (users collection)
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (userDoc.exists()) {
         const userData = userDoc.data();
@@ -56,14 +55,14 @@ export default function EditProfileScreen() {
         setPhone(userData.phone || '');
       }
 
-      // Get store data
-      const storeDoc = await getDoc(doc(db, 'stores', user.uid));
-      if (storeDoc.exists()) {
-        const storeData = storeDoc.data();
-        setStoreName(storeData.storeName || '');
-        setDescription(storeData.description || '');
-        setLocation(storeData.location || '');
-        setAvatar(storeData.logo || null);
+      // Get seller data from sellers collection
+      const sellerDoc = await getDoc(doc(db, 'sellers', user.uid));
+      if (sellerDoc.exists()) {
+        const sellerData = sellerDoc.data();
+        setStoreName(sellerData.storeName || '');
+        setDescription(sellerData.storeDescription || '');
+        setLocation(sellerData.location || '');
+        setAvatar(sellerData.avatar || null);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -145,7 +144,7 @@ export default function EditProfileScreen() {
       const blob = await response.blob();
       
       const storage = getStorage();
-      const imageRef = ref(storage, `stores/${user.uid}/logo.jpg`);
+      const imageRef = ref(storage, `sellers/${user.uid}/avatar.jpg`);
       
       await uploadBytes(imageRef, blob);
       const downloadUrl = await getDownloadURL(imageRef);
@@ -173,40 +172,43 @@ export default function EditProfileScreen() {
       const user = auth.currentUser;
       if (!user) {
         Alert.alert('Error', 'Please log in');
-        router.back();
+        router.replace('/(seller)/profile');
         return;
       }
 
       // Upload avatar if changed
-      let logoUrl = avatar;
+      let avatarUrl = avatar;
       if (avatarFile) {
         const uploadedUrl = await uploadImage(avatarFile);
         if (uploadedUrl) {
-          logoUrl = uploadedUrl;
+          avatarUrl = uploadedUrl;
         }
       }
 
-      // Update user document
+      // Update user document (users collection)
       await updateDoc(doc(db, 'users', user.uid), {
         fullName: fullName.trim(),
         phone: phone.trim(),
         updatedAt: new Date().toISOString(),
       });
 
-      // Update store document
-      await updateDoc(doc(db, 'stores', user.uid), {
+      // Update seller document (sellers collection)
+      const sellerRef = doc(db, 'sellers', user.uid);
+      const updateData: any = {
         storeName: storeName.trim(),
-        description: description.trim(),
+        storeDescription: description.trim(),
         location: location.trim(),
-        ...(logoUrl && { logo: logoUrl }),
         updatedAt: new Date().toISOString(),
-      });
+      };
+      
+      if (avatarUrl) {
+        updateData.avatar = avatarUrl;
+      }
+      
+      await updateDoc(sellerRef, updateData);
 
-      Alert.alert(
-        'Success', 
-        'Profile updated successfully!',
-        [{ text: 'OK', onPress: () => router.back() }]
-      );
+      // Navigate back to profile page
+      router.replace('/(seller)/profile');
     } catch (error) {
       console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to save changes');
@@ -215,11 +217,15 @@ export default function EditProfileScreen() {
     }
   };
 
+  const handleGoBack = () => {
+    router.replace('/(seller)/profile');
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Profile</Text>
@@ -236,7 +242,7 @@ export default function EditProfileScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit Profile</Text>

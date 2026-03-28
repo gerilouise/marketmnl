@@ -72,12 +72,10 @@ export default function SellerProductsManageScreen() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // ========== SIMPLE IMAGE PICKER - COPY FROM WORKING PROFILE SCREEN ==========
   const pickImage = async () => {
     console.log("🔵 pickImage called");
 
     try {
-      // Request permission
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       console.log("Permission status:", status);
@@ -90,7 +88,6 @@ export default function SellerProductsManageScreen() {
         return;
       }
 
-      // Launch image picker
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -112,7 +109,6 @@ export default function SellerProductsManageScreen() {
       Alert.alert("Error", "Failed to pick image");
     }
   };
-  // ====================================================================
 
   // Recipe functions
   const addRecipe = () => {
@@ -258,8 +254,9 @@ export default function SellerProductsManageScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!name || !price || !stock || !weight) {
-      Alert.alert("Error", "Please fill in all required fields");
+    // Validate required fields - ADDED storage and shelfLife
+    if (!name || !price || !stock || !weight || !storage || !shelfLife) {
+      Alert.alert("Error", "Please fill in all required fields (*)");
       return;
     }
 
@@ -310,8 +307,8 @@ export default function SellerProductsManageScreen() {
         imageUrl: imageUrl,
         origin: origin.trim() || null,
         culturalBackground: culturalBackground.trim() || null,
-        storage: storage.trim() || null,
-        shelfLife: shelfLife.trim() || null,
+        storage: storage.trim(),
+        shelfLife: shelfLife.trim(),
         recipes: validRecipes.length > 0 ? validRecipes : null,
         sellerId: user.uid,
         sellerName: user.displayName || "MarketMNL Seller",
@@ -394,15 +391,12 @@ export default function SellerProductsManageScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Image Upload Section - SIMPLE WORKING VERSION */}
+          {/* Image Upload Section */}
           <View style={styles.imageSection}>
             <Text style={styles.label}>Product Image</Text>
             <TouchableOpacity
               style={styles.imageUploader}
-              onPress={() => {
-                console.log("🟢 Image area clicked!");
-                pickImage();
-              }}
+              onPress={pickImage}
               activeOpacity={0.7}
               disabled={submitting}
             >
@@ -438,7 +432,7 @@ export default function SellerProductsManageScreen() {
             )}
           </View>
 
-          {/* Rest of your form sections */}
+          {/* Product Information */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Product Information</Text>
 
@@ -533,6 +527,7 @@ export default function SellerProductsManageScreen() {
             </View>
           </View>
 
+          {/* Category */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Category</Text>
             <View style={styles.categoriesContainer}>
@@ -667,10 +662,9 @@ export default function SellerProductsManageScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Additional Details - UPDATED with required markers */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              Additional Details (Optional)
-            </Text>
+            <Text style={styles.sectionTitle}>Additional Details</Text>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Origin</Text>
@@ -700,7 +694,9 @@ export default function SellerProductsManageScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Storage Instructions</Text>
+              <Text style={styles.label}>
+                Storage Instructions <Text style={styles.required}>*</Text>
+              </Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g., Keep refrigerated after opening"
@@ -712,7 +708,9 @@ export default function SellerProductsManageScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Shelf Life</Text>
+              <Text style={styles.label}>
+                Shelf Life <Text style={styles.required}>*</Text>
+              </Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g., 6 months unopened"

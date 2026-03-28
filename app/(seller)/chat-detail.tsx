@@ -1,4 +1,4 @@
-// app/(seller)/chat-detail.tsx
+// app/(customer)/chat-detail.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -13,20 +13,52 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useChat } from '@/app/contexts/ChatContext';
 import { auth } from '@/lib/firebase';
 
-export default function SellerChatDetailScreen() {
-  const { currentConversation, messages, sendMessage, sending, selectConversation } = useChat();
+export default function CustomerChatDetailScreen() {
+  const { sellerId, sellerName } = useLocalSearchParams();
+  const { conversations, currentConversation, messages, sendMessage, sending, selectConversation, createConversation } = useChat();
   const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
+    const initChat = async () => {
+      setLoading(true);
+      try {
+        // Check if conversation already exists with this seller
+        const existingConversation = conversations.find(
+          c => c.participants.includes(sellerId as string)
+        );
+        
+        if (existingConversation) {
+          selectConversation(existingConversation);
+        } else if (sellerId) {
+          // Create new conversation
+          const convId = await createConversation(sellerId as string, sellerName as string);
+          if (convId) {
+            // Find the newly created conversation in the list
+            const newConv = conversations.find(c => c.id === convId);
+            if (newConv) {
+              selectConversation(newConv);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing chat:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    initChat();
+    
     return () => {
       selectConversation(null);
     };
-  }, []);
+  }, [sellerId]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !currentConversation || sending) return;
@@ -50,9 +82,6 @@ export default function SellerChatDetailScreen() {
 
   const renderMessage = ({ item }: { item: any }) => {
     const isUser = item.senderId === auth.currentUser?.uid;
-    const otherName = isUser ? 'You' : (currentConversation?.sellerId === item.senderId 
-      ? currentConversation?.sellerName 
-      : currentConversation?.buyerName);
     
     return (
       <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.sellerMessage]}>
@@ -66,6 +95,23 @@ export default function SellerChatDetailScreen() {
     );
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{sellerName || 'Chat'}</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!currentConversation) {
     return (
       <SafeAreaView style={styles.container}>
@@ -73,11 +119,14 @@ export default function SellerChatDetailScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Chat</Text>
+          <Text style={styles.headerTitle}>{sellerName || 'Chat'}</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No conversation selected</Text>
+          <Text style={styles.emptyText}>Unable to start conversation</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.retryButton}>
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -164,6 +213,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#32221B",
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   messagesList: {
     padding: 16,
     paddingBottom: 20,
@@ -249,9 +303,22 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    padding: 20,
   },
   emptyText: {
     fontSize: 16,
     color: "#8F796F",
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 25,
+  },
+  retryButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

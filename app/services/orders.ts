@@ -67,18 +67,32 @@ export const createOrder = async (
     if (!user) throw new Error("User not logged in");
 
     const orderNumber = generateOrderNumber();
+    
+    // Get sellerId from the first item (assuming all items are from same seller)
+    const sellerId = orderData.items[0]?.sellerId;
+    
+    if (!sellerId) {
+      console.error("❌ No sellerId found in order items:", orderData.items);
+      throw new Error("Order items are missing seller information");
+    }
 
     const newOrder = {
       ...orderData,
       userId: user.uid,
       userEmail: user.email,
       orderNumber,
+      sellerId: sellerId, // Add sellerId at order level for easy filtering
       status: "pending",
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     };
 
-    console.log("💾 Creating order:", { orderNumber, userId: user.uid });
+    console.log("💾 Creating order:", { 
+      orderNumber, 
+      userId: user.uid,
+      sellerId: sellerId,
+      itemsCount: orderData.items.length 
+    });
 
     const ordersRef = collection(db, "orders");
     const docRef = await addDoc(ordersRef, newOrder);
