@@ -4,7 +4,7 @@ import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { deleteDoc, doc, Timestamp, updateDoc } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,11 +19,32 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function CartScreen() {
-  const { cartItems, setCartItems, setSelectedItems, loadCart, loading } =
-    useCart();
+  const { cartItems, selectedItems, setSelectedItems, loadCart, loading, updateQuantity, removeFromCart } = useCart();
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Update selectedItemIds when cartItems changes
+  useEffect(() => {
+    // Clear selections if items are removed
+    const validIds = selectedItemIds.filter(id => cartItems.some(item => item.id === id));
+    if (validIds.length !== selectedItemIds.length) {
+      setSelectedItemIds(validIds);
+    }
+    
+    // Update selectAll state
+    if (validIds.length === cartItems.length && cartItems.length > 0) {
+      setSelectAll(true);
+    } else {
+      setSelectAll(false);
+    }
+  }, [cartItems]);
+
+  // Sync selectedItems context when selectedItemIds changes
+  useEffect(() => {
+    const selected = cartItems.filter(item => selectedItemIds.includes(item.id));
+    setSelectedItems(selected);
+  }, [selectedItemIds, cartItems]);
 
   // Load cart from Firebase
   const loadCartData = async () => {
@@ -39,32 +60,27 @@ export default function CartScreen() {
   );
 
   const toggleSelectItem = (itemId: string) => {
-    setSelectedItemIds((prev) => {
+    setSelectedItemIds((prev: string[]) => {
+      let newSelected: string[];
       if (prev.includes(itemId)) {
-        const newSelected = prev.filter((id) => id !== itemId);
-        setSelectAll(false);
-        return newSelected;
+        newSelected = prev.filter((id: string) => id !== itemId);
       } else {
-        const newSelected = [...prev, itemId];
-        if (newSelected.length === cartItems.length) {
-          setSelectAll(true);
-        }
-        return newSelected;
+        newSelected = [...prev, itemId];
       }
+      return newSelected;
     });
   };
 
   const toggleSelectAll = () => {
     if (selectAll) {
       setSelectedItemIds([]);
-      setSelectAll(false);
     } else {
-      setSelectedItemIds(cartItems.map((item) => item.id));
-      setSelectAll(true);
+      const allIds = cartItems.map((item) => item.id);
+      setSelectedItemIds(allIds);
     }
   };
 
-  const updateQuantity = async (itemId: string, increment: boolean) => {
+  const handleUpdateQuantity = async (itemId: string, increment: boolean) => {
     try {
       const item = cartItems.find((i) => i.id === itemId);
       if (!item) return;
@@ -72,24 +88,15 @@ export default function CartScreen() {
       const newQuantity = increment
         ? item.quantity + 1
         : Math.max(1, item.quantity - 1);
-      const itemRef = doc(db, "carts", itemId);
-      await updateDoc(itemRef, {
-        quantity: newQuantity,
-        updatedAt: Timestamp.now(),
-      });
-
-      setCartItems((prev) =>
-        prev.map((i) =>
-          i.id === itemId ? { ...i, quantity: newQuantity } : i,
-        ),
-      );
+      
+      await updateQuantity(itemId, newQuantity);
     } catch (error) {
       console.error("Error updating quantity:", error);
       Alert.alert("Error", "Failed to update quantity");
     }
   };
 
-  const removeItem = async (itemId: string, productName: string) => {
+  const handleRemoveItem = async (itemId: string, productName: string) => {
     Alert.alert("Remove Item", `Remove "${productName}" from your cart?`, [
       { text: "Cancel", style: "cancel" },
       {
@@ -97,12 +104,7 @@ export default function CartScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, "carts", itemId));
-            setCartItems((prev) => prev.filter((item) => item.id !== itemId));
-            setSelectedItemIds((prev) => prev.filter((id) => id !== itemId));
-            if (selectedItemIds.length === cartItems.length) {
-              setSelectAll(false);
-            }
+            await removeFromCart(itemId);
           } catch (error) {
             console.error("Error removing item:", error);
             Alert.alert("Error", "Failed to remove item");
@@ -176,7 +178,7 @@ export default function CartScreen() {
         <View style={styles.rightContainer}>
           <TouchableOpacity
             style={styles.trashButton}
-            onPress={() => removeItem(item.id, item.productName)}
+            onPress={() => handleRemoveItem(item.id, item.productName)}
           >
             <Ionicons name="trash-outline" size={20} color="#FF3B30" />
           </TouchableOpacity>
@@ -184,14 +186,14 @@ export default function CartScreen() {
           <View style={styles.quantityContainer}>
             <TouchableOpacity
               style={styles.quantityButton}
-              onPress={() => updateQuantity(item.id, false)}
+              onPress={() => handleUpdateQuantity(item.id, false)}
             >
               <Ionicons name="remove" size={16} color="#32221B" />
             </TouchableOpacity>
             <Text style={styles.quantityText}>{item.quantity}</Text>
             <TouchableOpacity
               style={styles.quantityButton}
-              onPress={() => updateQuantity(item.id, true)}
+              onPress={() => handleUpdateQuantity(item.id, true)}
             >
               <Ionicons name="add" size={16} color="#32221B" />
             </TouchableOpacity>

@@ -1,22 +1,23 @@
 // contexts/CartContext.tsx
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
-import { 
-  collection, 
-  query, 
-  where, 
+import {
+  collection,
+  query,
+  where,
   getDocs,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
-  Timestamp 
+  Timestamp,
+  writeBatch
 } from "firebase/firestore";
 
 interface CartItem {
   id: string;
-  userId: string; // Customer ID
-  sellerId: string; // ← ADD THIS - Seller ID
+  userId: string;
+  sellerId: string;
   productId: string;
   productName: string;
   productPrice: number;
@@ -31,10 +32,13 @@ interface CartContextType {
   cartItems: CartItem[];
   selectedItems: CartItem[];
   setSelectedItems: (items: CartItem[]) => void;
+  setCartItems: React.Dispatch<React.SetStateAction<CartItem[]>>;
   loadCart: () => Promise<void>;
   addToCart: (product: any) => Promise<void>;
   removeFromCart: (itemId: string) => Promise<void>;
   updateQuantity: (itemId: string, quantity: number) => Promise<void>;
+  removeSelectedItems: () => Promise<void>;
+  clearCart: () => Promise<void>;
   loading: boolean;
 }
 
@@ -69,8 +73,19 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       querySnapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as CartItem);
       });
-
-      setCartItems(items);
+     
+      // Remove any duplicates based on productId and sellerId
+      const uniqueItems = items.reduce((acc: CartItem[], current) => {
+        const exists = acc.find(
+          item => item.productId === current.productId && item.sellerId === current.sellerId
+        );
+        if (!exists) {
+          acc.push(current);
+        }
+        return acc;
+      }, []);
+     
+      setCartItems(uniqueItems);
     } catch (error) {
       console.error("Error loading cart:", error);
     } finally {
@@ -99,7 +114,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         const cartRef = collection(db, "carts");
         const newItem = {
           userId: user.uid,
-          sellerId: product.sellerId, // ← CRITICAL: Include sellerId
+          sellerId: product.sellerId,
           productId: product.id,
           productName: product.name,
           productPrice: product.price,
@@ -109,12 +124,10 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
           addedAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         };
-        
+       
         const docRef = await addDoc(cartRef, newItem);
-        setCartItems([...cartItems, { id: docRef.id, ...newItem }]);
+        setCartItems(prev => [...prev, { id: docRef.id, ...newItem }]);
       }
-      
-      await loadCart(); // Reload to get updated items
     } catch (error) {
       console.error("Error adding to cart:", error);
       throw error;
@@ -124,10 +137,47 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const removeFromCart = async (itemId: string) => {
     try {
       await deleteDoc(doc(db, "carts", itemId));
-      setCartItems(cartItems.filter(item => item.id !== itemId));
-      setSelectedItems(selectedItems.filter(item => item.id !== itemId));
+      setCartItems(prev => prev.filter(item => item.id !== itemId));
+      setSelectedItems(prev => prev.filter(item => item.id !== itemId));
     } catch (error) {
       console.error("Error removing from cart:", error);
+      throw error;
+    }
+  };
+
+  const removeSelectedItems = async () => {
+    try {
+      const batch = writeBatch(db);
+      selectedItems.forEach(item => {
+        const itemRef = doc(db, "carts", item.id);
+        batch.delete(itemRef);
+      });
+      await batch.commit();
+     
+      // Update local state
+      const remainingItems = cartItems.filter(
+        item => !selectedItems.some(selected => selected.id === item.id)
+      );
+      setCartItems(remainingItems);
+      setSelectedItems([]);
+    } catch (error) {
+      console.error("Error removing selected items:", error);
+      throw error;
+    }
+  };
+
+  const clearCart = async () => {
+    try {
+      const batch = writeBatch(db);
+      cartItems.forEach(item => {
+        const itemRef = doc(db, "carts", item.id);
+        batch.delete(itemRef);
+      });
+      await batch.commit();
+      setCartItems([]);
+      setSelectedItems([]);
+    } catch (error) {
+      console.error("Error clearing cart:", error);
       throw error;
     }
   };
@@ -138,21 +188,24 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         await removeFromCart(itemId);
         return;
       }
-      
+     
       const itemRef = doc(db, "carts", itemId);
       await updateDoc(itemRef, {
         quantity,
         updatedAt: Timestamp.now()
       });
-      
-      setCartItems(cartItems.map(item => 
-        item.id === itemId ? { ...item, quantity } : item
-      ));
-      
-      // Also update selected items if this item is selected
-      setSelectedItems(selectedItems.map(item => 
-        item.id === itemId ? { ...item, quantity } : item
-      ));
+     
+      setCartItems(prev =>
+        prev.map(item =>
+          item.id === itemId ? { ...item, quantity } : item
+        )
+      );
+     
+      setSelectedItems(prev =>
+        prev.map(item =>
+          item.id === itemId ? { ...item, quantity } : item
+        )
+      );
     } catch (error) {
       console.error("Error updating quantity:", error);
       throw error;
@@ -165,15 +218,18 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <CartContext.Provider
-      value={{ 
-        cartItems, 
-        selectedItems, 
-        setSelectedItems, 
-        loadCart, 
+      value={{
+        cartItems,
+        selectedItems,
+        setSelectedItems,
+        setCartItems,
+        loadCart,
         addToCart,
         removeFromCart,
         updateQuantity,
-        loading 
+        removeSelectedItems,
+        clearCart,
+        loading
       }}
     >
       {children}

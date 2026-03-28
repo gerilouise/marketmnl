@@ -21,7 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
 export default function CheckoutScreen() {
-  const { selectedItems, setSelectedItems, loadCart } = useCart();
+  const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } = useCart();
   const { addresses, loading, fetchAddresses } = useFirebaseProfile();
   const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
@@ -109,6 +109,7 @@ export default function CheckoutScreen() {
           "Error",
           "Some items are missing seller information. Please remove them from cart and try again."
         );
+        setIsProcessing(false);
         return;
       }
 
@@ -125,7 +126,7 @@ export default function CheckoutScreen() {
           productName: item.productName,
           productPrice: item.productPrice,
           quantity: item.quantity,
-          sellerId: item.sellerId, // ← This must be present
+          sellerId: item.sellerId,
           sellerName: item.sellerName,
           imageUrl: item.imageUrl,
         })),
@@ -152,13 +153,19 @@ export default function CheckoutScreen() {
 
       if (result.success) {
         setOrderNumber(result.orderNumber);
-        setShowOrderSuccess(true);
         
-        // Clear selected items after successful order
+        // Remove selected items from cart after successful order
+        console.log("🗑️ Removing selected items from cart...");
+        await removeSelectedItems();
+        
+        // Clear selected items in context
         setSelectedItems([]);
         
-        // Reload cart to refresh the list
+        // Reload cart to refresh
         await loadCart();
+        
+        console.log("✅ Order placed successfully, items removed from cart");
+        setShowOrderSuccess(true);
       }
     } catch (error: any) {
       console.error("❌ Order error:", error);

@@ -2,8 +2,8 @@
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,18 +17,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 interface FollowedShop {
   id: string;
   storeName: string;
   storeImage?: string;
+  description?: string;
 }
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [followedShops, setFollowedShops] = useState<FollowedShop[]>([]);
-  const [loadingFollowed, setLoadingFollowed] = useState(false);
+  const [loadingFollowed, setLoadingFollowed] = useState(true);
   const { profile, addresses, loading, fetchProfile, fetchAddresses } = useFirebaseProfile();
   const { logout } = useFirebaseAuth();
 
@@ -36,52 +37,94 @@ export default function ProfileScreen() {
     loadData();
   }, []);
 
-  useEffect(() => {
-    if (auth.currentUser) {
-      loadFollowedShops();
-    }
-  }, [auth.currentUser]);
+  // Set up real-time listener for followed shops
+  useFocusEffect(
+    useCallback(() => {
+      const user = auth.currentUser;
+      if (!user) {
+        setFollowedShops([]);
+        setLoadingFollowed(false);
+        return;
+      }
+
+      console.log("🔍 Setting up real-time listener for followed shops for user:", user.uid);
+      setLoadingFollowed(true);
+
+      // Create query for follows collection
+      const followsRef = collection(db, 'follows');
+      const q = query(followsRef, where('userId', '==', user.uid));
+
+      // Set up real-time listener
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
+        console.log(`📊 Real-time update: Found ${snapshot.size} follow records`);
+        
+        const shops: FollowedShop[] = [];
+        
+        // Fetch shop details for each follow record
+        for (const docSnapshot of snapshot.docs) {
+          const followData = docSnapshot.data();
+          const shopId = followData.shopId;
+          
+          console.log(`📦 Looking up shop: ${shopId}`);
+          
+          // Try to get shop from sellers collection first
+          let shopName = "Unknown Store";
+          let shopImage = null;
+          let shopDescription = "";
+          
+          // Check sellers collection
+          const sellerRef = doc(db, 'sellers', shopId);
+          const sellerSnap = await getDoc(sellerRef);
+          
+          if (sellerSnap.exists()) {
+            const sellerData = sellerSnap.data();
+            shopName = sellerData.storeName || "Market Seller";
+            shopImage = sellerData.imageUrl;
+            shopDescription = sellerData.description;
+            console.log(`✅ Found shop in sellers: ${shopName}`);
+          } else {
+            // Check stores collection as fallback
+            const storeRef = doc(db, 'stores', shopId);
+            const storeSnap = await getDoc(storeRef);
+            
+            if (storeSnap.exists()) {
+              const storeData = storeSnap.data();
+              shopName = storeData.storeName || "Market Store";
+              shopImage = storeData.imageUrl;
+              shopDescription = storeData.description;
+              console.log(`✅ Found shop in stores: ${shopName}`);
+            } else {
+              console.log(`❌ Shop not found: ${shopId}`);
+            }
+          }
+          
+          shops.push({
+            id: shopId,
+            storeName: shopName,
+            storeImage: shopImage,
+            description: shopDescription,
+          });
+        }
+        
+        console.log(`✅ Updated followed shops: ${shops.length} shops`);
+        setFollowedShops(shops);
+        setLoadingFollowed(false);
+      }, (error) => {
+        console.error('❌ Error in follows listener:', error);
+        setLoadingFollowed(false);
+      });
+
+      // Cleanup listener when screen loses focus
+      return () => {
+        console.log("🛑 Cleaning up follows listener");
+        unsubscribe();
+      };
+    }, [])
+  );
 
   const loadData = async () => {
     await fetchProfile();
     await fetchAddresses();
-  };
-
-  const loadFollowedShops = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    setLoadingFollowed(true);
-    try {
-      const followsRef = collection(db, 'follows');
-      const q = query(followsRef, where('userId', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      
-      const shops: FollowedShop[] = [];
-      
-      for (const docSnapshot of querySnapshot.docs) {
-        const followData = docSnapshot.data();
-        const shopId = followData.shopId;
-        
-        const storeRef = doc(db, 'stores', shopId);
-        const storeSnap = await getDoc(storeRef);
-        
-        if (storeSnap.exists()) {
-          const storeData = storeSnap.data();
-          shops.push({
-            id: shopId,
-            storeName: storeData.storeName || "Unknown Store",
-            storeImage: storeData.imageUrl,
-          });
-        }
-      }
-      
-      setFollowedShops(shops);
-    } catch (error) {
-      console.error('Error loading followed shops:', error);
-    } finally {
-      setLoadingFollowed(false);
-    }
   };
 
   const handleLogout = async () => {
@@ -248,7 +291,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Following Section - Added from second code */}
+        {/* Following Section - Real-time updates */}
         <View style={styles.followingSection}>
           <View style={styles.followingHeader}>
             <View style={styles.followingHeaderLeft}>
@@ -256,15 +299,21 @@ export default function ProfileScreen() {
               <Text style={styles.followingTitle}>Following</Text>
               <Text style={styles.followingCount}>{followedShops.length} shops</Text>
             </View>
+            {followedShops.length > 0 && (
+              <TouchableOpacity onPress={() => Alert.alert("Following", `You follow ${followedShops.length} shops`)}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {loadingFollowed ? (
             <View style={styles.loadingFollowedContainer}>
               <ActivityIndicator size="small" color="#C35822" />
+              <Text style={styles.loadingFollowedText}>Loading followed shops...</Text>
             </View>
           ) : followedShops.length > 0 ? (
             <View>
-              {followedShops.slice(0, 3).map((shop) => (
+              {followedShops.map((shop) => (
                 <TouchableOpacity 
                   key={shop.id}
                   style={styles.followedShopItem}
@@ -280,28 +329,25 @@ export default function ProfileScreen() {
                   
                   <View style={styles.shopInfo}>
                     <Text style={styles.shopName}>{shop.storeName}</Text>
+                    {shop.description && (
+                      <Text style={styles.shopDescription} numberOfLines={1}>
+                        {shop.description}
+                      </Text>
+                    )}
                   </View>
                   
                   <Ionicons name="chevron-forward" size={20} color="#8F796F" />
                 </TouchableOpacity>
               ))}
-              
-              {followedShops.length > 3 && (
-                <TouchableOpacity 
-                  style={styles.viewMoreButton}
-                  onPress={() => Alert.alert("Following", `You follow ${followedShops.length} shops. View all feature coming soon!`)}
-                >
-                  <Text style={styles.viewMoreText}>
-                    View {followedShops.length - 3} more {followedShops.length - 3 === 1 ? 'shop' : 'shops'}
-                  </Text>
-                </TouchableOpacity>
-              )}
             </View>
           ) : (
             <View style={styles.emptyFollowing}>
-              <Ionicons name="heart-outline" size={32} color="#E0DAD1" />
+              <Ionicons name="heart-outline" size={40} color="#E0DAD1" />
+              <Text style={styles.emptyFollowingTitle}>
+                No shops followed yet
+              </Text>
               <Text style={styles.emptyFollowingText}>
-                You're not following any shops yet
+                Follow your favorite shops to see their products and updates
               </Text>
               <TouchableOpacity 
                 style={styles.browseShopsButton}
@@ -373,7 +419,7 @@ export default function ProfileScreen() {
 
           <TouchableOpacity
             style={styles.quickActionButton}
-            onPress={() => router.push("/chat")}
+            onPress={() => router.push("/chatbot")}
           >
             <Ionicons name="chatbubble-outline" size={22} color="#C35822" />
             <Text style={styles.quickActionText}>AI Chatbot</Text>
@@ -577,7 +623,6 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: "#F0F0F0",
   },
-  // Following Section Styles
   followingSection: {
     backgroundColor: "#FFF",
     marginHorizontal: 20,
@@ -617,6 +662,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 12,
   },
+  viewAllText: {
+    fontSize: 12,
+    color: "#C35822",
+    fontWeight: "500",
+  },
   followedShopItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -625,15 +675,15 @@ const styles = StyleSheet.create({
     borderBottomColor: "#F5F5F5",
   },
   shopAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     marginRight: 12,
   },
   shopAvatarPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: "#FBF8F4",
     justifyContent: "center",
     alignItems: "center",
@@ -646,40 +696,51 @@ const styles = StyleSheet.create({
   },
   shopName: {
     fontSize: 15,
-    fontWeight: "500",
+    fontWeight: "600",
     color: "#32221B",
+    marginBottom: 2,
   },
-  viewMoreButton: {
-    paddingTop: 12,
-    alignItems: "center",
-  },
-  viewMoreText: {
-    fontSize: 13,
-    color: "#C35822",
-    fontWeight: "500",
+  shopDescription: {
+    fontSize: 12,
+    color: "#8F796F",
   },
   loadingFollowedContainer: {
     paddingVertical: 20,
     alignItems: "center",
   },
+  loadingFollowedText: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 8,
+  },
   emptyFollowing: {
     alignItems: "center",
-    paddingVertical: 16,
+    paddingVertical: 24,
+  },
+  emptyFollowingTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginTop: 12,
+    marginBottom: 4,
   },
   emptyFollowingText: {
     fontSize: 13,
     color: "#8F796F",
-    marginTop: 8,
+    textAlign: "center",
+    marginBottom: 16,
+    paddingHorizontal: 20,
   },
   browseShopsButton: {
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
+    backgroundColor: "#C35822",
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 25,
   },
   browseShopsText: {
-    fontSize: 13,
-    color: "#C35822",
-    fontWeight: "500",
+    fontSize: 14,
+    color: "#FFF",
+    fontWeight: "600",
   },
   defaultAddressCard: {
     backgroundColor: "#FFF",
