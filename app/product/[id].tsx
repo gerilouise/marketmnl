@@ -1,25 +1,38 @@
 // app/product/[id].tsx
-import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  Alert,
-  ActivityIndicator,
-  Share,
-  Modal,
-  TextInput,
-  Platform,
-  Animated,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { db, auth } from '@/lib/firebase';
-import { doc, getDoc, collection, setDoc, deleteDoc, updateDoc, addDoc, Timestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  Modal,
+  Platform,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface Recipe {
   id: string;
@@ -77,7 +90,7 @@ export default function ProductDetailsScreen() {
   const [addingToCart, setAddingToCart] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
-  
+
   // Review modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
@@ -117,45 +130,52 @@ export default function ProductDetailsScreen() {
 
   const loadProduct = async () => {
     if (!id) return;
-    
+
     setLoading(true);
     try {
-      const productRef = doc(db, 'products', id as string);
+      const productRef = doc(db, "products", id as string);
       const productSnap = await getDoc(productRef);
-      
+
       if (productSnap.exists()) {
-        const productData = { id: productSnap.id, ...productSnap.data() } as Product;
+        const productData = {
+          id: productSnap.id,
+          ...productSnap.data(),
+        } as Product;
         setProduct(productData);
-        
+
         // Get store name from sellers collection (where seller data is saved during signup)
         if (productData.sellerId) {
           // Try to load from sellers collection first
-          const sellerRef = doc(db, 'sellers', productData.sellerId);
+          const sellerRef = doc(db, "sellers", productData.sellerId);
           const sellerSnap = await getDoc(sellerRef);
-          
+
           if (sellerSnap.exists()) {
             const sellerData = sellerSnap.data();
-            setStoreName(sellerData.storeName || productData.sellerName || "MarketMNL");
+            setStoreName(
+              sellerData.storeName || productData.sellerName || "MarketMNL",
+            );
           } else {
             // Fallback to stores collection
-            const storeRef = doc(db, 'stores', productData.sellerId);
+            const storeRef = doc(db, "stores", productData.sellerId);
             const storeSnap = await getDoc(storeRef);
             if (storeSnap.exists()) {
               const storeData = storeSnap.data();
-              setStoreName(storeData.storeName || productData.sellerName || "MarketMNL");
+              setStoreName(
+                storeData.storeName || productData.sellerName || "MarketMNL",
+              );
             } else {
               setStoreName(productData.sellerName || "MarketMNL");
             }
           }
         }
-        
+
         await checkWishlistStatus();
       } else {
         Alert.alert("Error", "Product not found");
         router.back();
       }
     } catch (error) {
-      console.error('Error loading product:', error);
+      console.error("Error loading product:", error);
       Alert.alert("Error", "Failed to load product");
     } finally {
       setLoading(false);
@@ -164,17 +184,17 @@ export default function ProductDetailsScreen() {
 
   const loadReviews = async () => {
     if (!product?.id) return;
-    
+
     setLoadingReviews(true);
     try {
-      const reviewsRef = collection(db, 'product_reviews');
+      const reviewsRef = collection(db, "product_reviews");
       const q = query(
-        reviewsRef, 
-        where('productId', '==', product.id),
-        orderBy('createdAt', 'desc')
+        reviewsRef,
+        where("productId", "==", product.id),
+        orderBy("createdAt", "desc"),
       );
       const querySnapshot = await getDocs(q);
-      
+
       const loadedReviews: ProductReview[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
@@ -184,15 +204,22 @@ export default function ProductDetailsScreen() {
           userInitials: data.userInitials || "??",
           userId: data.userId,
           rating: data.rating,
-          date: data.createdAt?.toDate?.()?.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || new Date().toLocaleDateString(),
+          date:
+            data.createdAt
+              ?.toDate?.()
+              ?.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              }) || new Date().toLocaleDateString(),
           comment: data.comment,
           createdAt: data.createdAt,
         });
       });
-      
+
       setReviews(loadedReviews);
     } catch (error) {
-      console.error('Error loading reviews:', error);
+      console.error("Error loading reviews:", error);
     } finally {
       setLoadingReviews(false);
     }
@@ -201,15 +228,15 @@ export default function ProductDetailsScreen() {
   const checkWishlistStatus = async () => {
     const user = auth.currentUser;
     if (!user) return;
-    
+
     try {
-      const wishlistRef = collection(db, 'wishlists');
+      const wishlistRef = collection(db, "wishlists");
       const itemId = `${user.uid}_${id}`;
       const docRef = doc(wishlistRef, itemId);
       const docSnap = await getDoc(docRef);
       setIsWishlisted(docSnap.exists());
     } catch (error) {
-      console.error('Error checking wishlist:', error);
+      console.error("Error checking wishlist:", error);
     }
   };
 
@@ -218,25 +245,25 @@ export default function ProductDetailsScreen() {
     if (!user) {
       Alert.alert("Login Required", "Please log in to add items to cart", [
         { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") }
+        { text: "Login", onPress: () => router.push("/auth/login") },
       ]);
       return;
     }
 
     if (addingToCart) return;
-    
+
     setAddingToCart(true);
     try {
-      const cartRef = collection(db, 'carts');
+      const cartRef = collection(db, "carts");
       const cartItemId = `${user.uid}_${product?.id}`;
       const docRef = doc(cartRef, cartItemId);
       const docSnap = await getDoc(docRef);
-      
+
       if (docSnap.exists()) {
         const newQuantity = docSnap.data().quantity + quantity;
         await updateDoc(docRef, {
           quantity: newQuantity,
-          updatedAt: Timestamp.now()
+          updatedAt: Timestamp.now(),
         });
         showSuccessMessage();
       } else {
@@ -251,12 +278,12 @@ export default function ProductDetailsScreen() {
           quantity: quantity,
           imageUrl: product?.imageUrl,
           addedAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
+          updatedAt: Timestamp.now(),
         });
         showSuccessMessage();
       }
     } catch (error) {
-      console.error('Error adding to cart:', error);
+      console.error("Error adding to cart:", error);
       Alert.alert("Error", "Failed to add to cart");
     } finally {
       setAddingToCart(false);
@@ -268,17 +295,17 @@ export default function ProductDetailsScreen() {
     if (!user) {
       Alert.alert("Login Required", "Please log in to add items to wishlist", [
         { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") }
+        { text: "Login", onPress: () => router.push("/auth/login") },
       ]);
       return;
     }
 
     try {
-      const wishlistRef = collection(db, 'wishlists');
+      const wishlistRef = collection(db, "wishlists");
       const itemId = `${user.uid}_${product?.id}`;
       const docRef = doc(wishlistRef, itemId);
       const docSnap = await getDoc(docRef);
-      
+
       if (docSnap.exists()) {
         await deleteDoc(docRef);
         setIsWishlisted(false);
@@ -293,13 +320,13 @@ export default function ProductDetailsScreen() {
           sellerName: storeName,
           sellerId: product?.sellerId,
           imageUrl: product?.imageUrl,
-          addedAt: Timestamp.now()
+          addedAt: Timestamp.now(),
         });
         setIsWishlisted(true);
         Alert.alert("Added", `${product?.name} added to wishlist`);
       }
     } catch (error) {
-      console.error('Error toggling wishlist:', error);
+      console.error("Error toggling wishlist:", error);
       Alert.alert("Error", "Failed to update wishlist");
     }
   };
@@ -307,11 +334,11 @@ export default function ProductDetailsScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out ${product?.name} from ${storeName} on MarketMNL! ₱${product?.price}\n\n${product?.description}\n\nGet it here: ${Platform.OS === 'ios' ? 'marketmnl://product/' + product?.id : 'https://marketmnl.com/product/' + product?.id}`,
+        message: `Check out ${product?.name} from ${storeName} on MarketMNL! ₱${product?.price}\n\n${product?.description}\n\nGet it here: ${Platform.OS === "ios" ? "marketmnl://product/" + product?.id : "https://marketmnl.com/product/" + product?.id}`,
         title: product?.name,
       });
     } catch (error) {
-      console.error('Error sharing:', error);
+      console.error("Error sharing:", error);
     }
   };
 
@@ -320,7 +347,7 @@ export default function ProductDetailsScreen() {
     if (!user) {
       Alert.alert("Login Required", "Please log in to write a review", [
         { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") }
+        { text: "Login", onPress: () => router.push("/auth/login") },
       ]);
       return;
     }
@@ -332,10 +359,11 @@ export default function ProductDetailsScreen() {
 
     setSubmittingReview(true);
     try {
-      const reviewsRef = collection(db, 'product_reviews');
+      const reviewsRef = collection(db, "product_reviews");
       const userInitials = user.email?.substring(0, 2).toUpperCase() || "U";
-      const userName = user.displayName || user.email?.split('@')[0] || "Anonymous";
-      
+      const userName =
+        user.displayName || user.email?.split("@")[0] || "Anonymous";
+
       await addDoc(reviewsRef, {
         productId: product?.id,
         userId: user.uid,
@@ -345,15 +373,15 @@ export default function ProductDetailsScreen() {
         comment: reviewComment.trim(),
         createdAt: Timestamp.now(),
       });
-      
+
       await loadReviews();
       setReviewRating(5);
       setReviewComment("");
       setShowReviewModal(false);
-      
+
       Alert.alert("Success", "Your review has been submitted!");
     } catch (error) {
-      console.error('Error submitting review:', error);
+      console.error("Error submitting review:", error);
       Alert.alert("Error", "Failed to submit review");
     } finally {
       setSubmittingReview(false);
@@ -370,8 +398,9 @@ export default function ProductDetailsScreen() {
     }
   };
 
-  const incrementQuantity = () => setQuantity(prev => prev + 1);
-  const decrementQuantity = () => setQuantity(prev => (prev > 1 ? prev - 1 : 1));
+  const incrementQuantity = () => setQuantity((prev) => prev + 1);
+  const decrementQuantity = () =>
+    setQuantity((prev) => (prev > 1 ? prev - 1 : 1));
 
   const toggleRecipe = (recipeId: string) => {
     setExpandedRecipe(expandedRecipe === recipeId ? null : recipeId);
@@ -392,7 +421,11 @@ export default function ProductDetailsScreen() {
     );
   };
 
-  const renderRatingStars = (rating: number, size: number = 20, interactive: boolean = false) => {
+  const renderRatingStars = (
+    rating: number,
+    size: number = 20,
+    interactive: boolean = false,
+  ) => {
     return (
       <View style={styles.starsRow}>
         {[1, 2, 3, 4, 5].map((star) => (
@@ -460,11 +493,14 @@ export default function ProductDetailsScreen() {
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <View style={styles.headerRight}>
-            <TouchableOpacity style={styles.headerButton} onPress={handleToggleWishlist}>
-              <Ionicons 
-                name={isWishlisted ? "heart" : "heart-outline"} 
-                size={24} 
-                color={isWishlisted ? "#C35822" : "#32221B"} 
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={handleToggleWishlist}
+            >
+              <Ionicons
+                name={isWishlisted ? "heart" : "heart-outline"}
+                size={24}
+                color={isWishlisted ? "#C35822" : "#32221B"}
               />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
@@ -477,7 +513,10 @@ export default function ProductDetailsScreen() {
         <View style={styles.imageContainer}>
           <View style={styles.imageWrapper}>
             {product.imageUrl ? (
-              <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
+              <Image
+                source={{ uri: product.imageUrl }}
+                style={styles.productImage}
+              />
             ) : (
               <View style={styles.imagePlaceholder}>
                 <Ionicons name="image-outline" size={50} color="#CCC" />
@@ -494,17 +533,19 @@ export default function ProductDetailsScreen() {
               <Text style={styles.categoryText}>{product.category}</Text>
             </View>
           </View>
-          
+
           <View style={styles.namePriceRow}>
             <Text style={styles.productName}>{product.name}</Text>
             <Text style={styles.price}>₱{product.price}</Text>
           </View>
-          
+
           <Text style={styles.description}>{product.description}</Text>
-          
+
           <View style={styles.weightCalorieRow}>
             {product.netWeight && (
-              <Text style={styles.netWeight}>Net weight: {product.netWeight}</Text>
+              <Text style={styles.netWeight}>
+                Net weight: {product.netWeight}
+              </Text>
             )}
             {product.calories && (
               <View style={styles.calorieBadge}>
@@ -516,18 +557,33 @@ export default function ProductDetailsScreen() {
 
           <View style={styles.divider} />
 
-          <TouchableOpacity style={styles.sellerCard} onPress={navigateToStore} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.sellerCard}
+            onPress={navigateToStore}
+            activeOpacity={0.7}
+          >
             <View style={styles.sellerInfo}>
               <Text style={styles.sellerLabel}>Store</Text>
               <View style={styles.sellerNameContainer}>
-                <Text style={styles.sellerName}>{storeName || "MarketMNL"}</Text>
+                <Text style={styles.sellerName}>
+                  {storeName || "MarketMNL"}
+                </Text>
                 <Ionicons name="chevron-forward" size={16} color="#C35822" />
               </View>
             </View>
             <View style={styles.ratingContainer}>
               <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={styles.ratingText}>{product.rating || reviews.length > 0 ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1) : "4.5"}</Text>
-              <Text style={styles.reviewsText}>({product.reviewsCount || reviews.length})</Text>
+              <Text style={styles.ratingText}>
+                {product.rating || reviews.length > 0
+                  ? (
+                      reviews.reduce((sum, r) => sum + r.rating, 0) /
+                      reviews.length
+                    ).toFixed(1)
+                  : "4.5"}
+              </Text>
+              <Text style={styles.reviewsText}>
+                ({product.reviewsCount || reviews.length})
+              </Text>
             </View>
           </TouchableOpacity>
 
@@ -551,7 +607,9 @@ export default function ProductDetailsScreen() {
                 </View>
                 <View style={styles.detailContent}>
                   <Text style={styles.detailLabel}>Cultural Background</Text>
-                  <Text style={styles.detailValue}>{product.culturalBackground}</Text>
+                  <Text style={styles.detailValue}>
+                    {product.culturalBackground}
+                  </Text>
                 </View>
               </View>
             )}
@@ -586,37 +644,82 @@ export default function ProductDetailsScreen() {
             <View style={styles.recipeSection}>
               <View style={styles.recipeHeader}>
                 <View style={styles.recipeTitleContainer}>
-                  <Ionicons name="restaurant-outline" size={20} color="#C35822" />
+                  <Ionicons
+                    name="restaurant-outline"
+                    size={20}
+                    color="#C35822"
+                  />
                   <Text style={styles.recipeSectionTitle}>Recipe Ideas</Text>
                 </View>
-                <Text style={styles.recipeCount}>{product.recipes.length} recipes</Text>
+                <Text style={styles.recipeCount}>
+                  {product.recipes.length} recipes
+                </Text>
               </View>
 
               {product.recipes.map((recipe) => (
                 <View key={recipe.id} style={styles.recipeCard}>
-                  <TouchableOpacity style={styles.recipeCardHeader} onPress={() => toggleRecipe(recipe.id)}>
+                  <TouchableOpacity
+                    style={styles.recipeCardHeader}
+                    onPress={() => toggleRecipe(recipe.id)}
+                  >
                     <View style={styles.recipeInfo}>
                       <Text style={styles.recipeName}>{recipe.name}</Text>
                       <View style={styles.recipeMeta}>
                         <View style={styles.recipeMetaItem}>
-                          <Ionicons name="time-outline" size={12} color="#8F796F" />
-                          <Text style={styles.recipeMetaText}>{recipe.prepTime}</Text>
+                          <Ionicons
+                            name="time-outline"
+                            size={12}
+                            color="#8F796F"
+                          />
+                          <Text style={styles.recipeMetaText}>
+                            {recipe.prepTime}
+                          </Text>
                         </View>
                         <View style={styles.recipeMetaItem}>
-                          <Ionicons name="stats-chart-outline" size={12} color="#8F796F" />
-                          <Text style={styles.recipeMetaText}>{recipe.difficulty}</Text>
+                          <Ionicons
+                            name="stats-chart-outline"
+                            size={12}
+                            color="#8F796F"
+                          />
+                          <Text style={styles.recipeMetaText}>
+                            {recipe.difficulty}
+                          </Text>
                         </View>
                       </View>
                     </View>
-                    <Ionicons name={expandedRecipe === recipe.id ? "chevron-up" : "chevron-down"} size={20} color="#8F796F" />
+                    <Ionicons
+                      name={
+                        expandedRecipe === recipe.id
+                          ? "chevron-up"
+                          : "chevron-down"
+                      }
+                      size={20}
+                      color="#8F796F"
+                    />
                   </TouchableOpacity>
 
                   {expandedRecipe === recipe.id && (
                     <View style={styles.recipeExpanded}>
-                      <Text style={styles.recipeDescription}>{recipe.description}</Text>
-                      <TouchableOpacity style={styles.viewRecipeButton} onPress={() => Alert.alert("Recipe", `Full recipe for ${recipe.name} coming soon!`)}>
-                        <Text style={styles.viewRecipeButtonText}>View Full Recipe</Text>
-                        <Ionicons name="arrow-forward" size={16} color="#C35822" />
+                      <Text style={styles.recipeDescription}>
+                        {recipe.description}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.viewRecipeButton}
+                        onPress={() =>
+                          Alert.alert(
+                            "Recipe",
+                            `Full recipe for ${recipe.name} coming soon!`,
+                          )
+                        }
+                      >
+                        <Text style={styles.viewRecipeButtonText}>
+                          View Full Recipe
+                        </Text>
+                        <Ionicons
+                          name="arrow-forward"
+                          size={16}
+                          color="#C35822"
+                        />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -635,7 +738,10 @@ export default function ProductDetailsScreen() {
               <Text style={styles.reviewsCount}>{reviews.length} reviews</Text>
             </View>
 
-            <TouchableOpacity style={styles.writeReviewButton} onPress={() => setShowReviewModal(true)}>
+            <TouchableOpacity
+              style={styles.writeReviewButton}
+              onPress={() => setShowReviewModal(true)}
+            >
               <Ionicons name="create-outline" size={18} color="#C35822" />
               <Text style={styles.writeReviewText}>Write a Review</Text>
             </TouchableOpacity>
@@ -646,37 +752,53 @@ export default function ProductDetailsScreen() {
               </View>
             )}
 
-            {!loadingReviews && displayedReviews.map((review) => (
-              <View key={review.id} style={styles.reviewCard}>
-                <View style={styles.reviewHeader}>
-                  <View style={styles.reviewerInfo}>
-                    <View style={styles.reviewerAvatar}>
-                      <Text style={styles.reviewerInitials}>{review.userInitials}</Text>
+            {!loadingReviews &&
+              displayedReviews.map((review) => (
+                <View key={review.id} style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewerInfo}>
+                      <View style={styles.reviewerAvatar}>
+                        <Text style={styles.reviewerInitials}>
+                          {review.userInitials}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={styles.reviewerName}>
+                          {review.userName}
+                        </Text>
+                        <Text style={styles.reviewDate}>{review.date}</Text>
+                      </View>
                     </View>
-                    <View>
-                      <Text style={styles.reviewerName}>{review.userName}</Text>
-                      <Text style={styles.reviewDate}>{review.date}</Text>
-                    </View>
+                    {renderStars(review.rating)}
                   </View>
-                  {renderStars(review.rating)}
+                  <Text style={styles.reviewComment}>{review.comment}</Text>
                 </View>
-                <Text style={styles.reviewComment}>{review.comment}</Text>
-              </View>
-            ))}
+              ))}
 
             {!loadingReviews && reviews.length === 0 && (
               <View style={styles.emptyReviewsContainer}>
                 <Ionicons name="chatbubble-outline" size={40} color="#E0DAD1" />
-                <Text style={styles.emptyReviewsText}>No reviews yet. Be the first to review!</Text>
+                <Text style={styles.emptyReviewsText}>
+                  No reviews yet. Be the first to review!
+                </Text>
               </View>
             )}
 
             {reviews.length > 3 && (
-              <TouchableOpacity style={styles.viewAllButton} onPress={() => setShowAllReviews(!showAllReviews)}>
+              <TouchableOpacity
+                style={styles.viewAllButton}
+                onPress={() => setShowAllReviews(!showAllReviews)}
+              >
                 <Text style={styles.viewAllText}>
-                  {showAllReviews ? "Show Less" : `View All ${reviews.length} Reviews`}
+                  {showAllReviews
+                    ? "Show Less"
+                    : `View All ${reviews.length} Reviews`}
                 </Text>
-                <Ionicons name={showAllReviews ? "chevron-up" : "chevron-down"} size={16} color="#C35822" />
+                <Ionicons
+                  name={showAllReviews ? "chevron-up" : "chevron-down"}
+                  size={16}
+                  color="#C35822"
+                />
               </TouchableOpacity>
             )}
           </View>
@@ -697,25 +819,28 @@ export default function ProductDetailsScreen() {
 
       <View style={styles.bottomBar}>
         <View style={styles.quantityContainer}>
-          <TouchableOpacity 
-            onPress={decrementQuantity} 
+          <TouchableOpacity
+            onPress={decrementQuantity}
             style={styles.quantityButton}
             disabled={addingToCart}
           >
             <Ionicons name="remove" size={20} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.quantityText}>{quantity}</Text>
-          <TouchableOpacity 
-            onPress={incrementQuantity} 
+          <TouchableOpacity
+            onPress={incrementQuantity}
             style={styles.quantityButton}
             disabled={addingToCart}
           >
             <Ionicons name="add" size={20} color="#32221B" />
           </TouchableOpacity>
         </View>
-        
-        <TouchableOpacity 
-          style={[styles.addToCartButton, addingToCart && styles.addToCartButtonDisabled]} 
+
+        <TouchableOpacity
+          style={[
+            styles.addToCartButton,
+            addingToCart && styles.addToCartButtonDisabled,
+          ]}
           onPress={handleAddToCart}
           disabled={addingToCart}
         >
@@ -730,7 +855,12 @@ export default function ProductDetailsScreen() {
         </TouchableOpacity>
       </View>
 
-      <Modal visible={showReviewModal} animationType="slide" transparent={true} onRequestClose={() => setShowReviewModal(false)}>
+      <Modal
+        visible={showReviewModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowReviewModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -743,8 +873,10 @@ export default function ProductDetailsScreen() {
             <View style={styles.modalBody}>
               <Text style={styles.modalLabel}>Rating</Text>
               {renderRatingStars(reviewRating, 32, true)}
-              
-              <Text style={[styles.modalLabel, { marginTop: 20 }]}>Your Review</Text>
+
+              <Text style={[styles.modalLabel, { marginTop: 20 }]}>
+                Your Review
+              </Text>
               <TextInput
                 style={styles.reviewInput}
                 placeholder="Share your experience with this product..."
@@ -758,10 +890,20 @@ export default function ProductDetailsScreen() {
             </View>
 
             <View style={styles.modalFooter}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowReviewModal(false)}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowReviewModal(false)}
+              >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.submitButton, submittingReview && styles.submitButtonDisabled]} onPress={handleSubmitReview} disabled={submittingReview}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  submittingReview && styles.submitButtonDisabled,
+                ]}
+                onPress={handleSubmitReview}
+                disabled={submittingReview}
+              >
                 {submittingReview ? (
                   <ActivityIndicator size="small" color="#FFF" />
                 ) : (

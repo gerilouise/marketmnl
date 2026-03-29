@@ -1,10 +1,10 @@
 // app/(tabs)/cart.tsx
-import { useCart } from "@/app/contexts/CartContext";
+import { useFirebaseCart } from "@/hooks/useFirebaseCart";
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { deleteDoc, doc, Timestamp, updateDoc } from "firebase/firestore";
-import React, { useCallback, useState, useEffect } from "react";
+import { deleteDoc, doc } from "firebase/firestore";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,20 +19,23 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function CartScreen() {
-  const { cartItems, selectedItems, setSelectedItems, loadCart, loading, updateQuantity, removeFromCart } = useCart();
+  const { cartItems, loading, loadCart, updateQuantity, clearCart } =
+    useFirebaseCart();
+
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
-  // Update selectedItemIds when cartItems changes
+  // Update selectAll state when cartItems changes
   useEffect(() => {
-    // Clear selections if items are removed
-    const validIds = selectedItemIds.filter(id => cartItems.some(item => item.id === id));
+    const validIds = selectedItemIds.filter((id) =>
+      cartItems.some((item) => item.id === id),
+    );
     if (validIds.length !== selectedItemIds.length) {
       setSelectedItemIds(validIds);
     }
-    
-    // Update selectAll state
+
     if (validIds.length === cartItems.length && cartItems.length > 0) {
       setSelectAll(true);
     } else {
@@ -40,19 +43,12 @@ export default function CartScreen() {
     }
   }, [cartItems]);
 
-  // Sync selectedItems context when selectedItemIds changes
-  useEffect(() => {
-    const selected = cartItems.filter(item => selectedItemIds.includes(item.id));
-    setSelectedItems(selected);
-  }, [selectedItemIds, cartItems]);
-
   // Load cart from Firebase
   const loadCartData = async () => {
     await loadCart();
     setRefreshing(false);
   };
 
-  // Refresh when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       loadCartData();
@@ -88,7 +84,7 @@ export default function CartScreen() {
       const newQuantity = increment
         ? item.quantity + 1
         : Math.max(1, item.quantity - 1);
-      
+
       await updateQuantity(itemId, newQuantity);
     } catch (error) {
       console.error("Error updating quantity:", error);
@@ -96,22 +92,59 @@ export default function CartScreen() {
     }
   };
 
-  const handleRemoveItem = async (itemId: string, productName: string) => {
+  // ITO ANG DIRECT DELETE FUNCTION NA GUMAGANA (ginamit sa TEST button)
+  const directDelete = async (itemId: string, productName: string) => {
+    console.log("=== DELETING ITEM ===");
+    console.log("Item ID:", itemId);
+    console.log("Product Name:", productName);
+
+    try {
+      const itemRef = doc(db, "carts", itemId);
+      await deleteDoc(itemRef);
+      console.log("✅ DELETE SUCCESSFUL!");
+      await loadCart(); // Refresh the cart
+      Alert.alert("Success", `"${productName}" removed from cart`);
+      return true;
+    } catch (error: any) {
+      console.error("❌ Delete failed:", error);
+      Alert.alert("Error", error.message);
+      return false;
+    }
+  };
+
+  // NGAYON, ANG DELETE BUTTON AT TEST BUTTON AY PAREHAS NG GINAGAMIT NA FUNCTION
+  const handleRemoveItem = (itemId: string, productName: string) => {
     Alert.alert("Remove Item", `Remove "${productName}" from your cart?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
         style: "destructive",
         onPress: async () => {
-          try {
-            await removeFromCart(itemId);
-          } catch (error) {
-            console.error("Error removing item:", error);
-            Alert.alert("Error", "Failed to remove item");
-          }
+          setDeletingItemId(itemId);
+          await directDelete(itemId, productName);
+          setDeletingItemId(null);
         },
       },
     ]);
+  };
+
+  // Debug function to show current user and cart items
+  const showDebugInfo = () => {
+    const user = auth.currentUser;
+    console.log("=== DEBUG INFO ===");
+    console.log("Current User ID:", user?.uid);
+    console.log("Cart Items Count:", cartItems.length);
+    cartItems.forEach((item, index) => {
+      console.log(`Item ${index + 1}:`, {
+        id: item.id,
+        name: item.productName,
+        userId: item.userId,
+      });
+    });
+    Alert.alert(
+      "Debug Info",
+      `Logged in as: ${user?.uid || "No user"}\nCart items: ${cartItems.length}\n\nCheck console for details`,
+    );
   };
 
   const calculateSelectedTotal = () => {
@@ -131,13 +164,6 @@ export default function CartScreen() {
       Alert.alert("No Items Selected", "Please select items to checkout");
       return;
     }
-
-    // Get selected items and store in context
-    const selectedCartItems = cartItems.filter((item) =>
-      selectedItemIds.includes(item.id),
-    );
-    setSelectedItems(selectedCartItems);
-
     router.push("/checkout");
   };
 
@@ -146,14 +172,29 @@ export default function CartScreen() {
     loadCartData();
   };
 
+  // ITO LANG ANG BAGO - Navigation to product screen
+  const navigateToProduct = (productId: string) => {
+    router.push(`/product/${productId}`);
+  };
+
   const renderCartItem = ({ item }: { item: any }) => {
     const isSelected = selectedItemIds.includes(item.id);
+    const isDeleting = deletingItemId === item.id;
 
     return (
-      <View style={styles.cartItem}>
+      <TouchableOpacity
+        style={styles.cartItem}
+        onPress={() => navigateToProduct(item.productId)}
+        activeOpacity={0.7}
+        disabled={isDeleting}
+      >
         <TouchableOpacity
           style={[styles.checkbox, isSelected && styles.checkboxSelected]}
-          onPress={() => toggleSelectItem(item.id)}
+          onPress={(e) => {
+            e.stopPropagation();
+            toggleSelectItem(item.id);
+          }}
+          disabled={isDeleting}
         >
           {isSelected && <Ionicons name="checkmark" size={16} color="#FFF" />}
         </TouchableOpacity>
@@ -176,30 +217,45 @@ export default function CartScreen() {
         </View>
 
         <View style={styles.rightContainer}>
+          {/* TEST DELETE BUTTON - Gamit ang delete icon din */}
           <TouchableOpacity
-            style={styles.trashButton}
-            onPress={() => handleRemoveItem(item.id, item.productName)}
+            style={styles.testDeleteButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              setDeletingItemId(item.id);
+              directDelete(item.id, item.productName);
+              setDeletingItemId(null);
+            }}
+            disabled={isDeleting}
           >
-            <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+            <Ionicons name="trash" size={18} color="#e0e0e0" />
           </TouchableOpacity>
 
           <View style={styles.quantityContainer}>
             <TouchableOpacity
               style={styles.quantityButton}
-              onPress={() => handleUpdateQuantity(item.id, false)}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleUpdateQuantity(item.id, false);
+              }}
+              disabled={isDeleting}
             >
               <Ionicons name="remove" size={16} color="#32221B" />
             </TouchableOpacity>
             <Text style={styles.quantityText}>{item.quantity}</Text>
             <TouchableOpacity
               style={styles.quantityButton}
-              onPress={() => handleUpdateQuantity(item.id, true)}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleUpdateQuantity(item.id, true);
+              }}
+              disabled={isDeleting}
             >
               <Ionicons name="add" size={16} color="#32221B" />
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -252,31 +308,33 @@ export default function CartScreen() {
           </Text>
         </View>
 
-        {cartItems.length > 0 && (
-          <TouchableOpacity
-            style={styles.selectAllContainer}
-            onPress={toggleSelectAll}
-          >
-            <View
-              style={[
-                styles.checkboxSmall,
-                selectAll && styles.checkboxSmallSelected,
-              ]}
+        <View style={styles.headerButtons}>
+          {cartItems.length > 0 && (
+            <TouchableOpacity
+              style={styles.selectAllContainer}
+              onPress={toggleSelectAll}
             >
-              {selectAll && (
-                <Ionicons name="checkmark" size={12} color="#FFF" />
-              )}
-            </View>
-            <Text
-              style={[
-                styles.selectAllText,
-                selectAll && styles.selectAllTextActive,
-              ]}
-            >
-              Select All
-            </Text>
-          </TouchableOpacity>
-        )}
+              <View
+                style={[
+                  styles.checkboxSmall,
+                  selectAll && styles.checkboxSmallSelected,
+                ]}
+              >
+                {selectAll && (
+                  <Ionicons name="checkmark" size={12} color="#FFF" />
+                )}
+              </View>
+              <Text
+                style={[
+                  styles.selectAllText,
+                  selectAll && styles.selectAllTextActive,
+                ]}
+              >
+                Select All
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <FlatList
@@ -351,6 +409,11 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 15,
   },
+  headerButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   headerTitle: {
     fontSize: 28,
     fontWeight: "bold",
@@ -390,12 +453,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
+  debugButton: {
+    backgroundColor: "#4CAF50",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  clearButton: {
+    backgroundColor: "#FF9800",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  clearButtonText: {
+    color: "#FFF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   selectAllContainer: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFF",
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -417,7 +497,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#C35822",
   },
   selectAllText: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#8F796F",
   },
   selectAllTextActive: {
@@ -494,10 +574,18 @@ const styles = StyleSheet.create({
   rightContainer: {
     alignItems: "center",
     justifyContent: "space-between",
-    height: 80,
+    height: 100,
   },
   trashButton: {
-    padding: 4,
+    backgroundColor: "#FF3B30",
+    padding: 8,
+    borderRadius: 20,
+    marginBottom: 4,
+  },
+  testDeleteButton: {
+    backgroundColor: "#db0606",
+    padding: 8,
+    borderRadius: 20,
     marginBottom: 4,
   },
   quantityContainer: {

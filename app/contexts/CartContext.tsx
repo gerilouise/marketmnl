@@ -1,18 +1,18 @@
 // contexts/CartContext.tsx
-import React, { createContext, useContext, useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
 import {
-  collection,
-  query,
-  where,
-  getDocs,
   addDoc,
-  updateDoc,
+  collection,
   deleteDoc,
   doc,
+  getDocs,
+  query,
   Timestamp,
-  writeBatch
+  updateDoc,
+  where,
+  writeBatch,
 } from "firebase/firestore";
+import React, { createContext, useContext, useEffect, useState } from "react";
 
 interface CartItem {
   id: string;
@@ -73,18 +73,20 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
       querySnapshot.forEach((doc) => {
         items.push({ id: doc.id, ...doc.data() } as CartItem);
       });
-     
+
       // Remove any duplicates based on productId and sellerId
       const uniqueItems = items.reduce((acc: CartItem[], current) => {
         const exists = acc.find(
-          item => item.productId === current.productId && item.sellerId === current.sellerId
+          (item) =>
+            item.productId === current.productId &&
+            item.sellerId === current.sellerId,
         );
         if (!exists) {
           acc.push(current);
         }
         return acc;
       }, []);
-     
+
       setCartItems(uniqueItems);
     } catch (error) {
       console.error("Error loading cart:", error);
@@ -102,7 +104,8 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
       // Check if item already exists in cart
       const existingItem = cartItems.find(
-        item => item.productId === product.id && item.sellerId === product.sellerId
+        (item) =>
+          item.productId === product.id && item.sellerId === product.sellerId,
       );
 
       if (existingItem) {
@@ -124,9 +127,9 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
           addedAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         };
-       
+
         const docRef = await addDoc(cartRef, newItem);
-        setCartItems(prev => [...prev, { id: docRef.id, ...newItem }]);
+        setCartItems((prev) => [...prev, { id: docRef.id, ...newItem }]);
       }
     } catch (error) {
       console.error("Error adding to cart:", error);
@@ -134,13 +137,36 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // Update the removeFromCart function in your CartContext.tsx
   const removeFromCart = async (itemId: string) => {
+    console.log("🔴 removeFromCart called with ID:", itemId);
     try {
-      await deleteDoc(doc(db, "carts", itemId));
-      setCartItems(prev => prev.filter(item => item.id !== itemId));
-      setSelectedItems(prev => prev.filter(item => item.id !== itemId));
+      // First check if the item exists
+      const itemToDelete = cartItems.find((item) => item.id === itemId);
+      if (!itemToDelete) {
+        console.log("⚠️ Item not found in local cart:", itemId);
+      } else {
+        console.log("📦 Deleting item:", itemToDelete.productName);
+      }
+
+      // Delete from Firestore
+      const itemRef = doc(db, "carts", itemId);
+      await deleteDoc(itemRef);
+      console.log("✅ Successfully deleted from Firestore");
+
+      // Update local state
+      setCartItems((prev) => {
+        const newItems = prev.filter((item) => item.id !== itemId);
+        console.log("📊 Cart items after removal:", newItems.length);
+        return newItems;
+      });
+
+      setSelectedItems((prev) => {
+        const newSelected = prev.filter((item) => item.id !== itemId);
+        return newSelected;
+      });
     } catch (error) {
-      console.error("Error removing from cart:", error);
+      console.error("❌ Error removing from cart:", error);
       throw error;
     }
   };
@@ -148,15 +174,15 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const removeSelectedItems = async () => {
     try {
       const batch = writeBatch(db);
-      selectedItems.forEach(item => {
+      selectedItems.forEach((item) => {
         const itemRef = doc(db, "carts", item.id);
         batch.delete(itemRef);
       });
       await batch.commit();
-     
+
       // Update local state
       const remainingItems = cartItems.filter(
-        item => !selectedItems.some(selected => selected.id === item.id)
+        (item) => !selectedItems.some((selected) => selected.id === item.id),
       );
       setCartItems(remainingItems);
       setSelectedItems([]);
@@ -169,7 +195,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const clearCart = async () => {
     try {
       const batch = writeBatch(db);
-      cartItems.forEach(item => {
+      cartItems.forEach((item) => {
         const itemRef = doc(db, "carts", item.id);
         batch.delete(itemRef);
       });
@@ -188,23 +214,19 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         await removeFromCart(itemId);
         return;
       }
-     
+
       const itemRef = doc(db, "carts", itemId);
       await updateDoc(itemRef, {
         quantity,
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
       });
-     
-      setCartItems(prev =>
-        prev.map(item =>
-          item.id === itemId ? { ...item, quantity } : item
-        )
+
+      setCartItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, quantity } : item)),
       );
-     
-      setSelectedItems(prev =>
-        prev.map(item =>
-          item.id === itemId ? { ...item, quantity } : item
-        )
+
+      setSelectedItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, quantity } : item)),
       );
     } catch (error) {
       console.error("Error updating quantity:", error);
@@ -229,7 +251,7 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
         updateQuantity,
         removeSelectedItems,
         clearCart,
-        loading
+        loading,
       }}
     >
       {children}
