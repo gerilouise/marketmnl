@@ -6,8 +6,11 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   query,
+  Timestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
@@ -32,6 +35,7 @@ interface WishlistItem {
   productPrice: number;
   productImage?: string | null;
   sellerName: string;
+  sellerId: string;
   addedAt: any;
 }
 
@@ -39,6 +43,8 @@ export default function WishlistScreen() {
   const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [addingToCartId, setAddingToCartId] = useState<string | null>(null);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
   // Load wishlist from Firebase
   const loadWishlist = async () => {
@@ -53,12 +59,7 @@ export default function WishlistScreen() {
       console.log("Loading wishlist for user:", user.uid);
 
       const wishlistRef = collection(db, "wishlists");
-      // REMOVED orderBy to avoid index requirement
-      const q = query(
-        wishlistRef,
-        where("userId", "==", user.uid),
-        // orderBy('addedAt', 'desc') - REMOVED THIS LINE
-      );
+      const q = query(wishlistRef, where("userId", "==", user.uid));
 
       const querySnapshot = await getDocs(q);
       const items: WishlistItem[] = [];
@@ -72,6 +73,7 @@ export default function WishlistScreen() {
           productPrice: data.productPrice,
           productImage: data.productImage,
           sellerName: data.sellerName,
+          sellerId: data.sellerId,
           addedAt: data.addedAt,
         } as WishlistItem);
       });
@@ -99,11 +101,126 @@ export default function WishlistScreen() {
     }, []),
   );
 
-  // Remove from wishlist
-  const handleRemoveFromWishlist = async (
-    productId: string,
-    productName: string,
-  ) => {
+  // Check product stock
+  const checkProductStock = async (productId: string): Promise<number> => {
+    try {
+      const productRef = doc(db, "products", productId);
+      const productSnap = await getDoc(productRef);
+      if (productSnap.exists()) {
+        const productData = productSnap.data();
+        return productData.stockQuantity || 0;
+      }
+      return 0;
+    } catch (error) {
+      console.error("Error checking stock:", error);
+      return 0;
+    }
+  };
+
+  // Add to cart function
+  const handleAddToCart = async (item: WishlistItem) => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to add items to cart", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Login", onPress: () => router.push("/auth/login") },
+      ]);
+      return;
+    }
+
+    setAddingToCartId(item.productId);
+
+    try {
+      // Check stock first
+      const stockQuantity = await checkProductStock(item.productId);
+
+      if (stockQuantity <= 0) {
+        Alert.alert(
+          "Out of Stock",
+          `${item.productName} is currently out of stock.`,
+        );
+        setAddingToCartId(null);
+        return;
+      }
+
+      // Check if item already exists in cart
+      const cartRef = collection(db, "carts");
+      const cartItemId = `${user.uid}_${item.productId}`;
+      const cartDocRef = doc(cartRef, cartItemId);
+      const cartDocSnap = await getDoc(cartDocRef);
+
+      if (cartDocSnap.exists()) {
+        // Update quantity if exists
+        const currentQuantity = cartDocSnap.data().quantity;
+        const newQuantity = currentQuantity + 1;
+
+        if (newQuantity > stockQuantity) {
+          Alert.alert(
+            "Stock Limit",
+            `Only ${stockQuantity} items available in stock.`,
+          );
+          setAddingToCartId(null);
+          return;
+        }
+
+        await updateDoc(cartDocRef, {
+          quantity: newQuantity,
+          updatedAt: Timestamp.now(),
+        });
+        Alert.alert("Success", `Quantity updated for ${item.productName}`);
+      } else {
+        // Add new item
+        await setDoc(cartDocRef, {
+          id: cartItemId,
+          userId: user.uid,
+          productId: item.productId,
+          productName: item.productName,
+          productPrice: item.productPrice,
+          sellerName: item.sellerName,
+          sellerId: item.sellerId,
+          quantity: 1,
+          imageUrl: item.productImage || null,
+          addedAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+        Alert.alert("Success", `${item.productName} added to cart`);
+      }
+    } catch (error) {
+      console.error("Error adding to cart:", error);
+      Alert.alert("Error", "Failed to add item to cart");
+    } finally {
+      setAddingToCartId(null);
+    }
+  };
+
+  // ========== DIRECT DELETE TEST FUNCTION (gaya sa cart) ==========
+  const directDeleteTest = async (productId: string, productName: string) => {
+    console.log("=== DIRECT DELETE TEST ===");
+    console.log("Product ID to delete:", productId);
+    console.log("Product Name:", productName);
+
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const itemId = `${user.uid}_${productId}`;
+      const itemRef = doc(db, "wishlists", itemId);
+      await deleteDoc(itemRef);
+      console.log("✅ DIRECT DELETE SUCCESSFUL!");
+
+      await loadWishlist(); // Refresh the wishlist
+      Alert.alert("Success", `"${productName}" removed from wishlist`);
+      return true;
+    } catch (error: any) {
+      console.error("❌ Direct delete failed:", error);
+      Alert.alert("Error", error.message);
+      return false;
+    }
+  };
+  // ================================================================
+
+  // Remove from wishlist - gamit ang directDeleteTest
+  const handleRemoveFromWishlist = (productId: string, productName: string) => {
     Alert.alert(
       "Remove from Wishlist",
       `Remove "${productName}" from your wishlist?`,
@@ -113,41 +230,25 @@ export default function WishlistScreen() {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
-            try {
-              const user = auth.currentUser;
-              if (!user) return;
-
-              const itemId = `${user.uid}_${productId}`;
-              await deleteDoc(doc(db, "wishlists", itemId));
-
-              // Refresh the list after deletion
-              await loadWishlist();
-              Alert.alert("Success", "Item removed from wishlist");
-            } catch (error) {
-              console.error("Error removing from wishlist:", error);
-              Alert.alert("Error", "Failed to remove item");
-            }
+            setDeletingItemId(productId);
+            await directDeleteTest(productId, productName);
+            setDeletingItemId(null);
           },
         },
       ],
     );
   };
 
-  // Add to cart (placeholder)
-  const handleAddToCart = (item: WishlistItem) => {
-    Alert.alert("Add to Cart", `Add ${item.productName} to your cart?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Add",
-        onPress: () =>
-          Alert.alert("Success", `${item.productName} added to cart`),
-      },
-    ]);
-  };
-
   // Add all to cart
-  const handleAddAllToCart = () => {
+  const handleAddAllToCart = async () => {
     if (wishlistItems.length === 0) return;
+
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("Login Required", "Please log in to add items to cart");
+      return;
+    }
+
     Alert.alert(
       "Add All to Cart",
       `Add all ${wishlistItems.length} items to your cart?`,
@@ -155,7 +256,65 @@ export default function WishlistScreen() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Add All",
-          onPress: () => Alert.alert("Success", `All items added to cart`),
+          onPress: async () => {
+            let addedCount = 0;
+            let outOfStockCount = 0;
+
+            for (const item of wishlistItems) {
+              try {
+                // Check stock for each item
+                const stockQuantity = await checkProductStock(item.productId);
+
+                if (stockQuantity <= 0) {
+                  outOfStockCount++;
+                  continue;
+                }
+
+                const cartRef = collection(db, "carts");
+                const cartItemId = `${user.uid}_${item.productId}`;
+                const cartDocRef = doc(cartRef, cartItemId);
+                const cartDocSnap = await getDoc(cartDocRef);
+
+                if (cartDocSnap.exists()) {
+                  const currentQuantity = cartDocSnap.data().quantity;
+                  const newQuantity = currentQuantity + 1;
+
+                  if (newQuantity <= stockQuantity) {
+                    await updateDoc(cartDocRef, {
+                      quantity: newQuantity,
+                      updatedAt: Timestamp.now(),
+                    });
+                    addedCount++;
+                  } else {
+                    outOfStockCount++;
+                  }
+                } else {
+                  await setDoc(cartDocRef, {
+                    id: cartItemId,
+                    userId: user.uid,
+                    productId: item.productId,
+                    productName: item.productName,
+                    productPrice: item.productPrice,
+                    sellerName: item.sellerName,
+                    sellerId: item.sellerId,
+                    quantity: 1,
+                    imageUrl: item.productImage || null,
+                    addedAt: Timestamp.now(),
+                    updatedAt: Timestamp.now(),
+                  });
+                  addedCount++;
+                }
+              } catch (error) {
+                console.error("Error adding item:", error);
+              }
+            }
+
+            let message = `Added ${addedCount} item(s) to cart.`;
+            if (outOfStockCount > 0) {
+              message += ` ${outOfStockCount} item(s) were out of stock.`;
+            }
+            Alert.alert("Done", message);
+          },
         },
       ],
     );
@@ -172,56 +331,75 @@ export default function WishlistScreen() {
     loadWishlist();
   };
 
-  const renderItem = ({ item }: { item: WishlistItem }) => (
-    <TouchableOpacity
-      style={styles.wishlistItem}
-      onPress={() => navigateToProduct(item.productId)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.imagePlaceholder}>
-        {item.productImage ? (
-          <Image
-            source={{ uri: item.productImage }}
-            style={styles.productImage}
-          />
-        ) : (
-          <Ionicons name="image-outline" size={30} color="#CCC" />
-        )}
-      </View>
+  const renderItem = ({ item }: { item: WishlistItem }) => {
+    const isDeleting = deletingItemId === item.productId;
 
-      <View style={styles.itemDetails}>
-        <Text style={styles.itemName} numberOfLines={1}>
-          {item.productName}
-        </Text>
-        <Text style={styles.itemSeller} numberOfLines={1}>
-          {item.sellerName}
-        </Text>
-        <Text style={styles.itemPrice}>₱{item.productPrice}</Text>
-      </View>
+    return (
+      <TouchableOpacity
+        style={styles.wishlistItem}
+        onPress={() => navigateToProduct(item.productId)}
+        activeOpacity={0.7}
+        disabled={isDeleting}
+      >
+        <View style={styles.imagePlaceholder}>
+          {item.productImage ? (
+            <Image
+              source={{ uri: item.productImage }}
+              style={styles.productImage}
+            />
+          ) : (
+            <Ionicons name="image-outline" size={30} color="#CCC" />
+          )}
+        </View>
 
-      <View style={styles.actionButtons}>
-        <TouchableOpacity
-          style={styles.cartButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleAddToCart(item);
-          }}
-        >
-          <Ionicons name="cart-outline" size={18} color="#FFF" />
-        </TouchableOpacity>
+        <View style={styles.itemDetails}>
+          <Text style={styles.itemName} numberOfLines={1}>
+            {item.productName}
+          </Text>
+          <Text style={styles.itemSeller} numberOfLines={1}>
+            {item.sellerName}
+          </Text>
+          <Text style={styles.itemPrice}>₱{item.productPrice}</Text>
+        </View>
 
-        <TouchableOpacity
-          style={styles.removeButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleRemoveFromWishlist(item.productId, item.productName);
-          }}
-        >
-          <Ionicons name="trash-outline" size={18} color="#FFF" />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+        <View style={styles.actionButtons}>
+          {/* CART BUTTON */}
+          <TouchableOpacity
+            style={styles.cartButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleAddToCart(item);
+            }}
+            disabled={addingToCartId === item.productId || isDeleting}
+          >
+            {addingToCartId === item.productId ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="cart-outline" size={18} color="#FFF" />
+            )}
+          </TouchableOpacity>
+
+          {/* TEST DELETE BUTTON - Direktang deleteDoc gaya ng sa cart */}
+          <TouchableOpacity
+            style={styles.testDeleteButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              setDeletingItemId(item.productId);
+              directDeleteTest(item.productId, item.productName);
+              setDeletingItemId(null);
+            }}
+            disabled={isDeleting}
+          >
+            {isDeleting ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="trash" size={18} color="#FFF" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   // Check if user is logged in
   const user = auth.currentUser;
@@ -438,8 +616,8 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  removeButton: {
-    backgroundColor: "#FF3B30",
+  testDeleteButton: {
+    backgroundColor: "#db0606",
     width: 32,
     height: 32,
     borderRadius: 16,

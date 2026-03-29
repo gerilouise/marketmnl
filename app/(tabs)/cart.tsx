@@ -311,7 +311,10 @@ export default function CartScreen() {
         <View style={styles.headerButtons}>
           {cartItems.length > 0 && (
             <TouchableOpacity
-              style={styles.selectAllContainer}
+              style={[
+                styles.selectAllContainer,
+                selectAll && styles.selectAllContainerActive,
+              ]}
               onPress={toggleSelectAll}
             >
               <View
@@ -483,6 +486,9 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  selectAllContainerActive: {
+    backgroundColor: "#C35822",
+  },
   checkboxSmall: {
     width: 18,
     height: 18,
@@ -501,8 +507,7 @@ const styles = StyleSheet.create({
     color: "#8F796F",
   },
   selectAllTextActive: {
-    color: "#C35822",
-    fontWeight: "500",
+    color: "#FFF",
   },
   cartList: {
     paddingHorizontal: 20,
