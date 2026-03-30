@@ -11,6 +11,7 @@ import {
   query,
   setDoc,
   where,
+  updateDoc,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -41,9 +42,10 @@ interface Shop {
   storeName: string;
   description?: string;
   imageUrl?: string;
-  productCount?: number;
-  followerCount?: number;
-  rating?: number;
+  productCount: number;
+  followerCount: number;
+  rating: number;
+  reviewsCount?: number;
 }
 
 export default function BrowseScreen() {
@@ -82,23 +84,49 @@ export default function BrowseScreen() {
     }
   };
 
-  // Refresh wishlist when screen comes into focus (after deleting from wishlist tab)
+  // Refresh wishlist when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       loadWishlist();
     }, []),
   );
 
-  // Fetch all products
+  // Get seller name from seller ID
+  const getSellerName = async (sellerId: string) => {
+    try {
+      const sellerRef = doc(db, "sellers", sellerId);
+      const sellerSnap = await getDoc(sellerRef);
+      if (sellerSnap.exists()) {
+        const sellerData = sellerSnap.data();
+        return sellerData.storeName || sellerData.name || "MarketMNL";
+      }
+      return "MarketMNL";
+    } catch (error) {
+      console.error("Error getting seller name:", error);
+      return "MarketMNL";
+    }
+  };
+
+  // Fetch all products with seller names
   const loadProducts = async () => {
     setLoading(true);
     try {
       const productsRef = collection(db, "products");
       const querySnapshot = await getDocs(productsRef);
       const productsList: any[] = [];
-      querySnapshot.forEach((doc) => {
-        productsList.push({ id: doc.id, ...doc.data() });
-      });
+      
+      // Process each product to get seller name
+      for (const doc of querySnapshot.docs) {
+        const data = doc.data();
+        const sellerName = await getSellerName(data.sellerId);
+        
+        productsList.push({ 
+          id: doc.id, 
+          ...data,
+          sellerName: sellerName, // Ensure seller name is set
+        });
+      }
+      
       setAllProducts(productsList);
       filterProducts(selectedCategory, searchQuery, sortOrder, productsList);
     } catch (error) {
@@ -109,25 +137,103 @@ export default function BrowseScreen() {
     }
   };
 
-  // Fetch all shops
+  // Fetch shop statistics (product count, follower count, rating)
+  const fetchShopStats = async (shopId: string) => {
+    try {
+      // Get product count
+      const productsRef = collection(db, "products");
+      const productsQuery = query(productsRef, where("sellerId", "==", shopId));
+      const productsSnapshot = await getDocs(productsQuery);
+      const productCount = productsSnapshot.size;
+
+      // Get follower count from follows collection
+      const followsRef = collection(db, "follows");
+      const followsQuery = query(followsRef, where("shopId", "==", shopId));
+      const followsSnapshot = await getDocs(followsQuery);
+      const followerCount = followsSnapshot.size;
+
+      // Get reviews and calculate average rating
+      const reviewsRef = collection(db, "product_reviews");
+      const reviewsQuery = query(reviewsRef, where("sellerId", "==", shopId));
+      const reviewsSnapshot = await getDocs(reviewsQuery);
+      
+      let totalRating = 0;
+      let reviewCount = 0;
+      reviewsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.rating) {
+          totalRating += data.rating;
+          reviewCount++;
+        }
+      });
+      
+      const averageRating = reviewCount > 0 ? totalRating / reviewCount : 4.5;
+
+      // Update seller document with latest stats
+      const sellerRef = doc(db, "sellers", shopId);
+      await updateDoc(sellerRef, {
+        productCount: productCount,
+        followerCount: followerCount,
+        rating: averageRating,
+        reviewsCount: reviewCount,
+        updatedAt: new Date(),
+      }).catch((error) => {
+        // If update fails, just log and continue
+        console.log("Stats update skipped:", error.message);
+      });
+
+      return {
+        productCount,
+        followerCount,
+        rating: averageRating,
+        reviewsCount: reviewCount,
+      };
+    } catch (error) {
+      console.error("Error fetching shop stats:", error);
+      return {
+        productCount: 0,
+        followerCount: 0,
+        rating: 4.5,
+        reviewsCount: 0,
+      };
+    }
+  };
+
+  // Fetch all shops - Load from sellers collection with dynamic stats
   const loadShops = async () => {
     setLoading(true);
     try {
-      const storesRef = collection(db, "stores");
-      const querySnapshot = await getDocs(storesRef);
       const shopsList: Shop[] = [];
-      querySnapshot.forEach((doc) => {
+      
+      // Load from sellers collection
+      const sellersRef = collection(db, "sellers");
+      const sellersSnapshot = await getDocs(sellersRef);
+      
+      // Process each shop to get real-time stats
+      for (const doc of sellersSnapshot.docs) {
         const data = doc.data();
-        shopsList.push({
-          id: doc.id,
-          storeName: data.storeName || "Unknown Store",
-          description: data.description,
-          imageUrl: data.imageUrl,
-          productCount: data.productCount || 0,
-          followerCount: data.followerCount || 0,
-          rating: data.rating || 4.5,
-        });
-      });
+        // Only add if storeName exists
+        if (data.storeName) {
+          // Fetch real-time stats
+          const stats = await fetchShopStats(doc.id);
+          
+          shopsList.push({
+            id: doc.id,
+            storeName: data.storeName || "Unknown Store",
+            description: data.description || data.storeDescription,
+            imageUrl: data.imageUrl || data.avatar,
+            productCount: stats.productCount,
+            followerCount: stats.followerCount,
+            rating: stats.rating,
+            reviewsCount: stats.reviewsCount,
+          });
+        }
+      }
+      
+      // Sort by follower count (most popular first)
+      shopsList.sort((a, b) => b.followerCount - a.followerCount);
+      
+      console.log(`📦 Loaded ${shopsList.length} shops with stats`);
       setAllShops(shopsList);
       filterShops(searchQuery, shopsList);
     } catch (error) {
@@ -188,7 +294,6 @@ export default function BrowseScreen() {
       );
     }
 
-    filtered.sort((a, b) => (b.followerCount || 0) - (a.followerCount || 0));
     setFilteredShops(filtered);
   };
 
@@ -244,6 +349,7 @@ export default function BrowseScreen() {
           productName: product.name,
           productPrice: product.price,
           sellerName: product.sellerName || "MarketMNL",
+          sellerId: product.sellerId,
           productImage: product.imageUrl || null,
           addedAt: new Date(),
         });
@@ -367,7 +473,9 @@ export default function BrowseScreen() {
           </View>
           <View style={styles.shopStat}>
             <Ionicons name="star" size={12} color="#FFD700" />
-            <Text style={styles.shopStatText}>{item.rating || 4.5}</Text>
+            <Text style={styles.shopStatText}>
+              {item.rating ? item.rating.toFixed(1) : "4.5"}
+            </Text>
           </View>
         </View>
       </View>
@@ -379,8 +487,8 @@ export default function BrowseScreen() {
   const isLoading =
     loading &&
     (viewMode === "products"
-      ? filteredProducts.length === 0
-      : filteredShops.length === 0);
+      ? filteredProducts.length === 0 && allProducts.length === 0
+      : filteredShops.length === 0 && allShops.length === 0);
 
   return (
     <View style={styles.container}>
@@ -483,7 +591,7 @@ export default function BrowseScreen() {
         </View>
       )}
 
-      {/* Categories (only for products) - FIXED */}
+      {/* Categories (only for products) */}
       {viewMode === "products" && (
         <View style={styles.categoriesContainer}>
           <ScrollView
@@ -531,6 +639,7 @@ export default function BrowseScreen() {
         </View>
       ) : viewMode === "products" ? (
         <FlatList
+          key="products-list"
           data={filteredProducts}
           renderItem={renderProductItem}
           keyExtractor={(item) => item.id}
@@ -547,6 +656,7 @@ export default function BrowseScreen() {
         />
       ) : (
         <FlatList
+          key="shops-list"
           data={filteredShops}
           renderItem={renderShopItem}
           keyExtractor={(item) => item.id}

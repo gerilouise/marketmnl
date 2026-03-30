@@ -1,4 +1,4 @@
-// app/(seller)/products.tsx - Final version with manual sorting
+// app/(seller)/products.tsx - Final version without debug
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
@@ -22,7 +22,7 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Platform,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -43,6 +43,8 @@ export default function SellerProductsScreen() {
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<{ id: string; name: string } | null>(null);
 
   // Fetch ONLY the logged-in user's products
   const fetchProducts = async () => {
@@ -50,16 +52,12 @@ export default function SellerProductsScreen() {
     try {
       const user = auth.currentUser;
       if (!user) {
-        console.log("No user logged in");
         setProducts([]);
         setFilteredProducts([]);
         setLoading(false);
         return;
       }
 
-      console.log("Fetching products for seller ID:", user.uid);
-
-      // Query without orderBy to avoid index requirement
       const productsRef = collection(db, "products");
       const q = query(
         productsRef,
@@ -81,7 +79,6 @@ export default function SellerProductsScreen() {
         return 0;
       });
 
-      console.log(`✅ Found ${productsList.length} products for seller ${user.uid}`);
       setProducts(productsList);
 
       // Apply filter
@@ -93,7 +90,7 @@ export default function SellerProductsScreen() {
         );
         setFilteredProducts(filtered);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching products:", error);
       Alert.alert("Error", "Failed to load products");
     } finally {
@@ -114,48 +111,59 @@ export default function SellerProductsScreen() {
     }
   };
 
-  // Delete product function
-  const deleteProduct = async (productId: string, productName: string) => {
-    if (deletingProductId) return;
+  // Show delete confirmation modal
+  const showDeleteConfirmation = (productId: string, productName: string) => {
+    setProductToDelete({ id: productId, name: productName });
+    setDeleteModalVisible(true);
+  };
 
-    Alert.alert(
-      "Delete Product",
-      `Are you sure you want to delete "${productName}"?\n\nThis action cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setDeletingProductId(productId);
-            try {
-              const productRef = doc(db, "products", productId);
-              await deleteDoc(productRef);
-              
-              const updatedProducts = products.filter(p => p.id !== productId);
-              setProducts(updatedProducts);
-              
-              if (selectedCategory === "All") {
-                setFilteredProducts(updatedProducts);
-              } else {
-                const filtered = updatedProducts.filter(
-                  (product) => product.category === selectedCategory,
-                );
-                setFilteredProducts(filtered);
-              }
+  // Perform the actual delete
+  const confirmDelete = async () => {
+    if (!productToDelete) return;
+    
+    const { id: productId, name: productName } = productToDelete;
+    setDeleteModalVisible(false);
+    setDeletingProductId(productId);
+    
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert("Error", "You must be logged in to delete products");
+        setDeletingProductId(null);
+        setProductToDelete(null);
+        return;
+      }
 
-              Alert.alert("Success", `"${productName}" has been deleted permanently.`);
-            } catch (error: any) {
-              console.error("Delete error:", error);
-              Alert.alert("Delete Failed", error.message || "Failed to delete product");
-              await fetchProducts();
-            } finally {
-              setDeletingProductId(null);
-            }
-          },
-        },
-      ],
-    );
+      const productRef = doc(db, "products", productId);
+      await deleteDoc(productRef);
+
+      // Remove from local state
+      const updatedProducts = products.filter(p => p.id !== productId);
+      setProducts(updatedProducts);
+      
+      // Update filtered products based on current category
+      if (selectedCategory === "All") {
+        setFilteredProducts(updatedProducts);
+      } else {
+        const filtered = updatedProducts.filter(
+          (product) => product.category === selectedCategory,
+        );
+        setFilteredProducts(filtered);
+      }
+
+      Alert.alert("Success", `"${productName}" has been deleted.`);
+    } catch (error: any) {
+      console.error("Delete error:", error);
+      Alert.alert("Delete Failed", error.message || "Failed to delete product");
+    } finally {
+      setDeletingProductId(null);
+      setProductToDelete(null);
+    }
+  };
+
+  const cancelDelete = () => {
+    setDeleteModalVisible(false);
+    setProductToDelete(null);
   };
 
   // Fetch products when screen loads
@@ -188,6 +196,8 @@ export default function SellerProductsScreen() {
   };
 
   const renderProductItem = ({ item }: { item: any }) => {
+    const isDeleting = deletingProductId === item.id;
+    
     return (
       <View style={styles.productCard}>
         <View style={styles.productImagePlaceholder}>
@@ -222,9 +232,9 @@ export default function SellerProductsScreen() {
 
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={styles.editButton}
+            style={[styles.editButton, isDeleting && styles.disabledButton]}
             onPress={() => handleEditProduct(item.id)}
-            disabled={deletingProductId !== null}
+            disabled={isDeleting}
           >
             <Ionicons name="create-outline" size={20} color="#FFF" />
           </TouchableOpacity>
@@ -232,12 +242,12 @@ export default function SellerProductsScreen() {
           <TouchableOpacity
             style={[
               styles.deleteButton,
-              deletingProductId === item.id && styles.disabledButton
+              isDeleting && styles.disabledButton
             ]}
-            onPress={() => deleteProduct(item.id, item.name)}
-            disabled={deletingProductId !== null}
+            onPress={() => showDeleteConfirmation(item.id, item.name)}
+            disabled={isDeleting}
           >
-            {deletingProductId === item.id ? (
+            {isDeleting ? (
               <ActivityIndicator size="small" color="#FFF" />
             ) : (
               <Ionicons name="trash-outline" size={20} color="#FFF" />
@@ -340,6 +350,42 @@ export default function SellerProductsScreen() {
           </View>
         }
       />
+
+      {/* Custom Delete Confirmation Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={deleteModalVisible}
+        onRequestClose={cancelDelete}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIcon}>
+              <Ionicons name="alert-circle-outline" size={50} color="#FF3B30" />
+            </View>
+            <Text style={styles.modalTitle}>Delete Product</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to delete "{productToDelete?.name}"?
+            </Text>
+            <Text style={styles.modalWarning}>This action cannot be undone.</Text>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelModalButton]}
+                onPress={cancelDelete}
+              >
+                <Text style={styles.cancelModalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.deleteModalButton]}
+                onPress={confirmDelete}
+              >
+                <Text style={styles.deleteModalButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -560,6 +606,75 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   addFirstButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalIcon: {
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalWarning: {
+    fontSize: 12,
+    color: "#FF3B30",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+  },
+  cancelModalButton: {
+    backgroundColor: "#F5F5F5",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  cancelModalButtonText: {
+    color: "#8F796F",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  deleteModalButton: {
+    backgroundColor: "#FF3B30",
+  },
+  deleteModalButtonText: {
     color: "#FFF",
     fontSize: 16,
     fontWeight: "600",

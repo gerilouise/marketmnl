@@ -1,4 +1,5 @@
 // app/(tabs)/cart.tsx
+import { useCart } from "@/app/contexts/CartContext";
 import { useFirebaseCart } from "@/hooks/useFirebaseCart";
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,14 +19,18 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+
 export default function CartScreen() {
   const { cartItems, loading, loadCart, updateQuantity, clearCart } =
     useFirebaseCart();
+  const { setSelectedItems } = useCart(); // <-- GET setSelectedItems from context
+
 
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+
 
   // Update selectAll state when cartItems changes
   useEffect(() => {
@@ -36,6 +41,7 @@ export default function CartScreen() {
       setSelectedItemIds(validIds);
     }
 
+
     if (validIds.length === cartItems.length && cartItems.length > 0) {
       setSelectAll(true);
     } else {
@@ -43,17 +49,20 @@ export default function CartScreen() {
     }
   }, [cartItems]);
 
+
   // Load cart from Firebase
   const loadCartData = async () => {
     await loadCart();
     setRefreshing(false);
   };
 
+
   useFocusEffect(
     useCallback(() => {
       loadCartData();
     }, []),
   );
+
 
   const toggleSelectItem = (itemId: string) => {
     setSelectedItemIds((prev: string[]) => {
@@ -67,6 +76,7 @@ export default function CartScreen() {
     });
   };
 
+
   const toggleSelectAll = () => {
     if (selectAll) {
       setSelectedItemIds([]);
@@ -76,14 +86,17 @@ export default function CartScreen() {
     }
   };
 
+
   const handleUpdateQuantity = async (itemId: string, increment: boolean) => {
     try {
       const item = cartItems.find((i) => i.id === itemId);
       if (!item) return;
 
+
       const newQuantity = increment
         ? item.quantity + 1
         : Math.max(1, item.quantity - 1);
+
 
       await updateQuantity(itemId, newQuantity);
     } catch (error) {
@@ -92,11 +105,13 @@ export default function CartScreen() {
     }
   };
 
-  // ITO ANG DIRECT DELETE FUNCTION NA GUMAGANA (ginamit sa TEST button)
+
+  // ITO ANG DIRECT DELETE FUNCTION NA GUMAGANA
   const directDelete = async (itemId: string, productName: string) => {
     console.log("=== DELETING ITEM ===");
     console.log("Item ID:", itemId);
     console.log("Product Name:", productName);
+
 
     try {
       const itemRef = doc(db, "carts", itemId);
@@ -112,7 +127,7 @@ export default function CartScreen() {
     }
   };
 
-  // NGAYON, ANG DELETE BUTTON AT TEST BUTTON AY PAREHAS NG GINAGAMIT NA FUNCTION
+
   const handleRemoveItem = (itemId: string, productName: string) => {
     Alert.alert("Remove Item", `Remove "${productName}" from your cart?`, [
       { text: "Cancel", style: "cancel" },
@@ -128,24 +143,6 @@ export default function CartScreen() {
     ]);
   };
 
-  // Debug function to show current user and cart items
-  const showDebugInfo = () => {
-    const user = auth.currentUser;
-    console.log("=== DEBUG INFO ===");
-    console.log("Current User ID:", user?.uid);
-    console.log("Cart Items Count:", cartItems.length);
-    cartItems.forEach((item, index) => {
-      console.log(`Item ${index + 1}:`, {
-        id: item.id,
-        name: item.productName,
-        userId: item.userId,
-      });
-    });
-    Alert.alert(
-      "Debug Info",
-      `Logged in as: ${user?.uid || "No user"}\nCart items: ${cartItems.length}\n\nCheck console for details`,
-    );
-  };
 
   const calculateSelectedTotal = () => {
     return cartItems
@@ -153,33 +150,56 @@ export default function CartScreen() {
       .reduce((sum, item) => sum + item.productPrice * item.quantity, 0);
   };
 
+
   const calculateEstimatedTotal = () => {
     const subtotal = calculateSelectedTotal();
     const shipping = subtotal > 0 ? 50 : 0;
     return subtotal + shipping;
   };
 
+
+  // FIXED: Checkout function - make sure selected items are saved to context
   const handleCheckout = () => {
     if (selectedItemIds.length === 0) {
       Alert.alert("No Items Selected", "Please select items to checkout");
       return;
     }
+
+
+    // Get selected items from cartItems
+    const selectedCartItems = cartItems.filter((item) =>
+      selectedItemIds.includes(item.id),
+    );
+
+
+    console.log("🛒 Selected items for checkout:", selectedCartItems);
+    console.log("🛒 Selected item IDs:", selectedItemIds);
+
+
+    // IMPORTANT: Save selected items to context before navigating
+    setSelectedItems(selectedCartItems);
+
+
+    // Navigate to checkout
     router.push("/checkout");
   };
+
 
   const onRefresh = () => {
     setRefreshing(true);
     loadCartData();
   };
 
-  // ITO LANG ANG BAGO - Navigation to product screen
+
   const navigateToProduct = (productId: string) => {
     router.push(`/product/${productId}`);
   };
 
+
   const renderCartItem = ({ item }: { item: any }) => {
     const isSelected = selectedItemIds.includes(item.id);
     const isDeleting = deletingItemId === item.id;
+
 
     return (
       <TouchableOpacity
@@ -199,6 +219,7 @@ export default function CartScreen() {
           {isSelected && <Ionicons name="checkmark" size={16} color="#FFF" />}
         </TouchableOpacity>
 
+
         <View style={styles.imagePlaceholder}>
           {item.imageUrl ? (
             <Image
@@ -210,14 +231,15 @@ export default function CartScreen() {
           )}
         </View>
 
+
         <View style={styles.itemDetails}>
           <Text style={styles.itemName}>{item.productName}</Text>
           <Text style={styles.itemSeller}>{item.sellerName}</Text>
           <Text style={styles.itemPrice}>₱{item.productPrice}</Text>
         </View>
 
+
         <View style={styles.rightContainer}>
-          {/* TEST DELETE BUTTON - Gamit ang delete icon din */}
           <TouchableOpacity
             style={styles.testDeleteButton}
             onPress={(e) => {
@@ -230,6 +252,7 @@ export default function CartScreen() {
           >
             <Ionicons name="trash" size={18} color="#e0e0e0" />
           </TouchableOpacity>
+
 
           <View style={styles.quantityContainer}>
             <TouchableOpacity
@@ -259,9 +282,11 @@ export default function CartScreen() {
     );
   };
 
+
   const subtotal = calculateSelectedTotal();
   const estimatedTotal = calculateEstimatedTotal();
   const itemCount = selectedItemIds.length;
+
 
   if (loading && !refreshing) {
     return (
@@ -275,6 +300,7 @@ export default function CartScreen() {
       </SafeAreaView>
     );
   }
+
 
   if (!auth.currentUser) {
     return (
@@ -298,6 +324,7 @@ export default function CartScreen() {
     );
   }
 
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -307,6 +334,7 @@ export default function CartScreen() {
             {cartItems.length} items in your cart
           </Text>
         </View>
+
 
         <View style={styles.headerButtons}>
           {cartItems.length > 0 && (
@@ -340,6 +368,7 @@ export default function CartScreen() {
         </View>
       </View>
 
+
       <FlatList
         data={cartItems}
         renderItem={renderCartItem}
@@ -368,6 +397,7 @@ export default function CartScreen() {
         }
       />
 
+
       {cartItems.length > 0 && (
         <View style={styles.bottomContainer}>
           <View style={styles.summaryContainer}>
@@ -380,6 +410,7 @@ export default function CartScreen() {
               <Text style={styles.estimatedTotalValue}>₱{estimatedTotal}</Text>
             </View>
           </View>
+
 
           <TouchableOpacity
             style={[
@@ -399,6 +430,8 @@ export default function CartScreen() {
   );
 }
 
+
+// Styles remain the same (keep your existing styles)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -454,23 +487,6 @@ const styles = StyleSheet.create({
   loginButtonText: {
     color: "#FFF",
     fontSize: 16,
-    fontWeight: "600",
-  },
-  debugButton: {
-    backgroundColor: "#4CAF50",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  clearButton: {
-    backgroundColor: "#FF9800",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  clearButtonText: {
-    color: "#FFF",
-    fontSize: 12,
     fontWeight: "600",
   },
   selectAllContainer: {
@@ -580,12 +596,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     height: 100,
-  },
-  trashButton: {
-    backgroundColor: "#FF3B30",
-    padding: 8,
-    borderRadius: 20,
-    marginBottom: 4,
   },
   testDeleteButton: {
     backgroundColor: "#db0606",

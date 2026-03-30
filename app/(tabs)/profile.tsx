@@ -156,6 +156,13 @@ export default function ProfileScreen() {
     router.push(`/store/${storeId}`);
   };
 
+  const navigateToAllFollowing = () => {
+    router.push({
+      pathname: "/(tabs)/following",
+      params: { followedShops: JSON.stringify(followedShops) }
+    });
+  };
+
   const navigateTo = (screen: string) => {
     switch (screen) {
       case "addresses":
@@ -300,7 +307,7 @@ export default function ProfileScreen() {
               <Text style={styles.followingCount}>{followedShops.length} shops</Text>
             </View>
             {followedShops.length > 0 && (
-              <TouchableOpacity onPress={() => Alert.alert("Following", `You follow ${followedShops.length} shops`)}>
+              <TouchableOpacity onPress={navigateToAllFollowing}>
                 <Text style={styles.viewAllText}>View All</Text>
               </TouchableOpacity>
             )}
@@ -313,7 +320,7 @@ export default function ProfileScreen() {
             </View>
           ) : followedShops.length > 0 ? (
             <View>
-              {followedShops.map((shop) => (
+              {followedShops.slice(0, 3).map((shop) => (
                 <TouchableOpacity 
                   key={shop.id}
                   style={styles.followedShopItem}

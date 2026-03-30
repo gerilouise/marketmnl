@@ -1,7 +1,7 @@
 // app/checkout/index.tsx
 import { useCart } from "@/app/contexts/CartContext";
-import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { createOrder } from "@/app/services/orders";
+import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -18,10 +18,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
+
 export default function CheckoutScreen() {
-  const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } = useCart();
+  const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } =
+    useCart();
   const { addresses, loading, fetchAddresses } = useFirebaseProfile();
   const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
@@ -30,10 +33,12 @@ export default function CheckoutScreen() {
   const [showOrderSuccess, setShowOrderSuccess] = useState(false);
   const [orderNumber, setOrderNumber] = useState("");
 
+
   // GCash/Maya Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
+
 
   // Credit Card Modal
   const [showCreditCardModal, setShowCreditCardModal] = useState(false);
@@ -42,16 +47,37 @@ export default function CheckoutScreen() {
   const [expiryDate, setExpiryDate] = useState("");
   const [cvv, setCvv] = useState("");
 
+
   useEffect(() => {
     loadAddresses();
-    // Log selected items to verify sellerId
-    console.log("🛒 Selected items in checkout:", JSON.stringify(selectedItems, null, 2));
-    setCheckoutItems(selectedItems);
+
+
+    // IMPORTANT: Check if selectedItems has data
+    console.log("🛒 Selected items from context:", selectedItems);
+
+
+    if (selectedItems && selectedItems.length > 0) {
+      setCheckoutItems(selectedItems);
+    } else {
+      // If no items in context, show alert and redirect back to cart
+      Alert.alert(
+        "No Items Selected",
+        "Please select items to checkout from your cart.",
+        [
+          {
+            text: "OK",
+            onPress: () => router.back(),
+          },
+        ],
+      );
+    }
   }, []);
+
 
   const loadAddresses = async () => {
     await fetchAddresses();
   };
+
 
   useEffect(() => {
     if (addresses.length > 0) {
@@ -64,6 +90,7 @@ export default function CheckoutScreen() {
     }
   }, [addresses]);
 
+
   const calculateSubtotal = () => {
     return checkoutItems.reduce(
       (sum, item) => sum + item.productPrice * item.quantity,
@@ -71,9 +98,11 @@ export default function CheckoutScreen() {
     );
   };
 
+
   const shippingFee = 50;
   const subtotal = calculateSubtotal();
   const total = subtotal + shippingFee;
+
 
   const handlePaymentSelection = () => {
     if (!selectedAddress) {
@@ -82,11 +111,13 @@ export default function CheckoutScreen() {
       return;
     }
 
+
     if (checkoutItems.length === 0) {
       Alert.alert("No Items", "No items selected for checkout");
       router.push("/(tabs)/cart");
       return;
     }
+
 
     if (selectedPayment === "Cash on Delivery") {
       processOrder();
@@ -97,29 +128,40 @@ export default function CheckoutScreen() {
     }
   };
 
+
   const processOrder = async (paymentDetails?: any) => {
     setIsProcessing(true);
 
+
     try {
       // Verify all items have sellerId
-      const missingSellerId = checkoutItems.some(item => !item.sellerId);
+      const missingSellerId = checkoutItems.some((item) => !item.sellerId);
       if (missingSellerId) {
         console.error("❌ Some items are missing sellerId:", checkoutItems);
         Alert.alert(
           "Error",
-          "Some items are missing seller information. Please remove them from cart and try again."
+          "Some items are missing seller information. Please remove them from cart and try again.",
         );
         setIsProcessing(false);
         return;
       }
 
-      // Log the items with sellerId
-      console.log("📦 Processing order with items:", checkoutItems.map(item => ({
-        name: item.productName,
-        sellerId: item.sellerId,
-        sellerName: item.sellerName
-      })));
 
+      // Log the items
+      console.log(
+        "📦 Processing order with items:",
+        checkoutItems.map((item) => ({
+          name: item.productName,
+          sellerId: item.sellerId,
+          sellerName: item.sellerName,
+          quantity: item.quantity,
+          price: item.productPrice,
+        })),
+      );
+
+
+      // Prepare order data WITHOUT userId, orderNumber, createdAt, updatedAt, status
+      //因为这些会在 createOrder 函数中自动添加
       const orderData = {
         items: checkoutItems.map((item) => ({
           productId: item.productId,
@@ -147,23 +189,34 @@ export default function CheckoutScreen() {
         },
       };
 
-      console.log("🚀 Sending order to createOrder:", JSON.stringify(orderData, null, 2));
 
+      console.log(
+        "🚀 Sending order to createOrder:",
+        JSON.stringify(orderData, null, 2),
+      );
+
+
+      // Call createOrder with the correct parameter
       const result = await createOrder(orderData);
+
 
       if (result.success) {
         setOrderNumber(result.orderNumber);
-        
+
+
         // Remove selected items from cart after successful order
         console.log("🗑️ Removing selected items from cart...");
         await removeSelectedItems();
-        
+
+
         // Clear selected items in context
         setSelectedItems([]);
-        
+
+
         // Reload cart to refresh
         await loadCart();
-        
+
+
         console.log("✅ Order placed successfully, items removed from cart");
         setShowOrderSuccess(true);
       }
@@ -187,6 +240,7 @@ export default function CheckoutScreen() {
     }
   };
 
+
   const validateGCashMaya = () => {
     if (!phoneNumber) {
       Alert.alert("Error", "Please enter your mobile number");
@@ -202,6 +256,7 @@ export default function CheckoutScreen() {
     }
     return true;
   };
+
 
   const validateCreditCard = () => {
     if (!cardNumber || cardNumber.replace(/\s/g, "").length < 16) {
@@ -223,20 +278,24 @@ export default function CheckoutScreen() {
     return true;
   };
 
+
   const navigateToAddresses = () => {
     router.push("/(tabs)/addresses");
   };
+
 
   const formatAddress = (address: any) => {
     if (!address) return "";
     return `${address.street}, ${address.barangay}, ${address.city}, ${address.province} ${address.zipCode}`;
   };
 
+
   const formatCardNumber = (text: string) => {
     const cleaned = text.replace(/\s/g, "");
     const groups = cleaned.match(/.{1,4}/g);
     return groups ? groups.join(" ") : cleaned;
   };
+
 
   const formatExpiryDate = (text: string) => {
     const cleaned = text.replace(/[^\d]/g, "");
@@ -245,6 +304,7 @@ export default function CheckoutScreen() {
     }
     return cleaned;
   };
+
 
   if (loading) {
     return (
@@ -266,6 +326,7 @@ export default function CheckoutScreen() {
     );
   }
 
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -279,6 +340,7 @@ export default function CheckoutScreen() {
         <View style={{ width: 40 }} />
       </View>
 
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -290,6 +352,7 @@ export default function CheckoutScreen() {
           </Text>
           {checkoutItems.length === 0 ? (
             <View style={styles.emptyCartContainer}>
+              <Ionicons name="cart-outline" size={48} color="#E0DAD1" />
               <Text style={styles.emptyCartText}>No items selected</Text>
               <TouchableOpacity
                 style={styles.goToCartButton}
@@ -299,8 +362,8 @@ export default function CheckoutScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            checkoutItems.map((item) => (
-              <View key={item.id} style={styles.orderItem}>
+            checkoutItems.map((item, index) => (
+              <View key={item.id || index} style={styles.orderItem}>
                 <View style={styles.orderItemLeft}>
                   <Text style={styles.orderItemName}>{item.productName}</Text>
                   <Text style={styles.orderItemQuantity}>
@@ -319,6 +382,7 @@ export default function CheckoutScreen() {
             ))
           )}
         </View>
+
 
         {/* Delivery Address Section */}
         <View style={styles.section}>
@@ -361,6 +425,7 @@ export default function CheckoutScreen() {
           ) : null}
         </View>
 
+
         {/* Payment Method Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
@@ -390,6 +455,7 @@ export default function CheckoutScreen() {
           ))}
         </View>
 
+
         {/* Price Breakdown Section */}
         {checkoutItems.length > 0 && (
           <View style={styles.section}>
@@ -410,8 +476,10 @@ export default function CheckoutScreen() {
           </View>
         )}
 
+
         <View style={styles.bottomPadding} />
       </ScrollView>
+
 
       {/* Place Order Button */}
       <View style={styles.bottomBar}>
@@ -437,6 +505,7 @@ export default function CheckoutScreen() {
         </TouchableOpacity>
       </View>
 
+
       {/* GCash/Maya Modal */}
       <Modal visible={showPaymentModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -449,6 +518,7 @@ export default function CheckoutScreen() {
             </View>
             <Text style={styles.modalSubtitle}>Enter your payment details</Text>
 
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Mobile Number *</Text>
               <TextInput
@@ -460,6 +530,7 @@ export default function CheckoutScreen() {
               />
             </View>
 
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Reference Number *</Text>
               <TextInput
@@ -469,6 +540,7 @@ export default function CheckoutScreen() {
                 onChangeText={setReferenceNumber}
               />
             </View>
+
 
             <TouchableOpacity
               style={styles.confirmButton}
@@ -484,6 +556,7 @@ export default function CheckoutScreen() {
         </View>
       </Modal>
 
+
       {/* Credit Card Modal */}
       <Modal visible={showCreditCardModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -494,6 +567,7 @@ export default function CheckoutScreen() {
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
+
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Card Number *</Text>
@@ -507,6 +581,7 @@ export default function CheckoutScreen() {
               />
             </View>
 
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Cardholder Name *</Text>
               <TextInput
@@ -516,6 +591,7 @@ export default function CheckoutScreen() {
                 onChangeText={setCardName}
               />
             </View>
+
 
             <View style={styles.rowInputs}>
               <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
@@ -543,6 +619,7 @@ export default function CheckoutScreen() {
               </View>
             </View>
 
+
             <TouchableOpacity
               style={styles.confirmButton}
               onPress={() => {
@@ -556,6 +633,7 @@ export default function CheckoutScreen() {
           </View>
         </View>
       </Modal>
+
 
       {/* Success Modal */}
       <Modal visible={showOrderSuccess} animationType="fade" transparent>
@@ -594,6 +672,8 @@ export default function CheckoutScreen() {
   );
 }
 
+
+// Styles remain the same (I copied them from your original)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FBF8F4" },
   header: {
@@ -636,7 +716,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   emptyCartContainer: { alignItems: "center", paddingVertical: 20 },
-  emptyCartText: { fontSize: 14, color: "#8F796F", marginBottom: 12 },
+  emptyCartText: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginBottom: 12,
+    marginTop: 8,
+  },
   goToCartButton: {
     backgroundColor: "#C35822",
     paddingHorizontal: 20,
@@ -800,6 +885,7 @@ const styles = StyleSheet.create({
   placeOrderText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   processingContainer: { flexDirection: "row", alignItems: "center", gap: 8 },
 
+
   // Modal Styles
   modalOverlay: {
     flex: 1,
@@ -842,6 +928,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   confirmButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
+
 
   // Success Modal Styles
   successOverlay: {
