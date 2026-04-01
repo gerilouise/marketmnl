@@ -1,10 +1,14 @@
-// hooks/useFirebaseAuth.ts - Fix the sendOTP function
+// hooks/useFirebaseAuth.ts
 import { auth, db } from "@/lib/firebase";
+import * as Google from "expo-auth-session/providers/google";
 import { router } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   sendEmailVerification,
   sendPasswordResetEmail,
+  signInWithCredential,
   signInWithEmailAndPassword,
   signOut,
   User,
@@ -13,12 +17,120 @@ import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { useState } from "react";
 import { Alert } from "react-native";
 
+WebBrowser.maybeCompleteAuthSession();
+
 export const useFirebaseAuth = () => {
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
   // ============================================
-  // SIGN UP (Creates account and sends verification email)
+  // GOOGLE SIGN-IN CONFIGURATION
+  // ============================================
+  const [googleRequest, googleResponse, googlePromptAsync] =
+    Google.useAuthRequest({
+      expoClientId:
+        "6849567096-crlf30huc0i74bprblacb3kr5a6ii6an.apps.googleusercontent.com",
+      iosClientId:
+        "6849567096-crlf30huc0i74bprblacb3kr5a6ii6an.apps.googleusercontent.com",
+      androidClientId:
+        "6849567096-crlf30huc0i74bprblacb3kr5a6ii6an.apps.googleusercontent.com",
+      webClientId:
+        "6849567096-crlf30huc0i74bprblacb3kr5a6ii6an.apps.googleusercontent.com",
+      scopes: ["profile", "email", "openid"],
+      responseType: "id_token",
+    });
+
+  // ============================================
+  // GOOGLE SIGN-IN FUNCTION - FIXED
+  // ============================================
+  const signInWithGoogle = async () => {
+    setLoading(true);
+    try {
+      console.log("🔐 Starting Google sign in...");
+
+      const result = await googlePromptAsync();
+
+      console.log("Google result:", result);
+
+      if (result?.type === "success") {
+        // Try to get id_token from different possible locations
+        let id_token = result.params?.id_token;
+
+        // If id_token is not in params, try to get from authentication
+        if (!id_token && result.params?.access_token) {
+          // For some configurations, we need to exchange access_token
+          console.log("No id_token, trying with access_token");
+          const credential = GoogleAuthProvider.credential(
+            null,
+            result.params.access_token,
+          );
+          const userCredential = await signInWithCredential(auth, credential);
+          const firebaseUser = userCredential.user;
+
+          console.log(
+            "✅ Google sign in successful with access_token:",
+            firebaseUser.uid,
+          );
+          await handleUserProfile(firebaseUser);
+          return true;
+        }
+
+        if (id_token) {
+          const credential = GoogleAuthProvider.credential(id_token);
+          const userCredential = await signInWithCredential(auth, credential);
+          const firebaseUser = userCredential.user;
+
+          console.log("✅ Google sign in successful:", firebaseUser.uid);
+          await handleUserProfile(firebaseUser);
+          return true;
+        } else {
+          throw new Error("No id_token or access_token received from Google");
+        }
+      } else if (result?.type === "error") {
+        console.log("Google sign in error:", result.error);
+        Alert.alert("Error", result.error?.message || "Google sign in failed");
+        return false;
+      }
+      return false;
+    } catch (error: any) {
+      console.error("❌ Google sign in failed:", error);
+      Alert.alert("Error", error.message || "Google sign in failed");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper function to handle user profile
+  const handleUserProfile = async (firebaseUser: User) => {
+    const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+
+    if (!userDoc.exists()) {
+      const nameParts = firebaseUser.displayName?.split(" ") || ["", ""];
+      const profileData = {
+        uid: firebaseUser.uid,
+        email: firebaseUser.email,
+        fullName: firebaseUser.displayName || "",
+        firstName: nameParts[0] || "",
+        lastName: nameParts.slice(1).join(" ") || "",
+        phone: firebaseUser.phoneNumber || "",
+        photoURL: firebaseUser.photoURL,
+        userType: "buyer",
+        emailVerified: firebaseUser.emailVerified,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+
+      await setDoc(doc(db, "users", firebaseUser.uid), profileData);
+      console.log("✅ User profile created in Firestore");
+    }
+
+    Alert.alert("Success", "Logged in successfully with Google!");
+    router.replace("/(tabs)");
+  };
+
+  // ============================================
+  // SIGN UP
   // ============================================
   const signUp = async (
     email: string,
@@ -34,7 +146,6 @@ export const useFirebaseAuth = () => {
     try {
       console.log("📝 Creating account with Firebase...");
 
-      // 1. Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
@@ -44,11 +155,9 @@ export const useFirebaseAuth = () => {
 
       console.log("✅ User created in Auth:", user.uid);
 
-      // 2. Send email verification
       await sendEmailVerification(user);
       console.log("📧 Verification email sent");
 
-      // 3. Create user profile in Firestore
       const nameParts = userData.fullName.split(" ");
       const profileData = {
         uid: user.uid,
@@ -66,7 +175,6 @@ export const useFirebaseAuth = () => {
       await setDoc(doc(db, "users", user.uid), profileData);
       console.log("✅ User profile created in Firestore");
 
-      // 4. If seller, create seller profile
       if (userData.userType === "seller" && userData.storeName) {
         const sellerData = {
           uid: user.uid,
@@ -111,7 +219,7 @@ export const useFirebaseAuth = () => {
   };
 
   // ============================================
-  // SEND OTP (Simplified - just shows instructions)
+  // SEND OTP
   // ============================================
   const sendOTP = async (
     email: string,
@@ -122,14 +230,13 @@ export const useFirebaseAuth = () => {
       storeName?: string;
     },
   ) => {
-    // Just show instructions and use signUp instead
     Alert.alert(
       "Email Verification",
       "We'll send a verification email to your address. Please check your inbox.",
       [
         {
           text: "Continue",
-          onPress: () => signUp(email, "temporaryPassword123!", userData), // You should generate a random password here
+          onPress: () => signUp(email, "temporaryPassword123!", userData),
         },
       ],
     );
@@ -152,7 +259,6 @@ export const useFirebaseAuth = () => {
 
       console.log("✅ Login successful:", user.uid);
 
-      // Check if email is verified
       if (!user.emailVerified) {
         Alert.alert(
           "Email Not Verified",
@@ -162,14 +268,12 @@ export const useFirebaseAuth = () => {
         return false;
       }
 
-      // Get user type from Firestore
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const userData = userDoc.data();
       const userType = userData?.userType || "buyer";
 
       Alert.alert("Success", "Logged in successfully!");
 
-      // FIX: Redirect to specific tab screens
       if (userType === "seller") {
         router.replace("/(seller)/dashboard");
       } else {
@@ -260,5 +364,6 @@ export const useFirebaseAuth = () => {
     resetPassword,
     getCurrentUser,
     getUserProfile,
+    signInWithGoogle,
   };
 };

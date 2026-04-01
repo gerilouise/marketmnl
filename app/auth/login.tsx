@@ -24,7 +24,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  const { loading, login, resetPassword } = useFirebaseAuth();
+  const { loading, login, resetPassword, signInWithGoogle } = useFirebaseAuth();
 
   const handleLogin = async () => {
     // Clear previous error
@@ -82,7 +82,6 @@ export default function LoginScreen() {
             <View style={styles.formHeader}>
               <Text style={styles.formTitle}>Login</Text>
             </View>
-
             {/* Error Message Display */}
             {loginError !== "" && (
               <View style={styles.errorContainer}>
@@ -90,7 +89,6 @@ export default function LoginScreen() {
                 <Text style={styles.errorText}>{loginError}</Text>
               </View>
             )}
-
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Email Address</Text>
               <View style={styles.inputContainer}>
@@ -115,7 +113,6 @@ export default function LoginScreen() {
                 />
               </View>
             </View>
-
             <View style={styles.inputWrapper}>
               <Text style={styles.label}>Password</Text>
               <View style={styles.inputContainer}>
@@ -149,7 +146,6 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-
             <TouchableOpacity
               style={styles.forgotPassword}
               onPress={handleForgotPassword}
@@ -157,7 +153,6 @@ export default function LoginScreen() {
             >
               <Text style={styles.forgotPasswordText}>Forgot password?</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[
                 styles.loginButton,
@@ -172,7 +167,6 @@ export default function LoginScreen() {
                 <Text style={styles.loginButtonText}>Log In</Text>
               )}
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.guestButton}
               onPress={handleBrowseAsGuest}
@@ -180,7 +174,6 @@ export default function LoginScreen() {
               <Ionicons name="eye-outline" size={20} color="#8F796F" />
               <Text style={styles.guestButtonText}>Browse as Guest</Text>
             </TouchableOpacity>
-
             <View style={styles.orContainer}>
               <View style={styles.orLine} />
               <Text style={styles.orText}>OR</Text>
@@ -190,12 +183,11 @@ export default function LoginScreen() {
             <View style={styles.socialContainer}>
               <TouchableOpacity
                 style={styles.socialButton}
-                onPress={() =>
-                  Alert.alert(
-                    "Coming Soon",
-                    "Google login will be available soon!",
-                  )
-                }
+                onPress={() => {
+                  console.log("Google button pressed");
+                  signInWithGoogle();
+                }}
+                disabled={loading}
               >
                 <Ionicons name="logo-google" size={24} color="#DB4437" />
                 <Text style={styles.socialButtonText}>Google</Text>
