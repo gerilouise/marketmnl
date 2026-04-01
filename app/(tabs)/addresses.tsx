@@ -17,14 +17,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddressesScreen() {
-  const {
-    addresses,
-    loading,
-    setDefaultAddress,
-    deleteAddress,
-    fetchAddresses,
-  } = useFirebaseProfile();
-  const [showForm, setShowForm] = useState(false);
+  const { addresses, loading, setDefaultAddress, fetchAddresses } =
+    useFirebaseProfile();
+  const [deletingAddressId, setDeletingAddressId] = useState<string | null>(
+    null,
+  );
 
   // Debug: Log all addresses in state
   useEffect(() => {
@@ -36,98 +33,92 @@ export default function AddressesScreen() {
     });
   }, [addresses]);
 
-  // Test direct delete function
-  const testDirectDelete = async () => {
-    if (addresses.length === 0) {
-      Alert.alert("No addresses", "No addresses to test");
-      return;
-    }
-
-    const firstAddress = addresses[0];
-    console.log("🔧 TESTING DIRECT DELETE for:", firstAddress.id);
-    console.log("Address name:", firstAddress.fullName);
+  // ========== DIRECT DELETE TEST FUNCTION (gaya sa cart) ==========
+  const directDeleteTest = async (addressId: string, addressName: string) => {
+    console.log("=== DIRECT DELETE TEST ===");
+    console.log("Address ID to delete:", addressId);
+    console.log("Address Name:", addressName);
 
     try {
-      const addressRef = doc(db, "addresses", firstAddress.id);
+      const addressRef = doc(db, "addresses", addressId);
       await deleteDoc(addressRef);
-      console.log("✅ TEST DELETE SUCCESSFUL!");
+      console.log("✅ DIRECT DELETE SUCCESSFUL!");
 
-      // Refresh the addresses
-      await fetchAddresses();
-
-      Alert.alert("Success", `Address "${firstAddress.fullName}" deleted!`);
+      await fetchAddresses(); // Refresh the addresses list
+      Alert.alert("Success", `"${addressName}" removed from addresses`);
+      return true;
     } catch (error: any) {
-      console.error("❌ TEST DELETE FAILED:", error);
-      console.error("Error code:", error.code);
-      console.error("Error message:", error.message);
-      Alert.alert("Test Failed", `${error.code}: ${error.message}`);
+      console.error("❌ Direct delete failed:", error);
+      Alert.alert("Error", error.message);
+      return false;
     }
   };
+  // ==================================================================
 
   const handleSetDefault = async (id: string) => {
     await setDefaultAddress(id);
   };
 
-  const handleDelete = (id: string) => {
-    console.log("🗑️ Delete button pressed for address ID:", id);
-    Alert.alert(
-      "Delete Address",
-      "Are you sure you want to delete this address?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          onPress: async () => {
-            console.log("✅ Confirmed delete for:", id);
-            const result = await deleteAddress(id);
-            console.log("Delete result:", result ? "SUCCESS" : "FAILED");
-          },
-          style: "destructive",
-        },
-      ],
+  const renderAddress = ({ item }: { item: AddressData }) => {
+    const isDeleting = deletingAddressId === item.id;
+
+    return (
+      <View style={styles.addressCard}>
+        <View style={styles.addressHeader}>
+          <View style={styles.labelContainer}>
+            <Text style={styles.addressLabel}>{item.label || "Address"}</Text>
+            {item.isDefault && (
+              <View style={styles.defaultBadge}>
+                <Text style={styles.defaultText}>Default</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              onPress={() => router.push(`/(tabs)/edit-address?id=${item.id}`)}
+              disabled={isDeleting}
+            >
+              <Ionicons name="create-outline" size={20} color="#8F796F" />
+            </TouchableOpacity>
+
+            {/* TEST BUTTON - gaya ng sa cart.tsx */}
+            <TouchableOpacity
+              style={styles.testDeleteButton}
+              onPress={async () => {
+                setDeletingAddressId(item.id);
+                await directDeleteTest(item.id, item.fullName);
+                setDeletingAddressId(null);
+              }}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons name="trash" size={18} color="#FFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <Text style={styles.addressName}>{item.fullName}</Text>
+        <Text style={styles.addressPhone}>{item.phone}</Text>
+        <Text style={styles.addressText}>
+          {item.street}, {item.barangay}, {item.city}, {item.province}{" "}
+          {item.zipCode}
+        </Text>
+
+        {!item.isDefault && (
+          <TouchableOpacity
+            style={styles.setDefaultButton}
+            onPress={() => handleSetDefault(item.id)}
+            disabled={isDeleting}
+          >
+            <Text style={styles.setDefaultText}>Set as Default</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     );
   };
-
-  const renderAddress = ({ item }: { item: AddressData }) => (
-    <View style={styles.addressCard}>
-      <View style={styles.addressHeader}>
-        <View style={styles.labelContainer}>
-          <Text style={styles.addressLabel}>{item.label || "Address"}</Text>
-          {item.isDefault && (
-            <View style={styles.defaultBadge}>
-              <Text style={styles.defaultText}>Default</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.actionButtons}>
-          <TouchableOpacity
-            onPress={() => router.push(`/(tabs)/edit-address?id=${item.id}`)}
-          >
-            <Ionicons name="create-outline" size={20} color="#8F796F" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => handleDelete(item.id)}>
-            <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <Text style={styles.addressName}>{item.fullName}</Text>
-      <Text style={styles.addressPhone}>{item.phone}</Text>
-      <Text style={styles.addressText}>
-        {item.street}, {item.barangay}, {item.city}, {item.province}{" "}
-        {item.zipCode}
-      </Text>
-
-      {!item.isDefault && (
-        <TouchableOpacity
-          style={styles.setDefaultButton}
-          onPress={() => handleSetDefault(item.id)}
-        >
-          <Text style={styles.setDefaultText}>Set as Default</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
 
   if (loading) {
     return (
@@ -147,17 +138,9 @@ export default function AddressesScreen() {
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Shipping Addresses</Text>
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <TouchableOpacity
-            onPress={testDirectDelete}
-            style={styles.testButton}
-          >
-            <Text style={styles.testButtonText}>TEST</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/add-address")}>
-            <Ionicons name="add-circle" size={28} color="#C35822" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={() => router.push("/(tabs)/add-address")}>
+          <Ionicons name="add-circle" size={28} color="#C35822" />
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -210,18 +193,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#32221B",
   },
-  testButton: {
-    backgroundColor: "#FF9800",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 5,
-  },
-  testButtonText: {
-    color: "#FFF",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
   list: {
     padding: 20,
   },
@@ -266,6 +237,19 @@ const styles = StyleSheet.create({
   actionButtons: {
     flexDirection: "row",
     gap: 16,
+  },
+  testDeleteButton: {
+    backgroundColor: "#db0606",
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   addressName: {
     fontSize: 15,
