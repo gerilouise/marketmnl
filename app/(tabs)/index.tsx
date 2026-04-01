@@ -70,7 +70,7 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-    router.push("/(tabs)/chat-list");
+    // REMOVED: router.push("/(tabs)/chat-list"); - This was the problem!
   };
 
   useEffect(() => {

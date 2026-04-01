@@ -1,29 +1,27 @@
 // app/(tabs)/orders.tsx
+import { cancelOrder } from "@/app/services/orders";
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
-    addDoc,
-    collection,
-    deleteDoc,
-    doc,
-    getDocs,
-    query,
-    Timestamp,
-    where,
+  collection,
+  getDocs,
+  query,
+  Timestamp,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    Modal,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -78,7 +76,11 @@ const STATUS_TABS: { id: OrderStatus; label: string; icon: string }[] = [
   { id: "pending", label: "Pending", icon: "time-outline" },
   { id: "confirmed", label: "Confirmed", icon: "checkmark-circle-outline" },
   { id: "shipped", label: "Shipped", icon: "car-outline" },
-  { id: "delivered", label: "Delivered", icon: "checkmark-done-circle-outline" },
+  {
+    id: "delivered",
+    label: "Delivered",
+    icon: "checkmark-done-circle-outline",
+  },
   { id: "cancelled", label: "Cancelled", icon: "close-circle-outline" },
 ];
 
@@ -90,7 +92,9 @@ export default function OrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderModal, setShowOrderModal] = useState(false);
-  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
+    null,
+  );
 
   const loadOrders = async () => {
     try {
@@ -102,14 +106,31 @@ export default function OrdersScreen() {
         return;
       }
 
-      // Query without orderBy to avoid index requirement
+      console.log("🔄 Loading orders for user:", user.uid);
+
+      // Fetch from orders collection (active orders)
       const ordersRef = collection(db, "orders");
       const q = query(ordersRef, where("userId", "==", user.uid));
       const ordersSnapshot = await getDocs(q);
 
+      // Fetch from cancelled_orders collection
+      const cancelledOrdersRef = collection(db, "cancelled_orders");
+      const cancelledQ = query(
+        cancelledOrdersRef,
+        where("userId", "==", user.uid),
+      );
+      const cancelledSnapshot = await getDocs(cancelledQ);
+
       const ordersList: Order[] = [];
 
+      // Add active orders
       ordersSnapshot.forEach((doc) => {
+        const data = doc.data();
+        ordersList.push({ id: doc.id, ...data } as Order);
+      });
+
+      // Add cancelled orders
+      cancelledSnapshot.forEach((doc) => {
         const data = doc.data();
         ordersList.push({ id: doc.id, ...data } as Order);
       });
@@ -121,6 +142,10 @@ export default function OrdersScreen() {
         }
         return 0;
       });
+
+      console.log("✅ Total orders found:", ordersList.length);
+      console.log("  - Active:", ordersSnapshot.size);
+      console.log("  - Cancelled:", cancelledSnapshot.size);
 
       setOrders(ordersList);
       filterOrders(activeTab, ordersList);
@@ -145,7 +170,7 @@ export default function OrdersScreen() {
   useFocusEffect(
     useCallback(() => {
       loadOrders();
-    }, [])
+    }, []),
   );
 
   const handleTabChange = (tabId: OrderStatus) => {
@@ -209,6 +234,7 @@ export default function OrdersScreen() {
     }
   };
 
+  // FIXED: Cancel order using the cancelOrder service
   const handleCancelOrder = async (order: Order) => {
     Alert.alert(
       "Cancel Order",
@@ -221,39 +247,52 @@ export default function OrdersScreen() {
           onPress: async () => {
             setCancellingOrderId(order.id);
             try {
-              const user = auth.currentUser;
-              if (!user) throw new Error("User not logged in");
+              console.log("🔴 Cancelling order:", order.id, order.orderNumber);
 
-              const orderRef = doc(db, "orders", order.id);
-              await deleteDoc(orderRef);
+              // Use the cancelOrder service to move to cancelled_orders collection
+              const result = await cancelOrder(order.id, order);
 
-              await loadOrders();
+              if (result.success) {
+                console.log("✅ Order cancelled successfully!");
 
-              if (showOrderModal) {
-                setShowOrderModal(false);
-                setSelectedOrder(null);
+                // Reload orders to refresh the list
+                await loadOrders();
+
+                // Close modal if open
+                if (showOrderModal) {
+                  setShowOrderModal(false);
+                  setSelectedOrder(null);
+                }
+
+                Alert.alert(
+                  "Success",
+                  `Order ${order.orderNumber} has been cancelled`,
+                );
+              } else {
+                throw new Error("Cancel order failed");
               }
-
-              Alert.alert("Success", `Order ${order.orderNumber} has been cancelled`);
-            } catch (error) {
-              console.error("Error cancelling order:", error);
-              Alert.alert("Error", "Failed to cancel order. Please try again.");
+            } catch (error: any) {
+              console.error("❌ Error cancelling order:", error);
+              Alert.alert(
+                "Error",
+                error.message || "Failed to cancel order. Please try again.",
+              );
             } finally {
               setCancellingOrderId(null);
             }
           },
         },
-      ]
+      ],
     );
   };
 
   const formatDate = (timestamp: Timestamp) => {
     if (!timestamp) return "N/A";
     const date = timestamp.toDate();
-    return date.toLocaleDateString('en-US', { 
-      month: 'long', 
-      day: 'numeric',
-      year: 'numeric'
+    return date.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
     });
   };
 
@@ -281,6 +320,9 @@ export default function OrdersScreen() {
       );
     }
 
+    // Don't show cancel button for already cancelled orders
+    const isCancelled = item.status === "cancelled";
+
     return (
       <TouchableOpacity
         style={styles.orderCard}
@@ -300,7 +342,10 @@ export default function OrdersScreen() {
             ]}
           >
             <Text
-              style={[styles.statusText, { color: getStatusColor(item.status) }]}
+              style={[
+                styles.statusText,
+                { color: getStatusColor(item.status) },
+              ]}
             >
               {getStatusLabel(item.status)}
             </Text>
@@ -337,7 +382,10 @@ export default function OrdersScreen() {
               style={styles.trackButton}
               onPress={(e) => {
                 e.stopPropagation();
-                Alert.alert("Track Order", `Tracking info for ${item.orderNumber}`);
+                Alert.alert(
+                  "Track Order",
+                  `Tracking info for ${item.orderNumber}`,
+                );
               }}
             >
               <Text style={styles.trackButtonText}>Track Package</Text>
@@ -358,14 +406,25 @@ export default function OrdersScreen() {
 
         {/* Status Message */}
         <View style={styles.statusMessageContainer}>
-          <Ionicons 
-            name={item.status === "delivered" ? "checkmark-done-circle" : 
-                  item.status === "shipped" ? "car" :
-                  item.status === "cancelled" ? "close-circle" : "time-outline"} 
-            size={14} 
-            color={getStatusColor(item.status)} 
+          <Ionicons
+            name={
+              item.status === "delivered"
+                ? "checkmark-done-circle"
+                : item.status === "shipped"
+                  ? "car"
+                  : item.status === "cancelled"
+                    ? "close-circle"
+                    : "time-outline"
+            }
+            size={14}
+            color={getStatusColor(item.status)}
           />
-          <Text style={[styles.statusMessageText, { color: getStatusColor(item.status) }]}>
+          <Text
+            style={[
+              styles.statusMessageText,
+              { color: getStatusColor(item.status) },
+            ]}
+          >
             {getStatusMessage(item.status)}
           </Text>
         </View>
@@ -390,7 +449,10 @@ export default function OrdersScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Order Details</Text>
-              <TouchableOpacity onPress={closeOrderModal} style={styles.closeButton}>
+              <TouchableOpacity
+                onPress={closeOrderModal}
+                style={styles.closeButton}
+              >
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
@@ -399,19 +461,25 @@ export default function OrdersScreen() {
               {/* Order Number */}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Order #</Text>
-                <Text style={styles.detailValue}>{selectedOrder.orderNumber}</Text>
+                <Text style={styles.detailValue}>
+                  {selectedOrder.orderNumber}
+                </Text>
               </View>
 
               {/* Order Date */}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Order Date</Text>
-                <Text style={styles.detailValue}>{formatDate(selectedOrder.createdAt)}</Text>
+                <Text style={styles.detailValue}>
+                  {formatDate(selectedOrder.createdAt)}
+                </Text>
               </View>
 
               {/* Payment Method */}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Payment Method</Text>
-                <Text style={styles.detailValue}>{selectedOrder.paymentMethod}</Text>
+                <Text style={styles.detailValue}>
+                  {selectedOrder.paymentMethod}
+                </Text>
               </View>
 
               {/* Order Status */}
@@ -421,7 +489,8 @@ export default function OrdersScreen() {
                   style={[
                     styles.statusBadge,
                     {
-                      backgroundColor: getStatusColor(selectedOrder.status) + "20",
+                      backgroundColor:
+                        getStatusColor(selectedOrder.status) + "20",
                       alignSelf: "flex-start",
                     },
                   ]}
@@ -439,17 +508,43 @@ export default function OrdersScreen() {
 
               {/* Status Message */}
               <View style={styles.modalStatusMessage}>
-                <Ionicons 
-                  name={selectedOrder.status === "delivered" ? "checkmark-done-circle" : 
-                        selectedOrder.status === "shipped" ? "car" :
-                        selectedOrder.status === "cancelled" ? "close-circle" : "time-outline"} 
-                  size={16} 
-                  color={getStatusColor(selectedOrder.status)} 
+                <Ionicons
+                  name={
+                    selectedOrder.status === "delivered"
+                      ? "checkmark-done-circle"
+                      : selectedOrder.status === "shipped"
+                        ? "car"
+                        : selectedOrder.status === "cancelled"
+                          ? "close-circle"
+                          : "time-outline"
+                  }
+                  size={16}
+                  color={getStatusColor(selectedOrder.status)}
                 />
-                <Text style={[styles.modalStatusMessageText, { color: getStatusColor(selectedOrder.status) }]}>
+                <Text
+                  style={[
+                    styles.modalStatusMessageText,
+                    { color: getStatusColor(selectedOrder.status) },
+                  ]}
+                >
                   {getStatusMessage(selectedOrder.status)}
                 </Text>
               </View>
+
+              {/* Cancellation Info */}
+              {selectedOrder.status === "cancelled" &&
+                selectedOrder.cancelledAt && (
+                  <View style={styles.cancellationInfo}>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={16}
+                      color="#F44336"
+                    />
+                    <Text style={styles.cancellationText}>
+                      Cancelled on {formatDate(selectedOrder.cancelledAt)}
+                    </Text>
+                  </View>
+                )}
 
               <View style={styles.divider} />
 
@@ -481,19 +576,25 @@ export default function OrdersScreen() {
               {/* Subtotal */}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Subtotal</Text>
-                <Text style={styles.detailValue}>₱{selectedOrder.subtotal.toFixed(2)}</Text>
+                <Text style={styles.detailValue}>
+                  ₱{selectedOrder.subtotal.toFixed(2)}
+                </Text>
               </View>
 
               {/* Shipping Fee */}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Shipping Fee</Text>
-                <Text style={styles.detailValue}>₱{selectedOrder.shippingFee.toFixed(2)}</Text>
+                <Text style={styles.detailValue}>
+                  ₱{selectedOrder.shippingFee.toFixed(2)}
+                </Text>
               </View>
 
               {/* Total */}
               <View style={[styles.detailRow, styles.totalRow]}>
                 <Text style={styles.totalLabelModal}>Total</Text>
-                <Text style={styles.totalAmountModal}>₱{selectedOrder.total.toFixed(2)}</Text>
+                <Text style={styles.totalAmountModal}>
+                  ₱{selectedOrder.total.toFixed(2)}
+                </Text>
               </View>
 
               <View style={styles.divider} />
@@ -502,13 +603,22 @@ export default function OrdersScreen() {
               {selectedOrder.address && (
                 <View style={styles.addressSection}>
                   <Text style={styles.addressTitle}>Shipping Address</Text>
-                  <Text style={styles.addressName}>{selectedOrder.address.fullName}</Text>
-                  <Text style={styles.addressPhone}>{selectedOrder.address.phone}</Text>
-                  <Text style={styles.addressText}>
-                    {selectedOrder.address.street}, {selectedOrder.address.barangay}, {selectedOrder.address.city}
-                    , {selectedOrder.address.province} {selectedOrder.address.zipCode}
+                  <Text style={styles.addressName}>
+                    {selectedOrder.address.fullName}
                   </Text>
-                  <Text style={styles.addressLabel}>Label: {selectedOrder.address.label}</Text>
+                  <Text style={styles.addressPhone}>
+                    {selectedOrder.address.phone}
+                  </Text>
+                  <Text style={styles.addressText}>
+                    {selectedOrder.address.street},{" "}
+                    {selectedOrder.address.barangay},{" "}
+                    {selectedOrder.address.city},{" "}
+                    {selectedOrder.address.province}{" "}
+                    {selectedOrder.address.zipCode}
+                  </Text>
+                  <Text style={styles.addressLabel}>
+                    Label: {selectedOrder.address.label}
+                  </Text>
                 </View>
               )}
             </ScrollView>
@@ -537,7 +647,10 @@ export default function OrdersScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Orders</Text>
@@ -554,7 +667,10 @@ export default function OrdersScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Orders</Text>
@@ -562,8 +678,13 @@ export default function OrdersScreen() {
         </View>
         <View style={styles.notLoggedInContainer}>
           <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
-          <Text style={styles.notLoggedInText}>Please log in to view your orders</Text>
-          <TouchableOpacity style={styles.loginButton} onPress={() => router.push("/auth/login")}>
+          <Text style={styles.notLoggedInText}>
+            Please log in to view your orders
+          </Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push("/auth/login")}
+          >
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
         </View>
@@ -574,14 +695,17 @@ export default function OrdersScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Orders</Text>
         <Text style={styles.orderCount}>{filteredOrders.length} orders</Text>
       </View>
 
-      {/* Status Tabs - Styled like browse page */}
+      {/* Status Tabs */}
       <View style={styles.tabsWrapper}>
         <ScrollView
           horizontal
@@ -589,7 +713,7 @@ export default function OrdersScreen() {
           contentContainerStyle={styles.tabsScrollContent}
         >
           {STATUS_TABS.map((tab) => {
-            const count = orders.filter(o => o.status === tab.id).length;
+            const count = orders.filter((o) => o.status === tab.id).length;
             return (
               <TouchableOpacity
                 key={tab.id}
@@ -613,8 +737,18 @@ export default function OrdersScreen() {
                   {tab.label}
                 </Text>
                 {count > 0 && (
-                  <View style={[styles.tabBadge, activeTab === tab.id && styles.tabBadgeActive]}>
-                    <Text style={[styles.tabBadgeText, activeTab === tab.id && styles.tabBadgeTextActive]}>
+                  <View
+                    style={[
+                      styles.tabBadge,
+                      activeTab === tab.id && styles.tabBadgeActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.tabBadgeText,
+                        activeTab === tab.id && styles.tabBadgeTextActive,
+                      ]}
+                    >
                       {count}
                     </Text>
                   </View>
@@ -730,7 +864,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  // Tabs Styles - Matching browse page
   tabsWrapper: {
     marginVertical: 12,
     paddingHorizontal: 16,
@@ -1100,6 +1233,21 @@ const styles = StyleSheet.create({
   modalStatusMessageText: {
     fontSize: 13,
     fontWeight: "500",
+    flex: 1,
+  },
+  cancellationInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 10,
+    backgroundColor: "#FFEBEE",
+    borderRadius: 8,
+    gap: 8,
+  },
+  cancellationText: {
+    fontSize: 12,
+    color: "#F44336",
     flex: 1,
   },
 });

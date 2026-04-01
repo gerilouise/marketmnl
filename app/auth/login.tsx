@@ -29,7 +29,7 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     // Clear previous error
     setLoginError("");
-    
+
     if (!email || !password) {
       setLoginError("Please fill in all fields");
       Alert.alert("Error", "Please fill in all fields");
@@ -44,7 +44,7 @@ export default function LoginScreen() {
     }
 
     const success = await login(email, password);
-    
+
     if (!success) {
       setLoginError("Invalid email or password. Please try again.");
     }
