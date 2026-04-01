@@ -1,4 +1,4 @@
-// app/(tabs)/profile.tsx
+// app/(tabs)/profile.tsx - With custom logout modal
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +14,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from '@/lib/firebase';
@@ -30,12 +31,36 @@ export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [followedShops, setFollowedShops] = useState<FollowedShop[]>([]);
   const [loadingFollowed, setLoadingFollowed] = useState(true);
+  const [wishlistCount, setWishlistCount] = useState(0);
+  const [debugMessage, setDebugMessage] = useState("Ready");
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const { profile, addresses, loading, fetchProfile, fetchAddresses } = useFirebaseProfile();
-  const { logout } = useFirebaseAuth();
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Set up real-time listener for wishlist count
+  useFocusEffect(
+    useCallback(() => {
+      const user = auth.currentUser;
+      if (!user) {
+        setWishlistCount(0);
+        return;
+      }
+
+      const wishlistRef = collection(db, 'wishlists');
+      const q = query(wishlistRef, where('userId', '==', user.uid));
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setWishlistCount(snapshot.size);
+        setDebugMessage(`Wishlist updated: ${snapshot.size} items`);
+      });
+
+      return () => unsubscribe();
+    }, [])
+  );
 
   // Set up real-time listener for followed shops
   useFocusEffect(
@@ -47,105 +72,83 @@ export default function ProfileScreen() {
         return;
       }
 
-      console.log("🔍 Setting up real-time listener for followed shops for user:", user.uid);
+      setDebugMessage(`Setting up follows listener...`);
       setLoadingFollowed(true);
 
-      // Create query for follows collection
       const followsRef = collection(db, 'follows');
       const q = query(followsRef, where('userId', '==', user.uid));
 
-      // Set up real-time listener
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        console.log(`📊 Real-time update: Found ${snapshot.size} follow records`);
-        
+        setDebugMessage(`Found ${snapshot.size} followed shops`);
         const shops: FollowedShop[] = [];
         
-        // Fetch shop details for each follow record
         for (const docSnapshot of snapshot.docs) {
           const followData = docSnapshot.data();
           const shopId = followData.shopId;
           
-          console.log(`📦 Looking up shop: ${shopId}`);
-          
-          // Try to get shop from sellers collection first
-          let shopName = "Unknown Store";
-          let shopImage = null;
-          let shopDescription = "";
-          
-          // Check sellers collection
           const sellerRef = doc(db, 'sellers', shopId);
           const sellerSnap = await getDoc(sellerRef);
           
           if (sellerSnap.exists()) {
             const sellerData = sellerSnap.data();
-            shopName = sellerData.storeName || "Market Seller";
-            shopImage = sellerData.imageUrl;
-            shopDescription = sellerData.description;
-            console.log(`✅ Found shop in sellers: ${shopName}`);
-          } else {
-            // Check stores collection as fallback
-            const storeRef = doc(db, 'stores', shopId);
-            const storeSnap = await getDoc(storeRef);
-            
-            if (storeSnap.exists()) {
-              const storeData = storeSnap.data();
-              shopName = storeData.storeName || "Market Store";
-              shopImage = storeData.imageUrl;
-              shopDescription = storeData.description;
-              console.log(`✅ Found shop in stores: ${shopName}`);
-            } else {
-              console.log(`❌ Shop not found: ${shopId}`);
-            }
+            shops.push({
+              id: shopId,
+              storeName: sellerData.storeName || "Market Seller",
+              storeImage: sellerData.imageUrl,
+              description: sellerData.description,
+            });
           }
-          
-          shops.push({
-            id: shopId,
-            storeName: shopName,
-            storeImage: shopImage,
-            description: shopDescription,
-          });
         }
         
-        console.log(`✅ Updated followed shops: ${shops.length} shops`);
         setFollowedShops(shops);
-        setLoadingFollowed(false);
-      }, (error) => {
-        console.error('❌ Error in follows listener:', error);
         setLoadingFollowed(false);
       });
 
-      // Cleanup listener when screen loses focus
-      return () => {
-        console.log("🛑 Cleaning up follows listener");
-        unsubscribe();
-      };
+      return () => unsubscribe();
     }, [])
   );
 
   const loadData = async () => {
+    setDebugMessage("Loading profile data...");
     await fetchProfile();
     await fetchAddresses();
+    setDebugMessage("Profile data loaded");
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      "Log Out",
-      "Are you sure you want to log out?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Log Out",
-          onPress: async () => {
-            await logout();
-          },
-          style: "destructive",
-        },
-      ],
-      { cancelable: true },
-    );
+  const showLogoutModal = () => {
+    setDebugMessage("Logout button pressed");
+    setLogoutModalVisible(true);
+  };
+
+  const confirmLogout = async () => {
+    setLoggingOut(true);
+    setDebugMessage("Logging out...");
+    setLogoutModalVisible(false);
+    
+    try {
+      // Sign out from Firebase
+      await auth.signOut();
+      setDebugMessage("✅ Signed out successfully!");
+      
+      // Clear local state
+      setFollowedShops([]);
+      setWishlistCount(0);
+      
+      // Navigate to login
+      setTimeout(() => {
+        router.replace("/auth/login");
+      }, 100);
+    } catch (error: any) {
+      setDebugMessage(`❌ Logout error: ${error.message}`);
+      Alert.alert("Error", "Failed to log out. Please try again.");
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
+  const cancelLogout = () => {
+    setLogoutModalVisible(false);
+    setDebugMessage("Logout cancelled");
   };
 
   const handleEditProfile = () => {
@@ -154,13 +157,6 @@ export default function ProfileScreen() {
 
   const navigateToStore = (storeId: string) => {
     router.push(`/store/${storeId}`);
-  };
-
-  const navigateToAllFollowing = () => {
-    router.push({
-      pathname: "/(tabs)/following",
-      params: { followedShops: JSON.stringify(followedShops) }
-    });
   };
 
   const navigateTo = (screen: string) => {
@@ -177,6 +173,9 @@ export default function ProfileScreen() {
       case "wishlist":
         router.push("/(tabs)/wishlist");
         break;
+      case "following":
+        router.push("/(tabs)/following");
+        break;
       case "settings":
         Alert.alert("Coming Soon", "Settings screen will be available soon!");
         break;
@@ -185,19 +184,23 @@ export default function ProfileScreen() {
     }
   };
 
-  const MenuItem = ({ icon, title, subtitle, onPress, rightIcon }: any) => (
+  const MenuItem = ({ icon, title, subtitle, onPress, badge }: any) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <View style={styles.menuItemLeft}>
         <View style={styles.iconContainer}>
-          <Ionicons name={icon} size={24} color="#8F796F" />
+          <Ionicons name={icon} size={22} color="#8F796F" />
         </View>
         <View style={styles.menuItemTextContainer}>
           <Text style={styles.menuItemTitle}>{title}</Text>
           {subtitle && <Text style={styles.menuItemSubtitle}>{subtitle}</Text>}
         </View>
       </View>
-      {rightIcon || (
-        <Ionicons name="chevron-forward" size={20} color="#8F796F" />
+      {badge ? (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{badge}</Text>
+        </View>
+      ) : (
+        <Ionicons name="chevron-forward" size={18} color="#C0B7AE" />
       )}
     </TouchableOpacity>
   );
@@ -206,287 +209,219 @@ export default function ProfileScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#C35822" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
       </View>
     );
   }
 
   const defaultAddress = addresses?.find((addr) => addr.isDefault);
+  const user = auth.currentUser;
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Profile</Text>
-          <View style={{ width: 24 }} />
+          <TouchableOpacity onPress={() => navigateTo("settings")}>
+            <Ionicons name="settings-outline" size={24} color="#32221B" />
+          </TouchableOpacity>
         </View>
 
+        {/* Debug Panel */}
+        <View style={styles.debugPanel}>
+          <Text style={styles.debugTitle}>🔍 Debug:</Text>
+          <Text style={styles.debugText}>{debugMessage}</Text>
+          <Text style={styles.debugTextSmall}>
+            User: {user ? user.uid.substring(0, 8) + "..." : "Not logged in"}
+          </Text>
+        </View>
+
+        {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileImageContainer}>
             {profile?.photoURL ? (
-              <Image
-                source={{ uri: profile.photoURL }}
-                style={styles.profileImage}
-              />
+              <Image source={{ uri: profile.photoURL }} style={styles.profileImage} />
             ) : (
               <View style={styles.profileImagePlaceholder}>
-                <Ionicons name="person" size={40} color="#8F796F" />
+                <Ionicons name="person" size={48} color="#C0B7AE" />
               </View>
             )}
-            <TouchableOpacity
-              style={styles.editImageButton}
-              onPress={handleEditProfile}
-            >
-              <Ionicons name="camera" size={16} color="#FFF" />
+            <TouchableOpacity style={styles.editImageButton} onPress={handleEditProfile}>
+              <Ionicons name="camera" size={14} color="#FFF" />
             </TouchableOpacity>
           </View>
 
           <Text style={styles.profileName}>{profile?.fullName || "User"}</Text>
-          <Text style={styles.profileEmail}>
-            {profile?.email || "No email"}
-          </Text>
+          <Text style={styles.profileEmail}>{profile?.email || user?.email || "No email"}</Text>
 
-          {profile?.age && (
-            <Text style={styles.profileAge}>Age: {profile.age}</Text>
-          )}
-          {profile?.birthdate && (
-            <Text style={styles.profileBirthdate}>
-              Born: {new Date(profile.birthdate).toLocaleDateString()}
-            </Text>
-          )}
-
-          <TouchableOpacity
-            style={styles.editProfileButton}
-            onPress={handleEditProfile}
-          >
-            <Ionicons name="pencil" size={16} color="#C35822" />
+          <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
+            <Ionicons name="pencil-outline" size={14} color="#C35822" />
             <Text style={styles.editProfileText}>Edit Profile</Text>
           </TouchableOpacity>
 
+          {/* Stats Row */}
           <View style={styles.statsRow}>
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => navigateTo("orders")}
-            >
+            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("orders")}>
               <Text style={styles.statNumber}>{profile?.ordersCount || 0}</Text>
               <Text style={styles.statLabel}>Orders</Text>
             </TouchableOpacity>
-
             <View style={styles.statDivider} />
-
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => navigateTo("reviews")}
-            >
-              <Text style={styles.statNumber}>
-                {profile?.reviewsCount || 0}
-              </Text>
+            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("reviews")}>
+              <Text style={styles.statNumber}>{profile?.reviewsCount || 0}</Text>
               <Text style={styles.statLabel}>Reviews</Text>
             </TouchableOpacity>
-
             <View style={styles.statDivider} />
-
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => navigateTo("wishlist")}
-            >
-              <Text style={styles.statNumber}>
-                {profile?.wishlistCount || 0}
-              </Text>
+            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("wishlist")}>
+              <Text style={styles.statNumber}>{wishlistCount}</Text>
               <Text style={styles.statLabel}>Wishlist</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Following Section - Real-time updates */}
-        <View style={styles.followingSection}>
-          <View style={styles.followingHeader}>
-            <View style={styles.followingHeaderLeft}>
-              <Ionicons name="heart-outline" size={20} color="#C35822" />
-              <Text style={styles.followingTitle}>Following</Text>
-              <Text style={styles.followingCount}>{followedShops.length} shops</Text>
-            </View>
-            {followedShops.length > 0 && (
-              <TouchableOpacity onPress={navigateToAllFollowing}>
-                <Text style={styles.viewAllText}>View All</Text>
-              </TouchableOpacity>
-            )}
+        {/* Address Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Shipping Address</Text>
+            <TouchableOpacity onPress={() => navigateTo("addresses")}>
+              <Text style={styles.sectionLink}>Manage</Text>
+            </TouchableOpacity>
           </View>
 
-          {loadingFollowed ? (
-            <View style={styles.loadingFollowedContainer}>
-              <ActivityIndicator size="small" color="#C35822" />
-              <Text style={styles.loadingFollowedText}>Loading followed shops...</Text>
-            </View>
-          ) : followedShops.length > 0 ? (
-            <View>
-              {followedShops.slice(0, 3).map((shop) => (
-                <TouchableOpacity 
-                  key={shop.id}
-                  style={styles.followedShopItem}
-                  onPress={() => navigateToStore(shop.id)}
-                >
-                  {shop.storeImage ? (
-                    <Image source={{ uri: shop.storeImage }} style={styles.shopAvatar} />
-                  ) : (
-                    <View style={styles.shopAvatarPlaceholder}>
-                      <Ionicons name="storefront-outline" size={24} color="#8F796F" />
-                    </View>
-                  )}
-                  
-                  <View style={styles.shopInfo}>
-                    <Text style={styles.shopName}>{shop.storeName}</Text>
-                    {shop.description && (
-                      <Text style={styles.shopDescription} numberOfLines={1}>
-                        {shop.description}
-                      </Text>
-                    )}
-                  </View>
-                  
-                  <Ionicons name="chevron-forward" size={20} color="#8F796F" />
-                </TouchableOpacity>
-              ))}
+          {defaultAddress ? (
+            <View style={styles.addressCard}>
+              <View style={styles.addressIconRow}>
+                <Ionicons name="location-outline" size={18} color="#C35822" />
+                <Text style={styles.addressLabelTag}>{defaultAddress.label}</Text>
+              </View>
+              <Text style={styles.addressName}>{defaultAddress.fullName}</Text>
+              <Text style={styles.addressText}>
+                {defaultAddress.street}, {defaultAddress.barangay}, {defaultAddress.city}
+              </Text>
+              <Text style={styles.addressText}>
+                {defaultAddress.province} {defaultAddress.zipCode}
+              </Text>
+              <Text style={styles.addressPhone}>{defaultAddress.phone}</Text>
             </View>
           ) : (
-            <View style={styles.emptyFollowing}>
-              <Ionicons name="heart-outline" size={40} color="#E0DAD1" />
-              <Text style={styles.emptyFollowingTitle}>
-                No shops followed yet
-              </Text>
-              <Text style={styles.emptyFollowingText}>
-                Follow your favorite shops to see their products and updates
-              </Text>
-              <TouchableOpacity 
-                style={styles.browseShopsButton}
-                onPress={() => router.push("/(tabs)/browse")}
-              >
-                <Text style={styles.browseShopsText}>Browse Shops</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.addAddressButton} onPress={() => router.push("/(tabs)/add-address")}>
+              <Ionicons name="add-circle-outline" size={22} color="#C35822" />
+              <Text style={styles.addAddressText}>Add a shipping address</Text>
+            </TouchableOpacity>
           )}
         </View>
 
-        {/* Default Address Section */}
-        {defaultAddress ? (
-          <TouchableOpacity
-            style={styles.defaultAddressCard}
-            onPress={() => navigateTo("addresses")}
-          >
-            <View style={styles.defaultAddressHeader}>
-              <Ionicons name="location" size={20} color="#C35822" />
-              <Text style={styles.defaultAddressTitle}>Default Address</Text>
+        {/* Quick Actions */}
+        <View style={styles.quickActionsRow}>
+          <TouchableOpacity style={styles.quickActionItem} onPress={() => navigateTo("orders")}>
+            <View style={styles.quickActionIcon}>
+              <Ionicons name="bag-handle-outline" size={22} color="#C35822" />
             </View>
-            <Text style={styles.defaultAddressName}>
-              {defaultAddress.fullName}
-            </Text>
-            <Text style={styles.defaultAddressPhone}>
-              {defaultAddress.phone}
-            </Text>
-            <Text style={styles.defaultAddressText}>
-              {defaultAddress.street}, {defaultAddress.barangay},{" "}
-              {defaultAddress.city}, {defaultAddress.province}{" "}
-              {defaultAddress.zipCode}
-            </Text>
-            <View style={styles.defaultAddressFooter}>
-              <Text style={styles.defaultAddressLabel}>
-                {defaultAddress.label}
-              </Text>
-              <TouchableOpacity onPress={() => navigateTo("addresses")}>
-                <Text style={styles.manageAddressText}>Manage Addresses</Text>
-              </TouchableOpacity>
+            <Text style={styles.quickActionLabel}>Orders</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickActionItem} onPress={() => router.push("/chatbot")}>
+            <View style={styles.quickActionIcon}>
+              <Ionicons name="chatbubble-ellipses-outline" size={22} color="#C35822" />
             </View>
+            <Text style={styles.quickActionLabel}>Chat</Text>
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.noAddressCard}
-            onPress={() => navigateTo("addresses")}
-          >
-            <Ionicons name="location-outline" size={32} color="#C35822" />
-            <Text style={styles.noAddressTitle}>No Address Added Yet</Text>
-            <Text style={styles.noAddressText}>
-              Add your first shipping address to start ordering
-            </Text>
-            <TouchableOpacity
-              style={styles.addAddressButton}
-              onPress={() => router.push("/(tabs)/add-address")}
-            >
-              <Text style={styles.addAddressButtonText}>Add Address</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        )}
-
-        <View style={styles.quickActions}>
-          <TouchableOpacity
-            style={styles.quickActionButton}
-            onPress={() => navigateTo("orders")}
-          >
-            <Ionicons name="bag-handle-outline" size={22} color="#C35822" />
-            <Text style={styles.quickActionText}>My Orders</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickActionButton}
-            onPress={() => router.push("/chatbot")}
-          >
-            <Ionicons name="chatbubble-outline" size={22} color="#C35822" />
-            <Text style={styles.quickActionText}>AI Chatbot</Text>
+          <TouchableOpacity style={styles.quickActionItem} onPress={() => navigateTo("following")}>
+            <View style={styles.quickActionIcon}>
+              <Ionicons name="heart-outline" size={22} color="#C35822" />
+            </View>
+            <Text style={styles.quickActionLabel}>Following</Text>
+            {followedShops.length > 0 && (
+              <View style={styles.quickActionBadge}>
+                <Text style={styles.quickActionBadgeText}>{followedShops.length}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
 
+        {/* Account Menu */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
-
           <MenuItem
             icon="location-outline"
-            title="Shipping Address"
-            subtitle={`${addresses?.length || 0} saved addresses`}
+            title="Addresses"
+            subtitle={`${addresses?.length || 0} saved`}
             onPress={() => navigateTo("addresses")}
           />
-
           <MenuItem
             icon="star-outline"
-            title="My Reviews"
-            subtitle={`${profile?.reviewsCount || 0} product reviews`}
+            title="Reviews"
+            subtitle={`${profile?.reviewsCount || 0} reviews`}
             onPress={() => navigateTo("reviews")}
           />
         </View>
 
+        {/* Preferences */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
-
           <View style={styles.menuItem}>
             <View style={styles.menuItemLeft}>
               <View style={styles.iconContainer}>
-                <Ionicons
-                  name="notifications-outline"
-                  size={24}
-                  color="#8F796F"
-                />
+                <Ionicons name="notifications-outline" size={22} color="#8F796F" />
               </View>
               <Text style={styles.menuItemTitle}>Notifications</Text>
             </View>
             <Switch
               value={notificationsEnabled}
               onValueChange={setNotificationsEnabled}
-              trackColor={{ false: "#E0DAD1", true: "#C35822" }}
+              trackColor={{ false: "#E8E2DC", true: "#C35822" }}
               thumbColor="#FFF"
             />
           </View>
-
-          <MenuItem
-            icon="settings-outline"
-            title="Settings"
-            onPress={() => navigateTo("settings")}
-          />
         </View>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={24} color="#C35822" />
+        {/* Logout Button - Red Outline */}
+        <TouchableOpacity style={styles.logoutButton} onPress={showLogoutModal}>
+          <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {/* Custom Logout Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={logoutModalVisible}
+        onRequestClose={cancelLogout}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIcon}>
+              <Ionicons name="log-out-outline" size={50} color="#FF3B30" />
+            </View>
+            <Text style={styles.modalTitle}>Log Out</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to log out?
+            </Text>
+            <Text style={styles.modalWarning}>You will need to log in again.</Text>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelModalButton]}
+                onPress={cancelLogout}
+                disabled={loggingOut}
+              >
+                <Text style={styles.cancelModalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.logoutModalButton]}
+                onPress={confirmLogout}
+                disabled={loggingOut}
+              >
+                {loggingOut ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.logoutModalButtonText}>Log Out</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -502,53 +437,74 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#FBF8F4",
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#8F796F",
-  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: "bold",
     color: "#32221B",
+  },
+  debugPanel: {
+    backgroundColor: "#FFF3E0",
+    marginHorizontal: 20,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#C35822",
+  },
+  debugTitle: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#C35822",
+    marginBottom: 4,
+  },
+  debugText: {
+    fontSize: 12,
+    color: "#32221B",
+    fontFamily: "monospace",
+    marginBottom: 2,
+  },
+  debugTextSmall: {
+    fontSize: 10,
+    color: "#8F796F",
+    fontFamily: "monospace",
   },
   profileCard: {
     backgroundColor: "#FFF",
     marginHorizontal: 20,
     borderRadius: 20,
-    padding: 20,
+    padding: 24,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.04,
     shadowRadius: 8,
-    elevation: 3,
-    marginBottom: 20,
+    elevation: 2,
+    marginBottom: 16,
   },
   profileImageContainer: {
     position: "relative",
-    marginBottom: 12,
+    marginBottom: 16,
   },
   profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     borderWidth: 2,
     borderColor: "#C35822",
   },
   profileImagePlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#E0DAD1",
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: "#F5F0EB",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -566,7 +522,7 @@ const styles = StyleSheet.create({
     borderColor: "#FFF",
   },
   profileName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#32221B",
     marginBottom: 4,
@@ -574,34 +530,23 @@ const styles = StyleSheet.create({
   profileEmail: {
     fontSize: 14,
     color: "#8F796F",
-    marginBottom: 4,
-  },
-  profileAge: {
-    fontSize: 14,
-    color: "#8F796F",
-    marginBottom: 2,
-  },
-  profileBirthdate: {
-    fontSize: 14,
-    color: "#8F796F",
     marginBottom: 12,
   },
   editProfileButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FBF8F4",
+    gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    marginBottom: 16,
     borderWidth: 1,
     borderColor: "#C35822",
+    marginBottom: 20,
   },
   editProfileText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "500",
     color: "#C35822",
-    marginLeft: 6,
   },
   statsRow: {
     flexDirection: "row",
@@ -619,7 +564,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     color: "#32221B",
-    marginBottom: 2,
+    marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
@@ -627,277 +572,142 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    height: "100%",
+    height: 36,
     backgroundColor: "#F0F0F0",
-  },
-  followingSection: {
-    backgroundColor: "#FFF",
-    marginHorizontal: 20,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  followingHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  followingHeaderLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  followingTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  followingCount: {
-    fontSize: 12,
-    color: "#8F796F",
-    backgroundColor: "#F5F5F5",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-  },
-  viewAllText: {
-    fontSize: 12,
-    color: "#C35822",
-    fontWeight: "500",
-  },
-  followedShopItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F5F5F5",
-  },
-  shopAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: 12,
-  },
-  shopAvatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#FBF8F4",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-  },
-  shopInfo: {
-    flex: 1,
-  },
-  shopName: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#32221B",
-    marginBottom: 2,
-  },
-  shopDescription: {
-    fontSize: 12,
-    color: "#8F796F",
-  },
-  loadingFollowedContainer: {
-    paddingVertical: 20,
-    alignItems: "center",
-  },
-  loadingFollowedText: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginTop: 8,
-  },
-  emptyFollowing: {
-    alignItems: "center",
-    paddingVertical: 24,
-  },
-  emptyFollowingTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  emptyFollowingText: {
-    fontSize: 13,
-    color: "#8F796F",
-    textAlign: "center",
-    marginBottom: 16,
-    paddingHorizontal: 20,
-  },
-  browseShopsButton: {
-    backgroundColor: "#C35822",
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 25,
-  },
-  browseShopsText: {
-    fontSize: 14,
-    color: "#FFF",
-    fontWeight: "600",
-  },
-  defaultAddressCard: {
-    backgroundColor: "#FFF",
-    marginHorizontal: 20,
-    marginBottom: 20,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#C35822",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  defaultAddressHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  defaultAddressTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#C35822",
-    marginLeft: 8,
-  },
-  defaultAddressName: {
-    fontSize: 15,
-    fontWeight: "500",
-    color: "#32221B",
-    marginBottom: 2,
-  },
-  defaultAddressPhone: {
-    fontSize: 14,
-    color: "#8F796F",
-    marginBottom: 4,
-  },
-  defaultAddressText: {
-    fontSize: 14,
-    color: "#666",
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  defaultAddressFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  defaultAddressLabel: {
-    fontSize: 12,
-    color: "#8F796F",
-    fontWeight: "500",
-    backgroundColor: "#F0F0F0",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-  },
-  manageAddressText: {
-    color: "#C35822",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  noAddressCard: {
-    backgroundColor: "#FFF",
-    marginHorizontal: 20,
-    marginBottom: 20,
-    borderRadius: 16,
-    padding: 24,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-    borderStyle: "dashed",
-  },
-  noAddressTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  noAddressText: {
-    fontSize: 14,
-    color: "#8F796F",
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  addAddressButton: {
-    backgroundColor: "#C35822",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-  },
-  addAddressButtonText: {
-    color: "#FFF",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  quickActions: {
-    flexDirection: "row",
-    marginHorizontal: 20,
-    marginBottom: 20,
-    gap: 12,
-  },
-  quickActionButton: {
-    flex: 1,
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  quickActionText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#32221B",
-    marginTop: 8,
   },
   section: {
     backgroundColor: "#FFF",
     marginHorizontal: 20,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.04,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
+  },
+  sectionLink: {
+    fontSize: 13,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  addressCard: {
+    backgroundColor: "#FEF5ED",
+    borderRadius: 12,
+    padding: 12,
+  },
+  addressIconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  addressLabelTag: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#C35822",
+    backgroundColor: "#FFF",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  addressName: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#32221B",
+    marginBottom: 2,
+  },
+  addressText: {
+    fontSize: 12,
+    color: "#666",
+    lineHeight: 16,
+  },
+  addressPhone: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 4,
+  },
+  addAddressButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 16,
+  },
+  addAddressText: {
+    fontSize: 14,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  quickActionsRow: {
+    flexDirection: "row",
+    marginHorizontal: 20,
+    gap: 12,
+    marginBottom: 16,
+  },
+  quickActionItem: {
+    flex: 1,
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    position: "relative",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  quickActionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#FEF5ED",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  quickActionLabel: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#32221B",
+  },
+  quickActionBadge: {
+    position: "absolute",
+    top: 6,
+    right: 12,
+    backgroundColor: "#C35822",
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  quickActionBadgeText: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#FFF",
   },
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F5F5F5",
+    borderBottomColor: "#F5F0EB",
   },
   menuItemLeft: {
     flexDirection: "row",
@@ -913,7 +723,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   menuItemTitle: {
-    fontSize: 15,
+    fontSize: 14,
     color: "#32221B",
     fontWeight: "500",
   },
@@ -922,6 +732,17 @@ const styles = StyleSheet.create({
     color: "#8F796F",
     marginTop: 2,
   },
+  badge: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  badgeText: {
+    fontSize: 12,
+    color: "#FFF",
+    fontWeight: "600",
+  },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -929,18 +750,87 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     marginHorizontal: 20,
     borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#C35822",
+    padding: 14,
+    gap: 8,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#FF3B30",
   },
   logoutText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "600",
-    color: "#C35822",
-    marginLeft: 8,
+    color: "#FF3B30",
   },
   bottomPadding: {
     height: 40,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalIcon: {
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalWarning: {
+    fontSize: 12,
+    color: "#FF3B30",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+  },
+  cancelModalButton: {
+    backgroundColor: "#F5F5F5",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  cancelModalButtonText: {
+    color: "#8F796F",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  logoutModalButton: {
+    backgroundColor: "#FF3B30",
+  },
+  logoutModalButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
