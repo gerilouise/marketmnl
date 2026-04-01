@@ -3,7 +3,7 @@ import { useCart } from "@/app/contexts/CartContext";
 import { createOrder } from "@/app/services/orders";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,9 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
-
 
 export default function CheckoutScreen() {
   const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } =
@@ -32,13 +30,16 @@ export default function CheckoutScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showOrderSuccess, setShowOrderSuccess] = useState(false);
   const [orderNumber, setOrderNumber] = useState("");
+  const [isAddressSelectedFromModal, setIsAddressSelectedFromModal] =
+    useState(false);
 
+  // Get params for selected address from select-address screen
+  const params = useLocalSearchParams();
 
   // GCash/Maya Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
-
 
   // Credit Card Modal
   const [showCreditCardModal, setShowCreditCardModal] = useState(false);
@@ -47,14 +48,23 @@ export default function CheckoutScreen() {
   const [expiryDate, setExpiryDate] = useState("");
   const [cvv, setCvv] = useState("");
 
-
   useEffect(() => {
     loadAddresses();
 
+    // Check if an address was passed back from select-address screen
+    if (params.selectedAddress) {
+      try {
+        const selectedAddr = JSON.parse(params.selectedAddress as string);
+        setSelectedAddress(selectedAddr);
+        setIsAddressSelectedFromModal(true); // Mark that we manually selected an address
+        console.log("📍 Address selected from checkout:", selectedAddr);
+      } catch (error) {
+        console.error("Error parsing selected address:", error);
+      }
+    }
 
     // IMPORTANT: Check if selectedItems has data
     console.log("🛒 Selected items from context:", selectedItems);
-
 
     if (selectedItems && selectedItems.length > 0) {
       setCheckoutItems(selectedItems);
@@ -71,16 +81,19 @@ export default function CheckoutScreen() {
         ],
       );
     }
-  }, []);
-
+  }, [params.selectedAddress]);
 
   const loadAddresses = async () => {
     await fetchAddresses();
   };
 
-
+  // Only set default address if no address was manually selected from the modal
   useEffect(() => {
-    if (addresses.length > 0) {
+    if (
+      addresses.length > 0 &&
+      !isAddressSelectedFromModal &&
+      !selectedAddress
+    ) {
       const defaultAddr = addresses.find((addr) => addr.isDefault);
       if (defaultAddr) {
         setSelectedAddress(defaultAddr);
@@ -88,8 +101,7 @@ export default function CheckoutScreen() {
         setSelectedAddress(addresses[0]);
       }
     }
-  }, [addresses]);
-
+  }, [addresses, isAddressSelectedFromModal, selectedAddress]);
 
   const calculateSubtotal = () => {
     return checkoutItems.reduce(
@@ -98,26 +110,22 @@ export default function CheckoutScreen() {
     );
   };
 
-
   const shippingFee = 50;
   const subtotal = calculateSubtotal();
   const total = subtotal + shippingFee;
 
-
   const handlePaymentSelection = () => {
     if (!selectedAddress) {
       Alert.alert("No Address", "Please add a shipping address first");
-      router.push("/(tabs)/addresses");
+      router.push("/checkout/select-address");
       return;
     }
-
 
     if (checkoutItems.length === 0) {
       Alert.alert("No Items", "No items selected for checkout");
       router.push("/(tabs)/cart");
       return;
     }
-
 
     if (selectedPayment === "Cash on Delivery") {
       processOrder();
@@ -128,10 +136,8 @@ export default function CheckoutScreen() {
     }
   };
 
-
   const processOrder = async (paymentDetails?: any) => {
     setIsProcessing(true);
-
 
     try {
       // Verify all items have sellerId
@@ -146,7 +152,6 @@ export default function CheckoutScreen() {
         return;
       }
 
-
       // Log the items
       console.log(
         "📦 Processing order with items:",
@@ -159,9 +164,7 @@ export default function CheckoutScreen() {
         })),
       );
 
-
-      // Prepare order data WITHOUT userId, orderNumber, createdAt, updatedAt, status
-      //因为这些会在 createOrder 函数中自动添加
+      // Prepare order data
       const orderData = {
         items: checkoutItems.map((item) => ({
           productId: item.productId,
@@ -189,33 +192,26 @@ export default function CheckoutScreen() {
         },
       };
 
-
       console.log(
         "🚀 Sending order to createOrder:",
         JSON.stringify(orderData, null, 2),
       );
 
-
       // Call createOrder with the correct parameter
       const result = await createOrder(orderData);
 
-
       if (result.success) {
         setOrderNumber(result.orderNumber);
-
 
         // Remove selected items from cart after successful order
         console.log("🗑️ Removing selected items from cart...");
         await removeSelectedItems();
 
-
         // Clear selected items in context
         setSelectedItems([]);
 
-
         // Reload cart to refresh
         await loadCart();
-
 
         console.log("✅ Order placed successfully, items removed from cart");
         setShowOrderSuccess(true);
@@ -240,7 +236,6 @@ export default function CheckoutScreen() {
     }
   };
 
-
   const validateGCashMaya = () => {
     if (!phoneNumber) {
       Alert.alert("Error", "Please enter your mobile number");
@@ -256,7 +251,6 @@ export default function CheckoutScreen() {
     }
     return true;
   };
-
 
   const validateCreditCard = () => {
     if (!cardNumber || cardNumber.replace(/\s/g, "").length < 16) {
@@ -278,24 +272,21 @@ export default function CheckoutScreen() {
     return true;
   };
 
-
-  const navigateToAddresses = () => {
-    router.push("/(tabs)/addresses");
+  // UPDATED: Navigate to select-address screen instead of addresses
+  const navigateToSelectAddress = () => {
+    router.push("/checkout/select-address");
   };
-
 
   const formatAddress = (address: any) => {
     if (!address) return "";
     return `${address.street}, ${address.barangay}, ${address.city}, ${address.province} ${address.zipCode}`;
   };
 
-
   const formatCardNumber = (text: string) => {
     const cleaned = text.replace(/\s/g, "");
     const groups = cleaned.match(/.{1,4}/g);
     return groups ? groups.join(" ") : cleaned;
   };
-
 
   const formatExpiryDate = (text: string) => {
     const cleaned = text.replace(/[^\d]/g, "");
@@ -305,13 +296,12 @@ export default function CheckoutScreen() {
     return cleaned;
   };
 
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => router.replace("/(tabs)/cart")}
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -326,12 +316,11 @@ export default function CheckoutScreen() {
     );
   }
 
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => router.replace("/(tabs)/cart")}
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -339,7 +328,6 @@ export default function CheckoutScreen() {
         <Text style={styles.headerTitle}>Checkout</Text>
         <View style={{ width: 40 }} />
       </View>
-
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -383,14 +371,13 @@ export default function CheckoutScreen() {
           )}
         </View>
 
-
-        {/* Delivery Address Section */}
+        {/* Delivery Address Section - UPDATED routing */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Address</Text>
           {addresses.length === 0 ? (
             <TouchableOpacity
               style={styles.addAddressButton}
-              onPress={navigateToAddresses}
+              onPress={navigateToSelectAddress}
             >
               <Ionicons name="add-circle-outline" size={24} color="#C35822" />
               <Text style={styles.addAddressText}>Add New Address</Text>
@@ -398,7 +385,7 @@ export default function CheckoutScreen() {
           ) : selectedAddress ? (
             <TouchableOpacity
               style={styles.addressCard}
-              onPress={navigateToAddresses}
+              onPress={navigateToSelectAddress}
             >
               <View style={styles.addressHeader}>
                 <Ionicons name="location-outline" size={20} color="#C35822" />
@@ -417,14 +404,13 @@ export default function CheckoutScreen() {
               </Text>
               <View style={styles.addressFooter}>
                 <Text style={styles.addressLabel}>{selectedAddress.label}</Text>
-                <TouchableOpacity onPress={navigateToAddresses}>
+                <TouchableOpacity onPress={navigateToSelectAddress}>
                   <Text style={styles.changeButtonText}>Change</Text>
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
           ) : null}
         </View>
-
 
         {/* Payment Method Section */}
         <View style={styles.section}>
@@ -455,7 +441,6 @@ export default function CheckoutScreen() {
           ))}
         </View>
 
-
         {/* Price Breakdown Section */}
         {checkoutItems.length > 0 && (
           <View style={styles.section}>
@@ -476,10 +461,8 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-
         <View style={styles.bottomPadding} />
       </ScrollView>
-
 
       {/* Place Order Button */}
       <View style={styles.bottomBar}>
@@ -505,7 +488,6 @@ export default function CheckoutScreen() {
         </TouchableOpacity>
       </View>
 
-
       {/* GCash/Maya Modal */}
       <Modal visible={showPaymentModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -518,7 +500,6 @@ export default function CheckoutScreen() {
             </View>
             <Text style={styles.modalSubtitle}>Enter your payment details</Text>
 
-
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Mobile Number *</Text>
               <TextInput
@@ -530,7 +511,6 @@ export default function CheckoutScreen() {
               />
             </View>
 
-
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Reference Number *</Text>
               <TextInput
@@ -540,7 +520,6 @@ export default function CheckoutScreen() {
                 onChangeText={setReferenceNumber}
               />
             </View>
-
 
             <TouchableOpacity
               style={styles.confirmButton}
@@ -556,7 +535,6 @@ export default function CheckoutScreen() {
         </View>
       </Modal>
 
-
       {/* Credit Card Modal */}
       <Modal visible={showCreditCardModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -567,7 +545,6 @@ export default function CheckoutScreen() {
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
-
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Card Number *</Text>
@@ -581,7 +558,6 @@ export default function CheckoutScreen() {
               />
             </View>
 
-
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Cardholder Name *</Text>
               <TextInput
@@ -591,7 +567,6 @@ export default function CheckoutScreen() {
                 onChangeText={setCardName}
               />
             </View>
-
 
             <View style={styles.rowInputs}>
               <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
@@ -619,7 +594,6 @@ export default function CheckoutScreen() {
               </View>
             </View>
 
-
             <TouchableOpacity
               style={styles.confirmButton}
               onPress={() => {
@@ -633,7 +607,6 @@ export default function CheckoutScreen() {
           </View>
         </View>
       </Modal>
-
 
       {/* Success Modal */}
       <Modal visible={showOrderSuccess} animationType="fade" transparent>
@@ -672,8 +645,7 @@ export default function CheckoutScreen() {
   );
 }
 
-
-// Styles remain the same (I copied them from your original)
+// Styles remain the same (kept from your original)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FBF8F4" },
   header: {
@@ -885,7 +857,6 @@ const styles = StyleSheet.create({
   placeOrderText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   processingContainer: { flexDirection: "row", alignItems: "center", gap: 8 },
 
-
   // Modal Styles
   modalOverlay: {
     flex: 1,
@@ -928,7 +899,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   confirmButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
-
 
   // Success Modal Styles
   successOverlay: {
