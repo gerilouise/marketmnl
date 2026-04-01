@@ -464,7 +464,7 @@ export const useFirebaseProfile = () => {
     }
   };
 
-  // Upload profile picture to Firebase Storage
+  // Upload profile picture to Firebase Storage - UPDATED
   const uploadProfilePicture = async (imageUri: string) => {
     try {
       const user = auth.currentUser;
@@ -476,8 +476,11 @@ export const useFirebaseProfile = () => {
       const response = await fetch(imageUri);
       const blob = await response.blob();
 
-      // Create storage reference
-      const storageRef = ref(storage, `profile_pictures/${user.uid}.jpg`);
+      // Create storage reference with folder structure
+      const storageRef = ref(
+        storage,
+        `profile_pictures/${user.uid}/avatar.jpg`,
+      );
 
       // Upload image
       await uploadBytes(storageRef, blob);
@@ -511,7 +514,7 @@ export const useFirebaseProfile = () => {
     }
   };
 
-  // Delete profile picture
+  // Delete profile picture - UPDATED
   const deleteProfilePicture = async () => {
     try {
       const user = auth.currentUser;
@@ -519,8 +522,11 @@ export const useFirebaseProfile = () => {
 
       setLoading(true);
 
-      // Delete from storage
-      const storageRef = ref(storage, `profile_pictures/${user.uid}.jpg`);
+      // Delete from storage with folder structure
+      const storageRef = ref(
+        storage,
+        `profile_pictures/${user.uid}/avatar.jpg`,
+      );
       await deleteObject(storageRef);
 
       // Update user profile in Firestore

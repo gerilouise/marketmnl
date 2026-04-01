@@ -1,5 +1,6 @@
 // app/(tabs)/orders.tsx
 import { auth, db } from "@/lib/firebase";
+import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
@@ -479,6 +480,7 @@ export default function OrdersScreen() {
   };
 
   // Execute the cancellation
+  // Execute the cancellation
   const executeCancel = async () => {
     if (!orderToCancel) return;
 
@@ -497,6 +499,24 @@ export default function OrdersScreen() {
         status: "cancelled",
         updatedAt: Timestamp.now(),
       });
+
+      // Create notification for cancellation
+      const notification = getOrderNotification(
+        orderToCancel.orderNumber,
+        "cancelled",
+      );
+      if (notification) {
+        await createNotification({
+          userId: user.uid,
+          title: notification.title,
+          message: notification.message,
+          type: notification.type,
+          orderId: orderToCancel.id,
+          orderNumber: orderToCancel.orderNumber,
+          read: false,
+          createdAt: Timestamp.now(),
+        });
+      }
 
       console.log("✅ Order cancelled successfully!");
 

@@ -1,10 +1,12 @@
 // app/(seller)/orders.tsx - No debug panel
 import { auth, db } from "@/lib/firebase";
+import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   query,
   Timestamp,
@@ -179,6 +181,11 @@ export default function OrdersScreen() {
       const orderRef = doc(db, "orders", orderId);
       const dbStatus = newStatus.toLowerCase();
 
+      // Get the order to get customer ID before updating
+      const orderDoc = await getDoc(orderRef);
+      const orderData = orderDoc.data();
+      const customerId = orderData?.userId;
+
       await updateDoc(orderRef, {
         status: dbStatus,
         updatedAt: Timestamp.now(),
@@ -196,6 +203,30 @@ export default function OrdersScreen() {
         setSelectedOrder((prev) =>
           prev ? { ...prev, status: newStatus as Order["status"] } : null,
         );
+      }
+
+      // CREATE NOTIFICATION FOR THE CUSTOMER
+      if (customerId) {
+        const notification = getOrderNotification(
+          orderNumber,
+          newStatus.toLowerCase(),
+          orderId,
+        );
+        if (notification) {
+          await createNotification({
+            userId: customerId,
+            title: notification.title,
+            message: notification.message,
+            type: notification.type,
+            orderId: orderId,
+            orderNumber: orderNumber,
+            read: false,
+            createdAt: Timestamp.now(),
+          });
+          console.log(
+            `📧 Notification sent to customer for status: ${newStatus}`,
+          );
+        }
       }
 
       Alert.alert("Success", `Order #${orderNumber} marked as ${newStatus}`);
@@ -226,7 +257,7 @@ export default function OrdersScreen() {
     showStatusConfirmation(orderId, orderNumber, "Confirmed", "Shipped");
   };
 
-  const handleCancelOrder = (orderId: string, orderNumber: string) => {
+  const handleCancelOrder = async (orderId: string, orderNumber: string) => {
     showStatusConfirmation(orderId, orderNumber, "Pending", "Cancelled");
   };
 

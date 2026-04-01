@@ -3,9 +3,16 @@ import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import {
+  collection,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +32,7 @@ export default function HomeScreen() {
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
   const [newArrivals, setNewArrivals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const { getCurrentUser } = useFirebaseAuth();
   const {
@@ -32,6 +40,28 @@ export default function HomeScreen() {
     loading: profileLoading,
     fetchProfile,
   } = useFirebaseProfile();
+
+  // Fetch unread notifications count
+  const loadUnreadNotifications = async () => {
+    try {
+      const user = getCurrentUser();
+      if (!user) {
+        setUnreadCount(0);
+        return;
+      }
+
+      const notificationsRef = collection(db, "notifications");
+      const q = query(
+        notificationsRef,
+        where("userId", "==", user.uid),
+        where("read", "==", false),
+      );
+      const querySnapshot = await getDocs(q);
+      setUnreadCount(querySnapshot.size);
+    } catch (error) {
+      console.error("Error loading unread count:", error);
+    }
+  };
 
   // Fetch profile when screen loads
   useEffect(() => {
@@ -70,12 +100,18 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-    // REMOVED: router.push("/(tabs)/chat-list"); - This was the problem!
   };
 
   useEffect(() => {
     fetchProducts();
+    loadUnreadNotifications();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUnreadNotifications();
+    }, []),
+  );
 
   // Categories data
   const categories = [
@@ -254,12 +290,23 @@ export default function HomeScreen() {
               )}
             </View>
             <View style={styles.headerIcons}>
-              <TouchableOpacity>
-                <Ionicons
-                  name="notifications-outline"
-                  size={24}
-                  color="#8F796F"
-                />
+              <TouchableOpacity
+                onPress={() => router.push("/(tabs)/notifications")}
+              >
+                <View>
+                  <Ionicons
+                    name="notifications-outline"
+                    size={24}
+                    color="#8F796F"
+                  />
+                  {unreadCount > 0 && (
+                    <View style={styles.notificationBadge}>
+                      <Text style={styles.notificationBadgeText}>
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </TouchableOpacity>
               <TouchableOpacity onPress={navigateToChat}>
                 <Ionicons name="chatbubble-outline" size={24} color="#8F796F" />
@@ -715,5 +762,22 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: "#8F796F",
+  },
+  notificationBadge: {
+    position: "absolute",
+    top: -5,
+    right: -8,
+    backgroundColor: "#C35822",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  notificationBadgeText: {
+    color: "#FFF",
+    fontSize: 10,
+    fontWeight: "bold",
   },
 });

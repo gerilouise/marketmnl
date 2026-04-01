@@ -37,6 +37,7 @@ export default function EditProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [newImageUri, setNewImageUri] = useState<string | null>(null); // Track newly selected image
 
   useEffect(() => {
     if (profile) {
@@ -58,12 +59,27 @@ export default function EditProfileScreen() {
     setSaving(true);
 
     try {
+      let finalPhotoURL = profileImage;
+
+      // If there's a new image selected, upload it first
+      if (newImageUri) {
+        const uploadedUrl = await uploadProfilePicture(newImageUri);
+        if (uploadedUrl) {
+          finalPhotoURL = uploadedUrl;
+        } else {
+          Alert.alert("Error", "Failed to upload profile picture");
+          setSaving(false);
+          return;
+        }
+      }
+
       const updates = {
         firstName,
         lastName,
         phone: phone || null,
         age: age ? parseInt(age) : null,
         birthdate: birthdate || null,
+        photoURL: finalPhotoURL, // Include the photo URL
       };
 
       const success = await updateProfile(updates);
@@ -83,15 +99,10 @@ export default function EditProfileScreen() {
       const imageUri = await pickImage();
       if (imageUri) {
         setUploadingImage(true);
+        // Store the new image URI
+        setNewImageUri(imageUri);
         // Temporarily show the selected image
         setProfileImage(imageUri);
-
-        // Upload to Firebase
-        const downloadURL = await uploadProfilePicture(imageUri);
-        if (!downloadURL) {
-          // If upload failed, revert to previous image
-          setProfileImage(profile?.photoURL || null);
-        }
         setUploadingImage(false);
       }
     } catch (error) {
@@ -110,10 +121,13 @@ export default function EditProfileScreen() {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
+            setUploadingImage(true);
             const success = await deleteProfilePicture();
             if (success) {
               setProfileImage(null);
+              setNewImageUri(null);
             }
+            setUploadingImage(false);
           },
         },
       ],
@@ -282,7 +296,6 @@ export default function EditProfileScreen() {
             <TextInput
               style={[styles.input, styles.disabledInput]}
               value={age}
-              onChangeText={setAge}
               placeholder="Auto-calculated"
               keyboardType="numeric"
               editable={false}

@@ -253,14 +253,14 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Debug Panel */}
+        {/* Debug Panel
         <View style={styles.debugPanel}>
           <Text style={styles.debugTitle}>🔍 Debug:</Text>
           <Text style={styles.debugText}>{debugMessage}</Text>
           <Text style={styles.debugTextSmall}>
             User: {user ? user.uid.substring(0, 8) + "..." : "Not logged in"}
           </Text>
-        </View>
+        </View> */}
 
         {/* Profile Card */}
         <View style={styles.profileCard}>
@@ -310,8 +310,7 @@ export default function ProfileScreen() {
               style={styles.statItem}
               onPress={() => navigateTo("reviews")}
             >
-              <Text style={styles.statNumber}>{reviewCount}</Text>{" "}
-              {/* CHANGED to use reviewCount */}
+              <Text style={styles.statNumber}>{reviewCount}</Text>
               <Text style={styles.statLabel}>Reviews</Text>
             </TouchableOpacity>
             <View style={styles.statDivider} />

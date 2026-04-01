@@ -2,8 +2,11 @@
 import { useCart } from "@/app/contexts/CartContext";
 import { createOrder } from "@/app/services/orders";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
+import { auth } from "@/lib/firebase"; // ADD auth and db
+import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { Timestamp } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -202,6 +205,29 @@ export default function CheckoutScreen() {
 
       if (result.success) {
         setOrderNumber(result.orderNumber);
+
+        // CREATE NOTIFICATION FOR THE CUSTOMER
+        const notification = getOrderNotification(
+          result.orderNumber,
+          "pending",
+          result.orderId,
+        );
+        if (notification) {
+          const user = auth.currentUser;
+          if (user) {
+            await createNotification({
+              userId: user.uid,
+              title: notification.title,
+              message: notification.message,
+              type: notification.type,
+              orderId: result.orderId,
+              orderNumber: result.orderNumber,
+              read: false,
+              createdAt: Timestamp.now(),
+            });
+            console.log("📧 Notification created for customer");
+          }
+        }
 
         // Remove selected items from cart after successful order
         console.log("🗑️ Removing selected items from cart...");

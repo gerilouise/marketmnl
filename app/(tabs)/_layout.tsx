@@ -113,7 +113,7 @@ export default function TabLayout() {
         }}
       />
 
-       <Tabs.Screen
+      <Tabs.Screen
         name="chat-list"
         options={{
           href: null, // Hide from tab bar
@@ -129,6 +129,13 @@ export default function TabLayout() {
 
       <Tabs.Screen
         name="following"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
+
+      <Tabs.Screen
+        name="notifications"
         options={{
           href: null, // Hide from tab bar
         }}
