@@ -1,30 +1,30 @@
 // app/(seller)/orders.tsx - No debug panel
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  FlatList,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-  Modal,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { auth, db } from '@/lib/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  doc, 
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  Timestamp,
   updateDoc,
-  Timestamp 
-} from 'firebase/firestore';
+  where,
+} from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface OrderItem {
   productId: string;
@@ -40,7 +40,7 @@ interface Order {
   customerName: string;
   customerEmail: string;
   items: OrderItem[];
-  status: 'Pending' | 'Confirmed' | 'Shipped' | 'Delivered' | 'Cancelled';
+  status: "Pending" | "Confirmed" | "Shipped" | "Delivered" | "Cancelled";
   subtotal: number;
   shippingFee: number;
   total: number;
@@ -63,7 +63,14 @@ interface Order {
   userEmail: string;
 }
 
-const STATUS_CATEGORIES = ["All", "Pending", "Confirmed", "Shipped", "Delivered", "Cancelled"];
+const STATUS_CATEGORIES = [
+  "All",
+  "Pending",
+  "Confirmed",
+  "Shipped",
+  "Delivered",
+  "Cancelled",
+];
 
 export default function OrdersScreen() {
   const [selectedStatus, setSelectedStatus] = useState("All");
@@ -71,11 +78,16 @@ export default function OrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
-  
+
   // Modal state for status update
   const [statusModalVisible, setStatusModalVisible] = useState(false);
-  const [orderToUpdate, setOrderToUpdate] = useState<{ id: string; number: string; currentStatus: string; newStatus: string } | null>(null);
-  
+  const [orderToUpdate, setOrderToUpdate] = useState<{
+    id: string;
+    number: string;
+    currentStatus: string;
+    newStatus: string;
+  } | null>(null);
+
   // Modal state for order details
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -86,42 +98,39 @@ export default function OrdersScreen() {
     try {
       const user = auth.currentUser;
       if (!user) {
-        Alert.alert('Error', 'Please log in');
-        router.push('/auth/login');
+        Alert.alert("Error", "Please log in");
+        router.push("/auth/login");
         return;
       }
 
-      const ordersRef = collection(db, 'orders');
-      const q = query(
-        ordersRef, 
-        where('sellerId', '==', user.uid)
-      );
-      
+      const ordersRef = collection(db, "orders");
+      const q = query(ordersRef, where("sellerId", "==", user.uid));
+
       const querySnapshot = await getDocs(q);
       const ordersList: Order[] = [];
-      
+
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        const status = data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
-        ordersList.push({ 
-          id: doc.id, 
+        const status =
+          data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
+        ordersList.push({
+          id: doc.id,
           ...data,
-          status: status || 'Pending'
+          status: status || "Pending",
         } as Order);
       });
-      
+
       ordersList.sort((a, b) => {
         if (a.createdAt && b.createdAt) {
           return b.createdAt.seconds - a.createdAt.seconds;
         }
         return 0;
       });
-      
+
       setOrders(ordersList);
-      
     } catch (error) {
-      console.error('Error loading orders:', error);
-      Alert.alert('Error', 'Failed to load orders');
+      console.error("Error loading orders:", error);
+      Alert.alert("Error", "Failed to load orders");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -131,11 +140,21 @@ export default function OrdersScreen() {
   useFocusEffect(
     useCallback(() => {
       loadOrders();
-    }, [])
+    }, []),
   );
 
-  const showStatusConfirmation = (orderId: string, orderNumber: string, currentStatus: string, newStatus: string) => {
-    setOrderToUpdate({ id: orderId, number: orderNumber, currentStatus, newStatus });
+  const showStatusConfirmation = (
+    orderId: string,
+    orderNumber: string,
+    currentStatus: string,
+    newStatus: string,
+  ) => {
+    setOrderToUpdate({
+      id: orderId,
+      number: orderNumber,
+      currentStatus,
+      newStatus,
+    });
     setStatusModalVisible(true);
   };
 
@@ -146,36 +165,43 @@ export default function OrdersScreen() {
 
   const updateOrderStatus = async () => {
     if (!orderToUpdate) return;
-    
-    const { id: orderId, number: orderNumber, currentStatus, newStatus } = orderToUpdate;
+
+    const {
+      id: orderId,
+      number: orderNumber,
+      currentStatus,
+      newStatus,
+    } = orderToUpdate;
     setStatusModalVisible(false);
     setUpdatingOrderId(orderId);
-    
+
     try {
-      const orderRef = doc(db, 'orders', orderId);
+      const orderRef = doc(db, "orders", orderId);
       const dbStatus = newStatus.toLowerCase();
-      
+
       await updateDoc(orderRef, {
         status: dbStatus,
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
       });
 
-      setOrders(prev => 
-        prev.map(order => 
-          order.id === orderId 
-            ? { ...order, status: newStatus as Order['status'] } 
-            : order
-        )
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId
+            ? { ...order, status: newStatus as Order["status"] }
+            : order,
+        ),
       );
 
       if (selectedOrder && selectedOrder.id === orderId) {
-        setSelectedOrder(prev => prev ? { ...prev, status: newStatus as Order['status'] } : null);
+        setSelectedOrder((prev) =>
+          prev ? { ...prev, status: newStatus as Order["status"] } : null,
+        );
       }
 
-      Alert.alert('Success', `Order #${orderNumber} marked as ${newStatus}`);
+      Alert.alert("Success", `Order #${orderNumber} marked as ${newStatus}`);
     } catch (error) {
-      console.error('Error updating order:', error);
-      Alert.alert('Error', 'Failed to update order status');
+      console.error("Error updating order:", error);
+      Alert.alert("Error", "Failed to update order status");
     } finally {
       setUpdatingOrderId(null);
       setOrderToUpdate(null);
@@ -212,29 +238,35 @@ export default function OrdersScreen() {
     if (selectedStatus === "All") {
       return orders;
     }
-    return orders.filter(order => order.status === selectedStatus);
+    return orders.filter((order) => order.status === selectedStatus);
   };
 
   const getStatusColor = (status: string) => {
-    switch(status) {
-      case "Pending": return "#FFA500";
-      case "Confirmed": return "#4CAF50";
-      case "Shipped": return "#2196F3";
-      case "Delivered": return "#9C27B0";
-      case "Cancelled": return "#FF3B30";
-      default: return "#8F796F";
+    switch (status) {
+      case "Pending":
+        return "#FFA500";
+      case "Confirmed":
+        return "#4CAF50";
+      case "Shipped":
+        return "#2196F3";
+      case "Delivered":
+        return "#9C27B0";
+      case "Cancelled":
+        return "#FF3B30";
+      default:
+        return "#8F796F";
     }
   };
 
   const formatDate = (timestamp: Timestamp) => {
-    if (!timestamp) return 'N/A';
+    if (!timestamp) return "N/A";
     const date = timestamp.toDate();
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -244,7 +276,7 @@ export default function OrdersScreen() {
     const otherItemsCount = item.items.length - 1;
 
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.orderCard}
         onPress={() => showOrderDetails(item)}
         activeOpacity={0.7}
@@ -252,10 +284,22 @@ export default function OrdersScreen() {
         <View style={styles.orderHeader}>
           <View>
             <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-            <Text style={styles.orderDateSmall}>{formatDate(item.createdAt)}</Text>
+            <Text style={styles.orderDateSmall}>
+              {formatDate(item.createdAt)}
+            </Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + "20" }]}>
-            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getStatusColor(item.status) + "20" },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                { color: getStatusColor(item.status) },
+              ]}
+            >
               {item.status}
             </Text>
           </View>
@@ -282,8 +326,8 @@ export default function OrdersScreen() {
             <>
               {item.status === "Pending" && (
                 <View style={styles.actionButtonsRow}>
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.confirmButton]} 
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.confirmButton]}
                     onPress={(e) => {
                       e.stopPropagation();
                       handleConfirmOrder(item.id, item.orderNumber);
@@ -291,8 +335,8 @@ export default function OrdersScreen() {
                   >
                     <Text style={styles.actionButtonText}>Confirm</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.cancelButton]} 
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.cancelButton]}
                     onPress={(e) => {
                       e.stopPropagation();
                       handleCancelOrder(item.id, item.orderNumber);
@@ -303,8 +347,8 @@ export default function OrdersScreen() {
                 </View>
               )}
               {item.status === "Confirmed" && (
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.shippedButton]} 
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.shippedButton]}
                   onPress={(e) => {
                     e.stopPropagation();
                     handleMarkAsShipped(item.id, item.orderNumber);
@@ -314,8 +358,8 @@ export default function OrdersScreen() {
                 </TouchableOpacity>
               )}
               {item.status === "Shipped" && (
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.deliveredButton]} 
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.deliveredButton]}
                   onPress={(e) => {
                     e.stopPropagation();
                     handleMarkAsDelivered(item.id, item.orderNumber);
@@ -326,7 +370,11 @@ export default function OrdersScreen() {
               )}
               {item.status === "Delivered" && (
                 <View style={styles.statusMessage}>
-                  <Ionicons name="checkmark-done-circle" size={20} color="#9C27B0" />
+                  <Ionicons
+                    name="checkmark-done-circle"
+                    size={20}
+                    color="#9C27B0"
+                  />
                   <Text style={styles.statusMessageText}>Delivered</Text>
                 </View>
               )}
@@ -366,8 +414,13 @@ export default function OrdersScreen() {
         </View>
         <View style={styles.notLoggedInContainer}>
           <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
-          <Text style={styles.notLoggedInText}>Please log in to view orders</Text>
-          <TouchableOpacity style={styles.loginButton} onPress={() => router.push("/auth/login")}>
+          <Text style={styles.notLoggedInText}>
+            Please log in to view orders
+          </Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push("/auth/login")}
+          >
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
         </View>
@@ -383,15 +436,27 @@ export default function OrdersScreen() {
       </View>
 
       <View style={styles.categoriesWrapper}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoriesScrollContent}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesScrollContent}
+        >
           <View style={styles.categoriesContainer}>
             {STATUS_CATEGORIES.map((status) => (
               <TouchableOpacity
                 key={status}
-                style={[styles.categoryChip, selectedStatus === status && styles.categoryChipActive]}
+                style={[
+                  styles.categoryChip,
+                  selectedStatus === status && styles.categoryChipActive,
+                ]}
                 onPress={() => setSelectedStatus(status)}
               >
-                <Text style={[styles.categoryChipText, selectedStatus === status && styles.categoryChipTextActive]}>
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    selectedStatus === status && styles.categoryChipTextActive,
+                  ]}
+                >
                   {status}
                 </Text>
               </TouchableOpacity>
@@ -422,7 +487,10 @@ export default function OrdersScreen() {
             <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
             <Text style={styles.emptyText}>No orders found</Text>
             {selectedStatus !== "All" && (
-              <TouchableOpacity style={styles.clearFilterButton} onPress={() => setSelectedStatus("All")}>
+              <TouchableOpacity
+                style={styles.clearFilterButton}
+                onPress={() => setSelectedStatus("All")}
+              >
                 <Text style={styles.clearFilterText}>Clear Filter</Text>
               </TouchableOpacity>
             )}
@@ -447,10 +515,20 @@ export default function OrdersScreen() {
               Order #{orderToUpdate?.number}
             </Text>
             <Text style={styles.modalStatusChange}>
-              Change status from <Text style={{ fontWeight: 'bold' }}>{orderToUpdate?.currentStatus}</Text> to <Text style={{ fontWeight: 'bold', color: '#4CAF50' }}>{orderToUpdate?.newStatus}</Text>?
+              Change status from{" "}
+              <Text style={{ fontWeight: "bold" }}>
+                {orderToUpdate?.currentStatus}
+              </Text>{" "}
+              to{" "}
+              <Text style={{ fontWeight: "bold", color: "#4CAF50" }}>
+                {orderToUpdate?.newStatus}
+              </Text>
+              ?
             </Text>
-            <Text style={styles.modalWarning}>This will notify the customer.</Text>
-            
+            <Text style={styles.modalWarning}>
+              This will notify the customer.
+            </Text>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelModalButton]}
@@ -480,7 +558,10 @@ export default function OrdersScreen() {
           <View style={styles.detailsModalContent}>
             <View style={styles.detailsModalHeader}>
               <Text style={styles.detailsModalTitle}>Order Details</Text>
-              <TouchableOpacity onPress={closeDetailsModal} style={styles.closeButton}>
+              <TouchableOpacity
+                onPress={closeDetailsModal}
+                style={styles.closeButton}
+              >
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
@@ -490,32 +571,56 @@ export default function OrdersScreen() {
                 <>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Order Number</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.orderNumber}</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedOrder.orderNumber}
+                    </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Order Date</Text>
-                    <Text style={styles.detailValue}>{formatDate(selectedOrder.createdAt)}</Text>
+                    <Text style={styles.detailValue}>
+                      {formatDate(selectedOrder.createdAt)}
+                    </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Customer Name</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.customerName}</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedOrder.customerName}
+                    </Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Customer Email</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.customerEmail}</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedOrder.customerEmail}
+                    </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Payment Method</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.paymentMethod}</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedOrder.paymentMethod}
+                    </Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Order Status</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(selectedOrder.status) + "20", alignSelf: "flex-start" }]}>
-                      <Text style={[styles.statusText, { color: getStatusColor(selectedOrder.status) }]}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        {
+                          backgroundColor:
+                            getStatusColor(selectedOrder.status) + "20",
+                          alignSelf: "flex-start",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusText,
+                          { color: getStatusColor(selectedOrder.status) },
+                        ]}
+                      >
                         {selectedOrder.status}
                       </Text>
                     </View>
@@ -528,9 +633,13 @@ export default function OrdersScreen() {
                     <View key={index} style={styles.itemRow}>
                       <View style={styles.itemInfo}>
                         <Text style={styles.itemName}>{item.productName}</Text>
-                        <Text style={styles.itemQuantity}>Quantity: {item.quantity}</Text>
+                        <Text style={styles.itemQuantity}>
+                          Quantity: {item.quantity}
+                        </Text>
                       </View>
-                      <Text style={styles.itemPrice}>₱{(item.productPrice * item.quantity).toFixed(2)}</Text>
+                      <Text style={styles.itemPrice}>
+                        ₱{(item.productPrice * item.quantity).toFixed(2)}
+                      </Text>
                     </View>
                   ))}
 
@@ -539,15 +648,21 @@ export default function OrdersScreen() {
                   <Text style={styles.sectionTitle}>Price Details</Text>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Subtotal</Text>
-                    <Text style={styles.detailValue}>₱{selectedOrder.subtotal.toFixed(2)}</Text>
+                    <Text style={styles.detailValue}>
+                      ₱{selectedOrder.subtotal.toFixed(2)}
+                    </Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Shipping Fee</Text>
-                    <Text style={styles.detailValue}>₱{selectedOrder.shippingFee.toFixed(2)}</Text>
+                    <Text style={styles.detailValue}>
+                      ₱{selectedOrder.shippingFee.toFixed(2)}
+                    </Text>
                   </View>
                   <View style={[styles.detailRow, styles.totalRow]}>
                     <Text style={styles.totalLabel}>Total</Text>
-                    <Text style={styles.totalAmount}>₱{selectedOrder.total.toFixed(2)}</Text>
+                    <Text style={styles.totalAmount}>
+                      ₱{selectedOrder.total.toFixed(2)}
+                    </Text>
                   </View>
 
                   <View style={styles.divider} />
@@ -560,8 +675,9 @@ export default function OrdersScreen() {
                     {selectedOrder.shippingAddress?.phone || "N/A"}
                   </Text>
                   <Text style={styles.addressText}>
-                    {selectedOrder.shippingAddress?.street && selectedOrder.shippingAddress?.street !== '' 
-                      ? `${selectedOrder.shippingAddress.street}, ${selectedOrder.shippingAddress.barangay || ''}, ${selectedOrder.shippingAddress.city || ''}, ${selectedOrder.shippingAddress.province || ''} ${selectedOrder.shippingAddress.zipCode || ''}`
+                    {selectedOrder.shippingAddress?.street &&
+                    selectedOrder.shippingAddress?.street !== ""
+                      ? `${selectedOrder.shippingAddress.street}, ${selectedOrder.shippingAddress.barangay || ""}, ${selectedOrder.shippingAddress.city || ""}, ${selectedOrder.shippingAddress.province || ""} ${selectedOrder.shippingAddress.zipCode || ""}`
                       : "No address provided"}
                   </Text>
                   <Text style={styles.addressLabel}>
@@ -572,7 +688,10 @@ export default function OrdersScreen() {
             </ScrollView>
 
             <View style={styles.detailsModalFooter}>
-              <TouchableOpacity style={styles.closeDetailsButton} onPress={closeDetailsModal}>
+              <TouchableOpacity
+                style={styles.closeDetailsButton}
+                onPress={closeDetailsModal}
+              >
                 <Text style={styles.closeDetailsButtonText}>Close</Text>
               </TouchableOpacity>
             </View>

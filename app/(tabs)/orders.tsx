@@ -1,13 +1,14 @@
 // app/(tabs)/orders.tsx
-import { cancelOrder } from "@/app/services/orders";
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
   collection,
+  doc,
   getDocs,
   query,
   Timestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
@@ -58,9 +59,6 @@ interface Order {
   updatedAt: Timestamp;
   userId: string;
   userEmail: string;
-  cancelledAt?: Timestamp;
-  cancellationReason?: string;
-  originalOrderId?: string;
 }
 
 type OrderStatus =
@@ -95,6 +93,8 @@ export default function OrdersScreen() {
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
     null,
   );
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
 
   const loadOrders = async () => {
     try {
@@ -108,34 +108,17 @@ export default function OrdersScreen() {
 
       console.log("🔄 Loading orders for user:", user.uid);
 
-      // Fetch from orders collection (active orders)
       const ordersRef = collection(db, "orders");
       const q = query(ordersRef, where("userId", "==", user.uid));
       const ordersSnapshot = await getDocs(q);
 
-      // Fetch from cancelled_orders collection
-      const cancelledOrdersRef = collection(db, "cancelled_orders");
-      const cancelledQ = query(
-        cancelledOrdersRef,
-        where("userId", "==", user.uid),
-      );
-      const cancelledSnapshot = await getDocs(cancelledQ);
-
       const ordersList: Order[] = [];
 
-      // Add active orders
       ordersSnapshot.forEach((doc) => {
         const data = doc.data();
         ordersList.push({ id: doc.id, ...data } as Order);
       });
 
-      // Add cancelled orders
-      cancelledSnapshot.forEach((doc) => {
-        const data = doc.data();
-        ordersList.push({ id: doc.id, ...data } as Order);
-      });
-
-      // Sort manually in JavaScript (newest first)
       ordersList.sort((a, b) => {
         if (a.createdAt && b.createdAt) {
           return b.createdAt.seconds - a.createdAt.seconds;
@@ -144,8 +127,6 @@ export default function OrdersScreen() {
       });
 
       console.log("✅ Total orders found:", ordersList.length);
-      console.log("  - Active:", ordersSnapshot.size);
-      console.log("  - Cancelled:", cancelledSnapshot.size);
 
       setOrders(ordersList);
       filterOrders(activeTab, ordersList);
@@ -234,56 +215,48 @@ export default function OrdersScreen() {
     }
   };
 
-  // FIXED: Cancel order using the cancelOrder service
-  const handleCancelOrder = async (order: Order) => {
-    Alert.alert(
-      "Cancel Order",
-      `Are you sure you want to cancel order ${order.orderNumber}? This action cannot be undone.`,
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: "Yes, Cancel",
-          style: "destructive",
-          onPress: async () => {
-            setCancellingOrderId(order.id);
-            try {
-              console.log("🔴 Cancelling order:", order.id, order.orderNumber);
+  // Handle cancel confirmation
+  const showCancelConfirmationDialog = (order: Order) => {
+    setOrderToCancel(order);
+    setShowCancelConfirmation(true);
+  };
 
-              // Use the cancelOrder service to move to cancelled_orders collection
-              const result = await cancelOrder(order.id, order);
+  // Execute the cancellation
+  const executeCancel = async () => {
+    if (!orderToCancel) return;
 
-              if (result.success) {
-                console.log("✅ Order cancelled successfully!");
+    setShowCancelConfirmation(false);
+    setCancellingOrderId(orderToCancel.id);
 
-                // Reload orders to refresh the list
-                await loadOrders();
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert("Error", "You must be logged in");
+        return;
+      }
 
-                // Close modal if open
-                if (showOrderModal) {
-                  setShowOrderModal(false);
-                  setSelectedOrder(null);
-                }
+      const orderRef = doc(db, "orders", orderToCancel.id);
+      await updateDoc(orderRef, {
+        status: "cancelled",
+        updatedAt: Timestamp.now(),
+      });
 
-                Alert.alert(
-                  "Success",
-                  `Order ${order.orderNumber} has been cancelled`,
-                );
-              } else {
-                throw new Error("Cancel order failed");
-              }
-            } catch (error: any) {
-              console.error("❌ Error cancelling order:", error);
-              Alert.alert(
-                "Error",
-                error.message || "Failed to cancel order. Please try again.",
-              );
-            } finally {
-              setCancellingOrderId(null);
-            }
-          },
-        },
-      ],
-    );
+      console.log("✅ Order cancelled successfully!");
+
+      // Refresh orders
+      await loadOrders();
+
+      Alert.alert(
+        "Success",
+        `Order ${orderToCancel.orderNumber} has been cancelled`,
+      );
+    } catch (error: any) {
+      console.error("❌ Cancel failed:", error);
+      Alert.alert("Error", error.message);
+    } finally {
+      setCancellingOrderId(null);
+      setOrderToCancel(null);
+    }
   };
 
   const formatDate = (timestamp: Timestamp) => {
@@ -319,9 +292,6 @@ export default function OrdersScreen() {
         </View>
       );
     }
-
-    // Don't show cancel button for already cancelled orders
-    const isCancelled = item.status === "cancelled";
 
     return (
       <TouchableOpacity
@@ -362,49 +332,46 @@ export default function OrdersScreen() {
             <Text style={styles.totalLabel}>Total:</Text>
             <Text style={styles.totalAmount}>₱{item.total.toFixed(2)}</Text>
           </View>
-          {item.status === "pending" && !isCancelling && (
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                handleCancelOrder(item);
-              }}
-            >
-              {isCancelling ? (
-                <ActivityIndicator size="small" color="#F44336" />
-              ) : (
-                <Text style={styles.cancelButtonText}>Cancel Order</Text>
-              )}
-            </TouchableOpacity>
-          )}
-          {item.status === "shipped" && (
-            <TouchableOpacity
-              style={styles.trackButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                Alert.alert(
-                  "Track Order",
-                  `Tracking info for ${item.orderNumber}`,
-                );
-              }}
-            >
-              <Text style={styles.trackButtonText}>Track Package</Text>
-            </TouchableOpacity>
-          )}
-          {item.status === "delivered" && (
-            <TouchableOpacity
-              style={styles.reviewButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                Alert.alert("Write Review", `Write a review for your items`);
-              }}
-            >
-              <Text style={styles.reviewButtonText}>Write Review</Text>
-            </TouchableOpacity>
-          )}
+          <View style={styles.buttonRow}>
+            {item.status === "pending" && !isCancelling && (
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  showCancelConfirmationDialog(item);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+            {item.status === "shipped" && (
+              <TouchableOpacity
+                style={styles.trackButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Alert.alert(
+                    "Track Order",
+                    `Tracking info for ${item.orderNumber}`,
+                  );
+                }}
+              >
+                <Text style={styles.trackButtonText}>Track</Text>
+              </TouchableOpacity>
+            )}
+            {item.status === "delivered" && (
+              <TouchableOpacity
+                style={styles.reviewButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Alert.alert("Write Review", `Write a review for your items`);
+                }}
+              >
+                <Text style={styles.reviewButtonText}>Review</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
-        {/* Status Message */}
         <View style={styles.statusMessageContainer}>
           <Ionicons
             name={
@@ -429,6 +396,55 @@ export default function OrdersScreen() {
           </Text>
         </View>
       </TouchableOpacity>
+    );
+  };
+
+  // Cancel Confirmation Modal Component
+  const CancelConfirmationModal = () => {
+    if (!showCancelConfirmation || !orderToCancel) return null;
+
+    return (
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showCancelConfirmation}
+        onRequestClose={() => setShowCancelConfirmation(false)}
+      >
+        <View style={styles.confirmationOverlay}>
+          <View style={styles.confirmationModal}>
+            <View style={styles.confirmationIconContainer}>
+              <Ionicons name="alert-circle-outline" size={48} color="#F44336" />
+            </View>
+
+            <Text style={styles.confirmationTitle}>Cancel Order?</Text>
+            <Text style={styles.confirmationMessage}>
+              Are you sure you want to cancel order {orderToCancel.orderNumber}?
+              This action cannot be undone.
+            </Text>
+
+            <View style={styles.confirmationButtons}>
+              <TouchableOpacity
+                style={styles.confirmationNoButton}
+                onPress={() => {
+                  setShowCancelConfirmation(false);
+                  setOrderToCancel(null);
+                }}
+              >
+                <Text style={styles.confirmationNoButtonText}>No</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.confirmationYesButton}
+                onPress={executeCancel}
+              >
+                <Text style={styles.confirmationYesButtonText}>
+                  Yes, Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -531,21 +547,6 @@ export default function OrdersScreen() {
                 </Text>
               </View>
 
-              {/* Cancellation Info */}
-              {selectedOrder.status === "cancelled" &&
-                selectedOrder.cancelledAt && (
-                  <View style={styles.cancellationInfo}>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={16}
-                      color="#F44336"
-                    />
-                    <Text style={styles.cancellationText}>
-                      Cancelled on {formatDate(selectedOrder.cancelledAt)}
-                    </Text>
-                  </View>
-                )}
-
               <View style={styles.divider} />
 
               {/* Order Summary Title */}
@@ -630,7 +631,7 @@ export default function OrdersScreen() {
                   style={styles.cancelButtonModal}
                   onPress={() => {
                     closeOrderModal();
-                    handleCancelOrder(selectedOrder);
+                    showCancelConfirmationDialog(selectedOrder);
                   }}
                 >
                   <Text style={styles.cancelButtonTextModal}>Cancel Order</Text>
@@ -793,12 +794,16 @@ export default function OrdersScreen() {
         }
       />
 
+      {/* Cancel Confirmation Modal */}
+      <CancelConfirmationModal />
+
       {/* Order Details Modal */}
       {showOrderModal && <OrderDetailsModal />}
     </SafeAreaView>
   );
 }
 
+// Keep all your existing styles - they remain exactly the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1065,6 +1070,73 @@ const styles = StyleSheet.create({
     color: "#FF3B30",
     marginTop: 8,
   },
+  // Confirmation Modal Styles
+  confirmationOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  confirmationModal: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "80%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  confirmationIconContainer: {
+    marginBottom: 16,
+  },
+  confirmationTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  confirmationMessage: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  confirmationButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+    width: "100%",
+  },
+  confirmationNoButton: {
+    flex: 1,
+    backgroundColor: "#F5F5F5",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  confirmationNoButtonText: {
+    color: "#8F796F",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  confirmationYesButton: {
+    flex: 1,
+    backgroundColor: "#F44336",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+  },
+  confirmationYesButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
   // Modal Styles
   modalOverlay: {
     flex: 1,
@@ -1235,19 +1307,20 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     flex: 1,
   },
-  cancellationInfo: {
+  buttonRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
-    marginBottom: 4,
-    padding: 10,
-    backgroundColor: "#FFEBEE",
-    borderRadius: 8,
     gap: 8,
   },
-  cancellationText: {
+  testButton: {
+    backgroundColor: "#ff1201",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  testButtonText: {
+    color: "#FFF",
     fontSize: 12,
-    color: "#F44336",
-    flex: 1,
+    fontWeight: "600",
   },
 });
