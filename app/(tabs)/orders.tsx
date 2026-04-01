@@ -3,6 +3,7 @@ import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
+  addDoc,
   collection,
   doc,
   getDocs,
@@ -16,11 +17,13 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -34,6 +37,7 @@ interface OrderItem {
   sellerName: string;
   sellerId?: string;
   imageUrl?: string;
+  hasReviewed?: boolean;
 }
 
 interface Order {
@@ -82,6 +86,195 @@ const STATUS_TABS: { id: OrderStatus; label: string; icon: string }[] = [
   { id: "cancelled", label: "Cancelled", icon: "close-circle-outline" },
 ];
 
+// Separate Review Modal Component to prevent re-renders
+const ReviewModalComponent = React.memo(
+  ({
+    visible,
+    product,
+    order,
+    onClose,
+    onSubmit,
+  }: {
+    visible: boolean;
+    product: OrderItem | null;
+    order: Order | null;
+    onClose: () => void;
+    onSubmit: (rating: number, comment: string) => Promise<void>;
+  }) => {
+    const [rating, setRating] = useState(0);
+    const [comment, setComment] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+
+    // Reset state when modal opens
+    React.useEffect(() => {
+      if (visible) {
+        setRating(0);
+        setComment("");
+      }
+    }, [visible]);
+
+    if (!visible || !product) return null;
+
+    const renderStars = () => {
+      return (
+        <View style={styles.reviewStarsContainer}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <TouchableOpacity
+              key={star}
+              onPress={() => setRating(star)}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={star <= rating ? "star" : "star-outline"}
+                size={32}
+                color={star <= rating ? "#FFD700" : "#E0DAD1"}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    };
+
+    const handleSubmit = async () => {
+      if (rating === 0) {
+        Alert.alert("Error", "Please select a rating");
+        return;
+      }
+
+      if (!comment.trim()) {
+        Alert.alert("Error", "Please write a review comment");
+        return;
+      }
+
+      if (comment.trim().length < 10) {
+        Alert.alert("Error", "Please write at least 10 characters");
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await onSubmit(rating, comment.trim());
+        onClose();
+      } catch (error) {
+        console.error("Error submitting review:", error);
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={visible}
+        onRequestClose={onClose}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.reviewModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Write a Review</Text>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Product Info */}
+              <View style={styles.reviewProductInfo}>
+                <View style={styles.reviewProductImagePlaceholder}>
+                  {product.imageUrl ? (
+                    <Image
+                      source={{ uri: product.imageUrl }}
+                      style={styles.reviewProductImage}
+                    />
+                  ) : (
+                    <Ionicons name="image-outline" size={32} color="#CCC" />
+                  )}
+                </View>
+                <View style={styles.reviewProductDetails}>
+                  <Text style={styles.reviewProductName}>
+                    {product.productName}
+                  </Text>
+                  <Text style={styles.reviewProductQuantity}>
+                    Quantity: {product.quantity}
+                  </Text>
+                  <Text style={styles.reviewProductSeller}>
+                    Seller: {product.sellerName}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Rating Section */}
+              <View style={styles.reviewRatingSection}>
+                <Text style={styles.reviewRatingLabel}>Your Rating</Text>
+                {renderStars()}
+                <Text style={styles.reviewRatingHint}>
+                  {rating === 0 && "Tap to rate"}
+                  {rating === 1 && "Poor"}
+                  {rating === 2 && "Fair"}
+                  {rating === 3 && "Good"}
+                  {rating === 4 && "Very Good"}
+                  {rating === 5 && "Excellent!"}
+                </Text>
+              </View>
+
+              {/* Comment Section */}
+              <View style={styles.reviewCommentSection}>
+                <Text style={styles.reviewCommentLabel}>Your Review</Text>
+                <TextInput
+                  style={styles.reviewCommentInput}
+                  multiline
+                  numberOfLines={5}
+                  placeholder="Share your experience with this product..."
+                  placeholderTextColor="#8F796F"
+                  value={comment}
+                  onChangeText={setComment}
+                  textAlignVertical="top"
+                />
+                <Text style={styles.reviewCommentHint}>
+                  Minimum 10 characters
+                </Text>
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                style={[
+                  styles.reviewSubmitButton,
+                  (rating === 0 ||
+                    !comment.trim() ||
+                    comment.trim().length < 10 ||
+                    submitting) &&
+                    styles.reviewSubmitButtonDisabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={
+                  rating === 0 ||
+                  !comment.trim() ||
+                  comment.trim().length < 10 ||
+                  submitting
+                }
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.reviewSubmitButtonText}>
+                    Submit Review
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    );
+  },
+);
+
+ReviewModalComponent.displayName = "ReviewModalComponent";
+
 export default function OrdersScreen() {
   const [activeTab, setActiveTab] = useState<OrderStatus>("all");
   const [orders, setOrders] = useState<Order[]>([]);
@@ -96,6 +289,42 @@ export default function OrdersScreen() {
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
 
+  // Review modal states
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<OrderItem | null>(
+    null,
+  );
+  const [selectedOrderForReview, setSelectedOrderForReview] =
+    useState<Order | null>(null);
+
+  // Function to check if a product has been reviewed
+  const checkIfReviewed = async (
+    userId: string,
+    productId: string,
+    orderId: string,
+  ) => {
+    try {
+      const reviewsRef = collection(db, "reviews");
+      // Check for reviews with matching userId, productId, AND orderId
+      const q = query(
+        reviewsRef,
+        where("userId", "==", userId),
+        where("productId", "==", productId),
+        where("orderId", "==", orderId),
+      );
+      const querySnapshot = await getDocs(q);
+      const hasReview = !querySnapshot.empty;
+      console.log(
+        `Checking review for product ${productId} in order ${orderId}: ${hasReview}`,
+      );
+      return hasReview;
+    } catch (error) {
+      console.error("Error checking review status:", error);
+      return false;
+    }
+  };
+
+  // Function to load orders with review status
   const loadOrders = async () => {
     try {
       const user = auth.currentUser;
@@ -114,10 +343,30 @@ export default function OrdersScreen() {
 
       const ordersList: Order[] = [];
 
-      ordersSnapshot.forEach((doc) => {
-        const data = doc.data();
-        ordersList.push({ id: doc.id, ...data } as Order);
-      });
+      // For each order, check which items have been reviewed
+      for (const docSnapshot of ordersSnapshot.docs) {
+        const data = docSnapshot.data();
+        const order = { id: docSnapshot.id, ...data } as Order;
+
+        console.log(`Processing order ${order.id} with status ${order.status}`);
+
+        // Check review status for each item in the order
+        const itemsWithReviewStatus = await Promise.all(
+          order.items.map(async (item) => {
+            const hasReviewed = await checkIfReviewed(
+              user.uid,
+              item.productId,
+              order.id,
+            );
+            return { ...item, hasReviewed };
+          }),
+        );
+
+        ordersList.push({
+          ...order,
+          items: itemsWithReviewStatus,
+        });
+      }
 
       ordersList.sort((a, b) => {
         if (a.createdAt && b.createdAt) {
@@ -127,6 +376,14 @@ export default function OrdersScreen() {
       });
 
       console.log("✅ Total orders found:", ordersList.length);
+      // Log review status for debugging
+      ordersList.forEach((order) => {
+        order.items.forEach((item) => {
+          console.log(
+            `Product ${item.productName} in order ${order.orderNumber}: hasReviewed = ${item.hasReviewed}`,
+          );
+        });
+      });
 
       setOrders(ordersList);
       filterOrders(activeTab, ordersList);
@@ -259,6 +516,81 @@ export default function OrdersScreen() {
     }
   };
 
+  // Handle review button click
+  const openReviewModal = (order: Order, product: OrderItem) => {
+    // Prevent opening review modal if already reviewed
+    if (product.hasReviewed) {
+      Alert.alert(
+        "Already Reviewed",
+        "You have already reviewed this product.",
+      );
+      return;
+    }
+    setSelectedOrderForReview(order);
+    setSelectedProduct(product);
+    setShowReviewModal(true);
+  };
+
+  // Submit review
+  const submitReview = async (rating: number, comment: string) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert("Error", "You must be logged in");
+        return;
+      }
+
+      // Double-check if review already exists
+      const alreadyReviewed = await checkIfReviewed(
+        user.uid,
+        selectedProduct?.productId || "",
+        selectedOrderForReview?.id || "",
+      );
+
+      if (alreadyReviewed) {
+        Alert.alert("Error", "You have already reviewed this product.");
+        throw new Error("Already reviewed");
+      }
+
+      // Create review object
+      const reviewData = {
+        userId: user.uid,
+        userEmail: user.email,
+        orderId: selectedOrderForReview?.id,
+        orderNumber: selectedOrderForReview?.orderNumber,
+        productId: selectedProduct?.productId,
+        productName: selectedProduct?.productName,
+        sellerId: selectedProduct?.sellerId,
+        sellerName: selectedProduct?.sellerName,
+        rating: rating,
+        comment: comment,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+
+      console.log("Submitting review:", reviewData);
+
+      // Save review to Firestore
+      const reviewsRef = collection(db, "reviews");
+      await addDoc(reviewsRef, reviewData);
+
+      Alert.alert("Success", "Thank you for your review!");
+
+      // Clear selected product and order
+      setSelectedProduct(null);
+      setSelectedOrderForReview(null);
+
+      // Refresh orders to update review status
+      await loadOrders();
+    } catch (error: any) {
+      console.error("Error submitting review:", error);
+      if (error.message !== "Already reviewed") {
+        Alert.alert("Error", "Failed to submit review. Please try again.");
+      }
+      throw error;
+    }
+  };
+
   const formatDate = (timestamp: Timestamp) => {
     if (!timestamp) return "N/A";
     const date = timestamp.toDate();
@@ -283,6 +615,9 @@ export default function OrdersScreen() {
     const isCancelling = cancellingOrderId === item.id;
     const mainProduct = item.items?.[0];
     const otherItemsCount = item.items ? item.items.length - 1 : 0;
+    const allProductsReviewed = item.items?.every(
+      (i) => i.hasReviewed === true,
+    );
 
     if (!mainProduct) {
       return (
@@ -360,13 +695,61 @@ export default function OrdersScreen() {
             )}
             {item.status === "delivered" && (
               <TouchableOpacity
-                style={styles.reviewButton}
+                style={[
+                  styles.reviewButton,
+                  allProductsReviewed && styles.reviewedButton,
+                ]}
                 onPress={(e) => {
                   e.stopPropagation();
-                  Alert.alert("Write Review", `Write a review for your items`);
+                  if (allProductsReviewed) {
+                    Alert.alert(
+                      "Already Reviewed",
+                      "All items in this order have been reviewed.",
+                    );
+                    return;
+                  }
+                  // Show product selection for review
+                  if (item.items.length === 1) {
+                    // If only one product, review directly
+                    openReviewModal(item, item.items[0]);
+                  } else {
+                    // If multiple products, show product selection
+                    const unreviewedProducts = item.items.filter(
+                      (p) => !p.hasReviewed,
+                    );
+                    if (unreviewedProducts.length === 0) {
+                      Alert.alert(
+                        "Already Reviewed",
+                        "All items have been reviewed.",
+                      );
+                      return;
+                    }
+                    Alert.alert(
+                      "Select Product to Review",
+                      "Which product would you like to review?",
+                      unreviewedProducts.map((product) => ({
+                        text: `${product.productName} x${product.quantity}`,
+                        onPress: () => openReviewModal(item, product),
+                      })),
+                    );
+                  }
                 }}
               >
-                <Text style={styles.reviewButtonText}>Review</Text>
+                <Ionicons
+                  name={
+                    allProductsReviewed ? "checkmark-circle" : "star-outline"
+                  }
+                  size={14}
+                  color={allProductsReviewed ? "#4CAF50" : "#32221B"}
+                />
+                <Text
+                  style={[
+                    styles.reviewButtonText,
+                    allProductsReviewed && styles.reviewedButtonText,
+                  ]}
+                >
+                  {allProductsReviewed ? "Reviewed" : "Review"}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -552,9 +935,9 @@ export default function OrdersScreen() {
               {/* Order Summary Title */}
               <Text style={styles.orderSummaryTitle}>Order Summary</Text>
 
-              {/* Items List */}
+              {/* Items List with Individual Review Buttons */}
               {selectedOrder.items?.map((item, index) => (
-                <View key={index} style={styles.orderSummaryItem}>
+                <View key={index} style={styles.orderSummaryItemWithReview}>
                   <View style={styles.orderSummaryLeft}>
                     <Text style={styles.orderSummaryName} numberOfLines={2}>
                       {item.productName}
@@ -566,9 +949,50 @@ export default function OrdersScreen() {
                       Seller: {item.sellerName}
                     </Text>
                   </View>
-                  <Text style={styles.orderSummaryPrice}>
-                    ₱{(item.productPrice * item.quantity).toFixed(2)}
-                  </Text>
+                  <View style={styles.orderSummaryRight}>
+                    <Text style={styles.orderSummaryPrice}>
+                      ₱{(item.productPrice * item.quantity).toFixed(2)}
+                    </Text>
+                    {selectedOrder.status === "delivered" && (
+                      <TouchableOpacity
+                        style={[
+                          styles.reviewButtonSmall,
+                          item.hasReviewed === true &&
+                            styles.reviewedButtonSmall,
+                        ]}
+                        onPress={() => {
+                          if (item.hasReviewed === true) {
+                            Alert.alert(
+                              "Already Reviewed",
+                              "You have already reviewed this product.",
+                            );
+                            return;
+                          }
+                          closeOrderModal();
+                          openReviewModal(selectedOrder, item);
+                        }}
+                      >
+                        <Ionicons
+                          name={
+                            item.hasReviewed === true
+                              ? "checkmark-circle"
+                              : "star-outline"
+                          }
+                          size={14}
+                          color={item.hasReviewed === true ? "#4CAF50" : "#FFF"}
+                        />
+                        <Text
+                          style={[
+                            styles.reviewButtonSmallText,
+                            item.hasReviewed === true &&
+                              styles.reviewedButtonSmallText,
+                          ]}
+                        >
+                          {item.hasReviewed === true ? "Reviewed" : "Review"}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               ))}
 
@@ -799,11 +1223,20 @@ export default function OrdersScreen() {
 
       {/* Order Details Modal */}
       {showOrderModal && <OrderDetailsModal />}
+
+      {/* Review Modal - Using the separate component */}
+      <ReviewModalComponent
+        visible={showReviewModal}
+        product={selectedProduct}
+        order={selectedOrderForReview}
+        onClose={() => setShowReviewModal(false)}
+        onSubmit={submitReview}
+      />
     </SafeAreaView>
   );
 }
 
-// Keep all your existing styles - they remain exactly the same
+// Keep all your existing styles (they remain the same as before)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1194,11 +1627,14 @@ const styles = StyleSheet.create({
     color: "#32221B",
     marginBottom: 12,
   },
-  orderSummaryItem: {
+  orderSummaryItemWithReview: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
   },
   orderSummaryLeft: {
     flex: 1,
@@ -1220,10 +1656,28 @@ const styles = StyleSheet.create({
     color: "#C35822",
     marginTop: 2,
   },
+  orderSummaryRight: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
   orderSummaryPrice: {
     fontSize: 14,
     fontWeight: "600",
     color: "#C35822",
+  },
+  reviewButtonSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFD700",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    gap: 4,
+  },
+  reviewButtonSmallText: {
+    fontSize: 11,
+    color: "#32221B",
+    fontWeight: "600",
   },
   totalRow: {
     marginTop: 8,
@@ -1321,6 +1775,141 @@ const styles = StyleSheet.create({
   testButtonText: {
     color: "#FFF",
     fontSize: 12,
+    fontWeight: "600",
+  },
+  // Review Modal Styles
+  reviewModalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    width: "90%",
+    maxHeight: "85%",
+  },
+  reviewProductInfo: {
+    flexDirection: "row",
+    marginBottom: 20,
+    padding: 12,
+    backgroundColor: "#F9F9F9",
+    borderRadius: 12,
+  },
+  reviewProductImagePlaceholder: {
+    width: 60,
+    height: 60,
+    backgroundColor: "#F0F0F0",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  reviewProductImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  reviewProductDetails: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  reviewProductName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 4,
+  },
+  reviewProductQuantity: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginBottom: 2,
+  },
+  reviewProductSeller: {
+    fontSize: 11,
+    color: "#C35822",
+  },
+  reviewRatingSection: {
+    marginBottom: 20,
+    alignItems: "center",
+  },
+  reviewRatingLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
+  reviewStarsContainer: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 8,
+  },
+  reviewRatingHint: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 8,
+  },
+  reviewCommentSection: {
+    marginBottom: 20,
+  },
+  reviewCommentLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
+  reviewCommentInput: {
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: "#32221B",
+    backgroundColor: "#FFF",
+    minHeight: 100,
+  },
+  reviewCommentHint: {
+    fontSize: 11,
+    color: "#8F796F",
+    marginTop: 6,
+  },
+  reviewSubmitButton: {
+    backgroundColor: "#C35822",
+    paddingVertical: 14,
+    borderRadius: 25,
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  reviewSubmitButtonDisabled: {
+    backgroundColor: "#E0DAD1",
+  },
+  reviewSubmitButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  // Add these styles to your existing styles object
+  reviewedButton: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
+  reviewedButtonText: {
+    color: "#4CAF50",
+  },
+  reviewedButtonSmall: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    gap: 4,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  reviewedButtonSmallText: {
+    color: "#4CAF50",
+    fontSize: 11,
     fontWeight: "600",
   },
 });

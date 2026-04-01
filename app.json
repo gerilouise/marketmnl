@@ -38,8 +38,7 @@
       ],
       "expo-secure-store",
       "expo-sqlite",
-      "expo-web-browser",
-      "@stripe/stripe-react-native"
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

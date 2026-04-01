@@ -187,7 +187,7 @@ export default function ProductDetailsScreen() {
 
     setLoadingReviews(true);
     try {
-      const reviewsRef = collection(db, "product_reviews");
+      const reviewsRef = collection(db, "reviews");
       const q = query(
         reviewsRef,
         where("productId", "==", product.id),
@@ -201,23 +201,43 @@ export default function ProductDetailsScreen() {
         loadedReviews.push({
           id: doc.id,
           userName: data.userName || "Anonymous",
-          userInitials: data.userInitials || "??",
+          userInitials:
+            data.userInitials ||
+            data.userName?.substring(0, 2).toUpperCase() ||
+            "??",
           userId: data.userId,
           rating: data.rating,
           date:
-            data.createdAt
-              ?.toDate?.()
-              ?.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }) || new Date().toLocaleDateString(),
+            data.createdAt?.toDate?.()?.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            }) || new Date().toLocaleDateString(),
           comment: data.comment,
           createdAt: data.createdAt,
         });
       });
 
       setReviews(loadedReviews);
+
+      // Update product rating based on reviews
+      if (loadedReviews.length > 0) {
+        const totalRating = loadedReviews.reduce((sum, r) => sum + r.rating, 0);
+        const averageRating = totalRating / loadedReviews.length;
+        setProduct((prev) =>
+          prev
+            ? {
+                ...prev,
+                rating: averageRating,
+                reviewsCount: loadedReviews.length,
+              }
+            : null,
+        );
+      } else {
+        setProduct((prev) =>
+          prev ? { ...prev, rating: 0, reviewsCount: 0 } : null,
+        );
+      }
     } catch (error) {
       console.error("Error loading reviews:", error);
     } finally {
@@ -359,19 +379,28 @@ export default function ProductDetailsScreen() {
 
     setSubmittingReview(true);
     try {
-      const reviewsRef = collection(db, "product_reviews");
-      const userInitials = user.email?.substring(0, 2).toUpperCase() || "U";
+      const reviewsRef = collection(db, "reviews");
+      const userInitials =
+        user.email?.substring(0, 2).toUpperCase() ||
+        user.displayName?.substring(0, 2).toUpperCase() ||
+        "U";
       const userName =
         user.displayName || user.email?.split("@")[0] || "Anonymous";
 
       await addDoc(reviewsRef, {
         productId: product?.id,
+        productName: product?.name,
+        productImage: product?.imageUrl || null,
         userId: user.uid,
         userName: userName,
         userInitials: userInitials,
         rating: reviewRating,
         comment: reviewComment.trim(),
+        sellerId: product?.sellerId,
+        sellerName: storeName,
+        orderNumber: null,
         createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
       });
 
       await loadReviews();
@@ -379,7 +408,7 @@ export default function ProductDetailsScreen() {
       setReviewComment("");
       setShowReviewModal(false);
 
-      Alert.alert("Success", "Your review has been submitted!");
+      Alert.alert("Success", "Thank you for your review!");
     } catch (error) {
       console.error("Error submitting review:", error);
       Alert.alert("Error", "Failed to submit review");

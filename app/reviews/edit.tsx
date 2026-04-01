@@ -1,8 +1,8 @@
-// app/reviews/write.tsx
+// app/reviews/edit.tsx
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { addDoc, collection, Timestamp } from "firebase/firestore";
+import { doc, Timestamp, updateDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
@@ -17,27 +17,27 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function WriteReviewScreen() {
+export default function EditReviewScreen() {
   const params = useLocalSearchParams();
+  const reviewId = params.reviewId as string;
   const productId = params.productId as string;
   const productName = params.productName as string;
-  const sellerId = params.sellerId as string;
   const sellerName = params.sellerName as string;
-  const orderNumber = params.orderNumber as string;
+  const initialRating = parseInt((params.rating as string) || "5");
+  const initialComment = (params.comment as string) || "";
   const imageUrl = params.imageUrl as string;
 
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState("");
+  const [rating, setRating] = useState(initialRating);
+  const [comment, setComment] = useState(initialComment);
   const [submitting, setSubmitting] = useState(false);
 
-  const renderStars = (selectedRating: number, interactive: boolean = true) => {
+  const renderStars = (selectedRating: number) => {
     return (
       <View style={styles.starsContainer}>
         {[1, 2, 3, 4, 5].map((star) => (
           <TouchableOpacity
             key={star}
-            onPress={() => interactive && setRating(star)}
-            disabled={!interactive}
+            onPress={() => setRating(star)}
             activeOpacity={0.7}
           >
             <Ionicons
@@ -52,7 +52,7 @@ export default function WriteReviewScreen() {
     );
   };
 
-  const handleSubmit = async () => {
+  const handleUpdate = async () => {
     if (!comment.trim()) {
       Alert.alert("Error", "Please write a review before submitting");
       return;
@@ -60,7 +60,7 @@ export default function WriteReviewScreen() {
 
     const user = auth.currentUser;
     if (!user) {
-      Alert.alert("Error", "You must be logged in to submit a review");
+      Alert.alert("Error", "You must be logged in");
       router.push("/auth/login");
       return;
     }
@@ -68,41 +68,22 @@ export default function WriteReviewScreen() {
     setSubmitting(true);
 
     try {
-      const userInitials = user.email?.substring(0, 2).toUpperCase() || "U";
-      const userName =
-        user.displayName || user.email?.split("@")[0] || "Anonymous";
-
-      const reviewData = {
-        productId: productId,
-        productName: productName,
-        userId: user.uid,
-        userName: userName,
-        userInitials: userInitials,
+      const reviewRef = doc(db, "product_reviews", reviewId);
+      await updateDoc(reviewRef, {
         rating: rating,
         comment: comment.trim(),
-        sellerId: sellerId,
-        sellerName: sellerName,
-        orderNumber: orderNumber,
-        imageUrl: imageUrl || null,
-        createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      };
+      });
 
-      await addDoc(collection(db, "product_reviews"), reviewData);
-
-      Alert.alert(
-        "Review Submitted",
-        "Thank you for your feedback! Your review will help other customers.",
-        [
-          {
-            text: "OK",
-            onPress: () => router.back(),
-          },
-        ],
-      );
+      Alert.alert("Success", "Your review has been updated!", [
+        {
+          text: "OK",
+          onPress: () => router.back(),
+        },
+      ]);
     } catch (error: any) {
-      console.error("Error submitting review:", error);
-      Alert.alert("Error", "Failed to submit review. Please try again.");
+      console.error("Error updating review:", error);
+      Alert.alert("Error", "Failed to update review. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -117,9 +98,9 @@ export default function WriteReviewScreen() {
         >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Write a Review</Text>
+        <Text style={styles.headerTitle}>Edit Review</Text>
         <TouchableOpacity
-          onPress={handleSubmit}
+          onPress={handleUpdate}
           style={[
             styles.submitButton,
             submitting && styles.submitButtonDisabled,
@@ -129,7 +110,7 @@ export default function WriteReviewScreen() {
           {submitting ? (
             <ActivityIndicator size="small" color="#FFF" />
           ) : (
-            <Text style={styles.submitButtonText}>Submit</Text>
+            <Text style={styles.submitButtonText}>Update</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -149,16 +130,15 @@ export default function WriteReviewScreen() {
           <View style={styles.productInfo}>
             <Text style={styles.productName}>{productName}</Text>
             <Text style={styles.sellerName}>from {sellerName}</Text>
-            <Text style={styles.orderNumberText}>Order #{orderNumber}</Text>
           </View>
         </View>
 
         {/* Rating Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Rate this product</Text>
-          {renderStars(rating, true)}
+          {renderStars(rating)}
           <Text style={styles.ratingHint}>
-            Tap the stars to rate your experience
+            Tap the stars to change your rating
           </Text>
         </View>
 
@@ -177,32 +157,6 @@ export default function WriteReviewScreen() {
           />
           <Text style={styles.charCount}>{comment.length} characters</Text>
         </View>
-
-        {/* Tips Section */}
-        <View style={styles.tipsCard}>
-          <Ionicons name="bulb-outline" size={20} color="#C35822" />
-          <Text style={styles.tipsTitle}>Tips for writing a great review:</Text>
-          <View style={styles.tipItem}>
-            <Text style={styles.tipBullet}>•</Text>
-            <Text style={styles.tipText}>
-              Share what you liked or didn't like about the product
-            </Text>
-          </View>
-          <View style={styles.tipItem}>
-            <Text style={styles.tipBullet}>•</Text>
-            <Text style={styles.tipText}>
-              Mention the quality, taste, packaging, and delivery
-            </Text>
-          </View>
-          <View style={styles.tipItem}>
-            <Text style={styles.tipBullet}>•</Text>
-            <Text style={styles.tipText}>
-              Be specific and honest about your experience
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.bottomPadding} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -298,11 +252,6 @@ const styles = StyleSheet.create({
   sellerName: {
     fontSize: 13,
     color: "#C35822",
-    marginBottom: 4,
-  },
-  orderNumberText: {
-    fontSize: 12,
-    color: "#8F796F",
   },
   section: {
     backgroundColor: "#FFF",
@@ -352,37 +301,5 @@ const styles = StyleSheet.create({
     color: "#8F796F",
     textAlign: "right",
     marginTop: 8,
-  },
-  tipsCard: {
-    backgroundColor: "#FFF3E0",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  tipsTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#C35822",
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  tipItem: {
-    flexDirection: "row",
-    marginBottom: 8,
-    paddingLeft: 4,
-  },
-  tipBullet: {
-    fontSize: 14,
-    color: "#C35822",
-    marginRight: 8,
-  },
-  tipText: {
-    flex: 1,
-    fontSize: 13,
-    color: "#666",
-    lineHeight: 18,
-  },
-  bottomPadding: {
-    height: 20,
   },
 });

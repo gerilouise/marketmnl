@@ -10,8 +10,8 @@ import {
   getDocs,
   query,
   setDoc,
-  where,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -61,6 +61,9 @@ export default function BrowseScreen() {
   const [loading, setLoading] = useState(false);
   const [wishlist, setWishlist] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"products" | "shops">("products");
+  const [productReviews, setProductReviews] = useState<
+    Map<string, { averageRating: number; count: number }>
+  >(new Map());
 
   // Load wishlist for current user
   const loadWishlist = async () => {
@@ -107,6 +110,39 @@ export default function BrowseScreen() {
     }
   };
 
+  // Fetch reviews for products
+  const fetchProductReviews = async (productsList: any[]) => {
+    try {
+      const reviewsMap = new Map();
+
+      for (const product of productsList) {
+        const reviewsRef = collection(db, "reviews");
+        const q = query(reviewsRef, where("productId", "==", product.id));
+        const querySnapshot = await getDocs(q);
+
+        let totalRating = 0;
+        let reviewCount = 0;
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.rating) {
+            totalRating += data.rating;
+            reviewCount++;
+          }
+        });
+
+        const averageRating = reviewCount > 0 ? totalRating / reviewCount : 0;
+        reviewsMap.set(product.id, { averageRating, count: reviewCount });
+      }
+
+      setProductReviews(reviewsMap);
+      return reviewsMap;
+    } catch (error) {
+      console.error("Error fetching product reviews:", error);
+      return new Map();
+    }
+  };
+
   // Fetch all products with seller names
   const loadProducts = async () => {
     setLoading(true);
@@ -114,21 +150,36 @@ export default function BrowseScreen() {
       const productsRef = collection(db, "products");
       const querySnapshot = await getDocs(productsRef);
       const productsList: any[] = [];
-      
+
       // Process each product to get seller name
       for (const doc of querySnapshot.docs) {
         const data = doc.data();
         const sellerName = await getSellerName(data.sellerId);
-        
-        productsList.push({ 
-          id: doc.id, 
+
+        productsList.push({
+          id: doc.id,
           ...data,
-          sellerName: sellerName, // Ensure seller name is set
+          sellerName: sellerName,
         });
       }
-      
-      setAllProducts(productsList);
-      filterProducts(selectedCategory, searchQuery, sortOrder, productsList);
+
+      // Fetch reviews for all products
+      const reviewsMap = await fetchProductReviews(productsList);
+
+      // Update products with review data
+      const productsWithReviews = productsList.map((product) => ({
+        ...product,
+        rating: reviewsMap.get(product.id)?.averageRating || 0,
+        reviewsCount: reviewsMap.get(product.id)?.count || 0,
+      }));
+
+      setAllProducts(productsWithReviews);
+      filterProducts(
+        selectedCategory,
+        searchQuery,
+        sortOrder,
+        productsWithReviews,
+      );
     } catch (error) {
       console.error("Error loading products:", error);
       Alert.alert("Error", "Failed to load products");
@@ -153,10 +204,10 @@ export default function BrowseScreen() {
       const followerCount = followsSnapshot.size;
 
       // Get reviews and calculate average rating
-      const reviewsRef = collection(db, "product_reviews");
+      const reviewsRef = collection(db, "reviews");
       const reviewsQuery = query(reviewsRef, where("sellerId", "==", shopId));
       const reviewsSnapshot = await getDocs(reviewsQuery);
-      
+
       let totalRating = 0;
       let reviewCount = 0;
       reviewsSnapshot.forEach((doc) => {
@@ -166,7 +217,7 @@ export default function BrowseScreen() {
           reviewCount++;
         }
       });
-      
+
       const averageRating = reviewCount > 0 ? totalRating / reviewCount : 4.5;
 
       // Update seller document with latest stats
@@ -204,11 +255,11 @@ export default function BrowseScreen() {
     setLoading(true);
     try {
       const shopsList: Shop[] = [];
-      
+
       // Load from sellers collection
       const sellersRef = collection(db, "sellers");
       const sellersSnapshot = await getDocs(sellersRef);
-      
+
       // Process each shop to get real-time stats
       for (const doc of sellersSnapshot.docs) {
         const data = doc.data();
@@ -216,7 +267,7 @@ export default function BrowseScreen() {
         if (data.storeName) {
           // Fetch real-time stats
           const stats = await fetchShopStats(doc.id);
-          
+
           shopsList.push({
             id: doc.id,
             storeName: data.storeName || "Unknown Store",
@@ -229,10 +280,10 @@ export default function BrowseScreen() {
           });
         }
       }
-      
+
       // Sort by follower count (most popular first)
       shopsList.sort((a, b) => b.followerCount - a.followerCount);
-      
+
       console.log(`📦 Loaded ${shopsList.length} shops with stats`);
       setAllShops(shopsList);
       filterShops(searchQuery, shopsList);
@@ -387,51 +438,67 @@ export default function BrowseScreen() {
     router.push(`/store/${shopId}`);
   };
 
-  const renderProductItem = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigateToProduct(item.id)}
-      activeOpacity={0.9}
-    >
-      <View style={styles.imageContainer}>
-        {item.imageUrl ? (
-          <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Ionicons name="image-outline" size={32} color="#CCC" />
-          </View>
-        )}
-        <TouchableOpacity
-          style={styles.wishlistButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            toggleWishlist(item.id, item);
-          }}
-        >
-          <Ionicons
-            name={wishlist.has(item.id) ? "heart" : "heart-outline"}
-            size={18}
-            color={wishlist.has(item.id) ? "#C35822" : "#8F796F"}
-          />
-        </TouchableOpacity>
-      </View>
+  const renderProductItem = ({ item }: any) => {
+    const rating = item.rating || 0;
+    const reviewsCount = item.reviewsCount || 0;
 
-      <Text style={styles.productName} numberOfLines={1}>
-        {item.name}
-      </Text>
-      <Text style={styles.sellerName} numberOfLines={1}>
-        {item.sellerName || "MarketMNL"}
-      </Text>
-
-      <View style={styles.priceRow}>
-        <Text style={styles.price}>₱{item.price}</Text>
-        <View style={styles.rating}>
-          <Ionicons name="star" size={12} color="#FFD700" />
-          <Text style={styles.ratingText}>{item.rating || 4.5}</Text>
+    return (
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => navigateToProduct(item.id)}
+        activeOpacity={0.9}
+      >
+        <View style={styles.imageContainer}>
+          {item.imageUrl ? (
+            <Image
+              source={{ uri: item.imageUrl }}
+              style={styles.productImage}
+            />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Ionicons name="image-outline" size={32} color="#CCC" />
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.wishlistButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              toggleWishlist(item.id, item);
+            }}
+          >
+            <Ionicons
+              name={wishlist.has(item.id) ? "heart" : "heart-outline"}
+              size={18}
+              color={wishlist.has(item.id) ? "#C35822" : "#8F796F"}
+            />
+          </TouchableOpacity>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+
+        <Text style={styles.productName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={styles.sellerName} numberOfLines={1}>
+          {item.sellerName || "MarketMNL"}
+        </Text>
+
+        <View style={styles.priceRow}>
+          <Text style={styles.price}>₱{item.price}</Text>
+          {reviewsCount > 0 ? (
+            <View style={styles.rating}>
+              <Ionicons name="star" size={12} color="#FFD700" />
+              <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
+              <Text style={styles.reviewCountText}>({reviewsCount})</Text>
+            </View>
+          ) : (
+            <View style={styles.rating}>
+              <Ionicons name="star-outline" size={12} color="#8F796F" />
+              <Text style={styles.ratingTextNoReview}>No reviews</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const renderShopItem = ({ item }: { item: Shop }) => (
     <TouchableOpacity
@@ -893,6 +960,15 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   ratingText: {
+    fontSize: 11,
+    color: "#666",
+  },
+  reviewCountText: {
+    fontSize: 10,
+    color: "#8F796F",
+    marginLeft: 2,
+  },
+  ratingTextNoReview: {
     fontSize: 11,
     color: "#8F796F",
   },
