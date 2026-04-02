@@ -1,4 +1,4 @@
-// app/(seller)/orders.tsx - No debug panel
+// app/(seller)/orders.tsx - Fixed to match actual data structure
 import { auth, db } from "@/lib/firebase";
 import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
@@ -46,7 +46,8 @@ interface Order {
   subtotal: number;
   shippingFee: number;
   total: number;
-  shippingAddress: {
+  // The actual field name from checkout is 'address', not 'shippingAddress'
+  address: {
     fullName: string;
     phone: string;
     street: string;
@@ -113,6 +114,14 @@ export default function OrdersScreen() {
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
+        console.log("📦 Order data:", {
+          orderNumber: data.orderNumber,
+          customerName: data.customerName,
+          customerEmail: data.customerEmail,
+          address: data.address,
+          userId: data.userId,
+        });
+        
         const status =
           data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
         ordersList.push({
@@ -336,7 +345,7 @@ export default function OrdersScreen() {
           </View>
         </View>
 
-        <Text style={styles.customerName}>{item.customerName}</Text>
+        <Text style={styles.customerName}>{item.customerName || "Customer"}</Text>
         <Text style={styles.productName}>
           {mainProduct.productName} x{mainProduct.quantity}
           {otherItemsCount > 0 && ` +${otherItemsCount} more`}
@@ -578,7 +587,7 @@ export default function OrdersScreen() {
         </View>
       </Modal>
 
-      {/* Order Details Modal */}
+      {/* Order Details Modal - Fixed to use 'address' field */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -617,13 +626,13 @@ export default function OrdersScreen() {
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Customer Name</Text>
                     <Text style={styles.detailValue}>
-                      {selectedOrder.customerName}
+                      {selectedOrder.customerName || "N/A"}
                     </Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Customer Email</Text>
                     <Text style={styles.detailValue}>
-                      {selectedOrder.customerEmail}
+                      {selectedOrder.customerEmail || selectedOrder.userEmail || "N/A"}
                     </Text>
                   </View>
 
@@ -699,20 +708,20 @@ export default function OrdersScreen() {
                   <View style={styles.divider} />
 
                   <Text style={styles.sectionTitle}>Shipping Address</Text>
+                  {/* Using 'address' field instead of 'shippingAddress' */}
                   <Text style={styles.addressName}>
-                    {selectedOrder.shippingAddress?.fullName || "N/A"}
+                    {selectedOrder.address?.fullName || "N/A"}
                   </Text>
                   <Text style={styles.addressPhone}>
-                    {selectedOrder.shippingAddress?.phone || "N/A"}
+                    {selectedOrder.address?.phone || "N/A"}
                   </Text>
                   <Text style={styles.addressText}>
-                    {selectedOrder.shippingAddress?.street &&
-                    selectedOrder.shippingAddress?.street !== ""
-                      ? `${selectedOrder.shippingAddress.street}, ${selectedOrder.shippingAddress.barangay || ""}, ${selectedOrder.shippingAddress.city || ""}, ${selectedOrder.shippingAddress.province || ""} ${selectedOrder.shippingAddress.zipCode || ""}`
+                    {selectedOrder.address?.street && selectedOrder.address?.street !== ""
+                      ? `${selectedOrder.address.street}, ${selectedOrder.address.barangay || ""}, ${selectedOrder.address.city || ""}, ${selectedOrder.address.province || ""} ${selectedOrder.address.zipCode || ""}`
                       : "No address provided"}
                   </Text>
                   <Text style={styles.addressLabel}>
-                    Label: {selectedOrder.shippingAddress?.label || "N/A"}
+                    Label: {selectedOrder.address?.label || "N/A"}
                   </Text>
                 </>
               )}

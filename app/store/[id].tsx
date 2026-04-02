@@ -1,4 +1,4 @@
-// app/store/[id].tsx
+// app/store/[id].tsx - Fixed 2-column grid for odd number of items
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -347,41 +347,58 @@ export default function StoreScreen() {
     }
   };
 
-  const renderProductItem = ({ item }: { item: Product }) => (
-    <TouchableOpacity 
-      style={styles.productCard}
-      onPress={() => navigateToProduct(item.id)}
-    >
-      <View style={styles.productImagePlaceholder}>
-        {item.imageUrl ? (
-          <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
-        ) : (
-          <Ionicons name="image-outline" size={30} color="#CCC" />
-        )}
-        <TouchableOpacity 
-          style={styles.wishlistButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            toggleWishlist(item.id, item);
-          }}
-        >
-          <Ionicons 
-            name={wishlist.has(item.id) ? "heart" : "heart-outline"} 
-            size={18} 
-            color={wishlist.has(item.id) ? "#C35822" : "#8F796F"} 
-          />
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
-      <View style={styles.productRow}>
-        <Text style={styles.productPrice}>₱{item.price}</Text>
-        <View style={styles.productRating}>
-          <Ionicons name="star" size={12} color="#FFD700" />
-          <Text style={styles.ratingText}>{item.rating}</Text>
+  // Helper function to format data for 2-column grid
+  const formatProductData = () => {
+    const formattedData = [...filteredProducts];
+    // If odd number of items, add an empty placeholder
+    if (formattedData.length % 2 !== 0) {
+      formattedData.push({} as Product); // Empty placeholder
+    }
+    return formattedData;
+  };
+
+  const renderProductItem = ({ item }: { item: Product }) => {
+    // Check if it's an empty placeholder
+    if (!item.id) {
+      return <View style={styles.productCardPlaceholder} />;
+    }
+    
+    return (
+      <TouchableOpacity 
+        style={styles.productCard}
+        onPress={() => navigateToProduct(item.id)}
+      >
+        <View style={styles.productImagePlaceholder}>
+          {item.imageUrl ? (
+            <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+          ) : (
+            <Ionicons name="image-outline" size={30} color="#CCC" />
+          )}
+          <TouchableOpacity 
+            style={styles.wishlistButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              toggleWishlist(item.id, item);
+            }}
+          >
+            <Ionicons 
+              name={wishlist.has(item.id) ? "heart" : "heart-outline"} 
+              size={18} 
+              color={wishlist.has(item.id) ? "#C35822" : "#8F796F"} 
+            />
+          </TouchableOpacity>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+        <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
+        <View style={styles.productRow}>
+          <Text style={styles.productPrice}>₱{item.price}</Text>
+          <View style={styles.productRating}>
+            <Ionicons name="star" size={12} color="#FFD700" />
+            <Text style={styles.ratingText}>{item.rating}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
@@ -422,6 +439,7 @@ export default function StoreScreen() {
   }
 
   const categories = ["All", ...(store.categories || [])];
+  const formattedProducts = formatProductData();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -553,9 +571,9 @@ export default function StoreScreen() {
           </View>
 
           <FlatList
-            data={filteredProducts}
+            data={formattedProducts}
             renderItem={renderProductItem}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => item.id || `placeholder-${index}`}
             numColumns={2}
             columnWrapperStyle={styles.productsGrid}
             scrollEnabled={false}
@@ -800,7 +818,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   productCard: {
-    flex: 1,
+    width: "48%",
     backgroundColor: "#FFF",
     borderRadius: 12,
     padding: 12,
@@ -809,6 +827,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    marginBottom: 12,
+  },
+  productCardPlaceholder: {
+    width: "48%",
+    backgroundColor: "transparent",
     marginBottom: 12,
   },
   productImagePlaceholder: {

@@ -2,11 +2,12 @@
 import { useCart } from "@/app/contexts/CartContext";
 import { createOrder } from "@/app/services/orders";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
-import { auth } from "@/lib/firebase"; // ADD auth and db
+import { auth } from "@/lib/firebase";
 import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp, doc, getDoc, writeBatch } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -36,7 +37,6 @@ export default function CheckoutScreen() {
   const [isAddressSelectedFromModal, setIsAddressSelectedFromModal] =
     useState(false);
 
-  // Get params for selected address from select-address screen
   const params = useLocalSearchParams();
 
   // GCash/Maya Modal
@@ -54,25 +54,22 @@ export default function CheckoutScreen() {
   useEffect(() => {
     loadAddresses();
 
-    // Check if an address was passed back from select-address screen
     if (params.selectedAddress) {
       try {
         const selectedAddr = JSON.parse(params.selectedAddress as string);
         setSelectedAddress(selectedAddr);
-        setIsAddressSelectedFromModal(true); // Mark that we manually selected an address
+        setIsAddressSelectedFromModal(true);
         console.log("📍 Address selected from checkout:", selectedAddr);
       } catch (error) {
         console.error("Error parsing selected address:", error);
       }
     }
 
-    // IMPORTANT: Check if selectedItems has data
     console.log("🛒 Selected items from context:", selectedItems);
 
     if (selectedItems && selectedItems.length > 0) {
       setCheckoutItems(selectedItems);
     } else {
-      // If no items in context, show alert and redirect back to cart
       Alert.alert(
         "No Items Selected",
         "Please select items to checkout from your cart.",
@@ -90,7 +87,6 @@ export default function CheckoutScreen() {
     await fetchAddresses();
   };
 
-  // Only set default address if no address was manually selected from the modal
   useEffect(() => {
     if (
       addresses.length > 0 &&
@@ -116,6 +112,36 @@ export default function CheckoutScreen() {
   const shippingFee = 50;
   const subtotal = calculateSubtotal();
   const total = subtotal + shippingFee;
+
+  // Function to update product stock after order
+  const updateProductStock = async (items: any[]) => {
+    const batch = writeBatch(db);
+    
+    for (const item of items) {
+      const productRef = doc(db, "products", item.productId);
+      const productSnap = await getDoc(productRef);
+      
+      if (productSnap.exists()) {
+        const currentStock = productSnap.data().stockQuantity || 0;
+        const newStock = currentStock - item.quantity;
+        
+        if (newStock < 0) {
+          throw new Error(`Insufficient stock for ${item.productName}. Only ${currentStock} available.`);
+        }
+        
+        batch.update(productRef, {
+          stockQuantity: newStock,
+          updatedAt: Timestamp.now()
+        });
+        console.log(`📦 Updated stock for ${item.productName}: ${currentStock} → ${newStock}`);
+      } else {
+        throw new Error(`Product ${item.productName} not found`);
+      }
+    }
+    
+    await batch.commit();
+    console.log("✅ All product stocks updated successfully");
+  };
 
   const handlePaymentSelection = () => {
     if (!selectedAddress) {
@@ -143,6 +169,13 @@ export default function CheckoutScreen() {
     setIsProcessing(true);
 
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert("Error", "You must be logged in to place an order");
+        setIsProcessing(false);
+        return;
+      }
+
       // Verify all items have sellerId
       const missingSellerId = checkoutItems.some((item) => !item.sellerId);
       if (missingSellerId) {
@@ -155,7 +188,28 @@ export default function CheckoutScreen() {
         return;
       }
 
-      // Log the items
+      // First, check if all items have sufficient stock
+      for (const item of checkoutItems) {
+        const productRef = doc(db, "products", item.productId);
+        const productSnap = await getDoc(productRef);
+        
+        if (productSnap.exists()) {
+          const currentStock = productSnap.data().stockQuantity || 0;
+          if (currentStock < item.quantity) {
+            Alert.alert(
+              "Insufficient Stock",
+              `${item.productName} only has ${currentStock} items in stock. Please reduce quantity.`
+            );
+            setIsProcessing(false);
+            return;
+          }
+        } else {
+          Alert.alert("Error", `Product ${item.productName} not found`);
+          setIsProcessing(false);
+          return;
+        }
+      }
+
       console.log(
         "📦 Processing order with items:",
         checkoutItems.map((item) => ({
@@ -167,7 +221,7 @@ export default function CheckoutScreen() {
         })),
       );
 
-      // Prepare order data
+      // Prepare order data with customer information
       const orderData = {
         items: checkoutItems.map((item) => ({
           productId: item.productId,
@@ -193,17 +247,26 @@ export default function CheckoutScreen() {
           zipCode: selectedAddress.zipCode,
           label: selectedAddress.label,
         },
+        // Customer information
+        customerName: user.displayName || selectedAddress.fullName || "Customer",
+        customerEmail: user.email || "",
+        userId: user.uid,
+        userEmail: user.email,
       };
 
-      console.log(
-        "🚀 Sending order to createOrder:",
-        JSON.stringify(orderData, null, 2),
-      );
+      console.log("🚀 Sending order with customer info:", {
+        customerName: orderData.customerName,
+        customerEmail: orderData.customerEmail,
+        userId: orderData.userId,
+      });
 
-      // Call createOrder with the correct parameter
+      // Create the order
       const result = await createOrder(orderData);
 
       if (result.success) {
+        // Update product stock quantities
+        await updateProductStock(checkoutItems);
+        
         setOrderNumber(result.orderNumber);
 
         // CREATE NOTIFICATION FOR THE CUSTOMER
@@ -213,20 +276,17 @@ export default function CheckoutScreen() {
           result.orderId,
         );
         if (notification) {
-          const user = auth.currentUser;
-          if (user) {
-            await createNotification({
-              userId: user.uid,
-              title: notification.title,
-              message: notification.message,
-              type: notification.type,
-              orderId: result.orderId,
-              orderNumber: result.orderNumber,
-              read: false,
-              createdAt: Timestamp.now(),
-            });
-            console.log("📧 Notification created for customer");
-          }
+          await createNotification({
+            userId: user.uid,
+            title: notification.title,
+            message: notification.message,
+            type: notification.type,
+            orderId: result.orderId,
+            orderNumber: result.orderNumber,
+            read: false,
+            createdAt: Timestamp.now(),
+          });
+          console.log("📧 Notification created for customer");
         }
 
         // Remove selected items from cart after successful order
@@ -239,7 +299,7 @@ export default function CheckoutScreen() {
         // Reload cart to refresh
         await loadCart();
 
-        console.log("✅ Order placed successfully, items removed from cart");
+        console.log("✅ Order placed successfully, items removed from cart, stock updated");
         setShowOrderSuccess(true);
       }
     } catch (error: any) {
@@ -252,7 +312,6 @@ export default function CheckoutScreen() {
       setIsProcessing(false);
       setShowPaymentModal(false);
       setShowCreditCardModal(false);
-      // Reset form fields
       setPhoneNumber("");
       setReferenceNumber("");
       setCardNumber("");
@@ -298,7 +357,6 @@ export default function CheckoutScreen() {
     return true;
   };
 
-  // UPDATED: Navigate to select-address screen instead of addresses
   const navigateToSelectAddress = () => {
     router.push("/checkout/select-address");
   };
@@ -397,7 +455,7 @@ export default function CheckoutScreen() {
           )}
         </View>
 
-        {/* Delivery Address Section - UPDATED routing */}
+        {/* Delivery Address Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Address</Text>
           {addresses.length === 0 ? (
@@ -671,7 +729,6 @@ export default function CheckoutScreen() {
   );
 }
 
-// Styles remain the same (kept from your original)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FBF8F4" },
   header: {
@@ -883,7 +940,6 @@ const styles = StyleSheet.create({
   placeOrderText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   processingContainer: { flexDirection: "row", alignItems: "center", gap: 8 },
 
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -926,7 +982,6 @@ const styles = StyleSheet.create({
   },
   confirmButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
 
-  // Success Modal Styles
   successOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

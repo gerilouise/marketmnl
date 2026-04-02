@@ -16,7 +16,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
 
 interface SellerData {
   fullName: string;
@@ -32,6 +31,7 @@ interface SellerData {
 export default function SellerProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [sellerData, setSellerData] = useState<SellerData | null>(null);
 
   const loadSellerData = async () => {
@@ -104,26 +104,18 @@ export default function SellerProfileScreen() {
     router.push("/(seller)/edit-profile");
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      "Log Out",
-      "Are you sure you want to log out?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Log Out",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await signOut(auth);
-              router.replace("/auth/login");
-            } catch (error) {
-              Alert.alert('Error', 'Failed to log out');
-            }
-          },
-        },
-      ]
-    );
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    
+    setLoggingOut(true);
+    
+    try {
+      await auth.signOut();
+      router.replace("/auth/login");
+    } catch (error: any) {
+      Alert.alert("Error", "Failed to log out. Please try again.");
+      setLoggingOut(false);
+    }
   };
 
   const handleViewStore = () => {
@@ -307,10 +299,23 @@ export default function SellerProfileScreen() {
           />
         </View>
 
-        {/* Log Out Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={22} color="#C35822" />
-          <Text style={styles.logoutText}>Log Out</Text>
+        {/* Log Out Button - Red outline like customer side */}
+        <TouchableOpacity 
+          style={[styles.logoutButton, loggingOut && styles.logoutButtonDisabled]} 
+          onPress={handleLogout}
+          disabled={loggingOut}
+        >
+          {loggingOut ? (
+            <>
+              <ActivityIndicator size="small" color="#FF3B30" />
+              <Text style={styles.logoutText}>Logging out...</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
+              <Text style={styles.logoutText}>Log Out</Text>
+            </>
+          )}
         </TouchableOpacity>
 
         {/* Bottom Padding */}
@@ -487,17 +492,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#FFF",
     marginHorizontal: 20,
-    borderRadius: 25,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#C35822",
-    marginBottom: 20,
+    borderRadius: 12,
+    padding: 14,
     gap: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#FF3B30",
+  },
+  logoutButtonDisabled: {
+    opacity: 0.6,
   },
   logoutText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "600",
-    color: "#C35822",
+    color: "#FF3B30",
   },
   bottomPadding: {
     height: 40,

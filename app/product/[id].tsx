@@ -91,12 +91,6 @@ export default function ProductDetailsScreen() {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-  // Review modal state
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewComment, setReviewComment] = useState("");
-  const [submittingReview, setSubmittingReview] = useState(false);
-
   // Load product data from Firebase
   useEffect(() => {
     loadProduct();
@@ -143,9 +137,8 @@ export default function ProductDetailsScreen() {
         } as Product;
         setProduct(productData);
 
-        // Get store name from sellers collection (where seller data is saved during signup)
+        // Get store name from sellers collection
         if (productData.sellerId) {
-          // Try to load from sellers collection first
           const sellerRef = doc(db, "sellers", productData.sellerId);
           const sellerSnap = await getDoc(sellerRef);
 
@@ -155,17 +148,7 @@ export default function ProductDetailsScreen() {
               sellerData.storeName || productData.sellerName || "MarketMNL",
             );
           } else {
-            // Fallback to stores collection
-            const storeRef = doc(db, "stores", productData.sellerId);
-            const storeSnap = await getDoc(storeRef);
-            if (storeSnap.exists()) {
-              const storeData = storeSnap.data();
-              setStoreName(
-                storeData.storeName || productData.sellerName || "MarketMNL",
-              );
-            } else {
-              setStoreName(productData.sellerName || "MarketMNL");
-            }
+            setStoreName(productData.sellerName || "MarketMNL");
           }
         }
 
@@ -232,10 +215,6 @@ export default function ProductDetailsScreen() {
                 reviewsCount: loadedReviews.length,
               }
             : null,
-        );
-      } else {
-        setProduct((prev) =>
-          prev ? { ...prev, rating: 0, reviewsCount: 0 } : null,
         );
       }
     } catch (error) {
@@ -362,61 +341,6 @@ export default function ProductDetailsScreen() {
     }
   };
 
-  const handleSubmitReview = async () => {
-    const user = auth.currentUser;
-    if (!user) {
-      Alert.alert("Login Required", "Please log in to write a review", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") },
-      ]);
-      return;
-    }
-
-    if (!reviewComment.trim()) {
-      Alert.alert("Error", "Please write a comment");
-      return;
-    }
-
-    setSubmittingReview(true);
-    try {
-      const reviewsRef = collection(db, "reviews");
-      const userInitials =
-        user.email?.substring(0, 2).toUpperCase() ||
-        user.displayName?.substring(0, 2).toUpperCase() ||
-        "U";
-      const userName =
-        user.displayName || user.email?.split("@")[0] || "Anonymous";
-
-      await addDoc(reviewsRef, {
-        productId: product?.id,
-        productName: product?.name,
-        productImage: product?.imageUrl || null,
-        userId: user.uid,
-        userName: userName,
-        userInitials: userInitials,
-        rating: reviewRating,
-        comment: reviewComment.trim(),
-        sellerId: product?.sellerId,
-        sellerName: storeName,
-        orderNumber: null,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-
-      await loadReviews();
-      setReviewRating(5);
-      setReviewComment("");
-      setShowReviewModal(false);
-
-      Alert.alert("Success", "Thank you for your review!");
-    } catch (error) {
-      console.error("Error submitting review:", error);
-      Alert.alert("Error", "Failed to submit review");
-    } finally {
-      setSubmittingReview(false);
-    }
-  };
-
   const handleGoBack = () => {
     router.back();
   };
@@ -445,31 +369,6 @@ export default function ProductDetailsScreen() {
             size={14}
             color="#FFD700"
           />
-        ))}
-      </View>
-    );
-  };
-
-  const renderRatingStars = (
-    rating: number,
-    size: number = 20,
-    interactive: boolean = false,
-  ) => {
-    return (
-      <View style={styles.starsRow}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <TouchableOpacity
-            key={star}
-            onPress={() => interactive && setReviewRating(star)}
-            disabled={!interactive}
-          >
-            <Ionicons
-              name={star <= rating ? "star" : "star-outline"}
-              size={size}
-              color="#FFD700"
-              style={interactive && styles.interactiveStar}
-            />
-          </TouchableOpacity>
         ))}
       </View>
     );
@@ -757,7 +656,7 @@ export default function ProductDetailsScreen() {
             </View>
           )}
 
-          {/* Reviews Section */}
+          {/* Reviews Section - View Only */}
           <View style={styles.reviewsSection}>
             <View style={styles.reviewsHeader}>
               <View style={styles.reviewsTitleContainer}>
@@ -767,13 +666,7 @@ export default function ProductDetailsScreen() {
               <Text style={styles.reviewsCount}>{reviews.length} reviews</Text>
             </View>
 
-            <TouchableOpacity
-              style={styles.writeReviewButton}
-              onPress={() => setShowReviewModal(true)}
-            >
-              <Ionicons name="create-outline" size={18} color="#C35822" />
-              <Text style={styles.writeReviewText}>Write a Review</Text>
-            </TouchableOpacity>
+            {/* Write Review Button - REMOVED */}
 
             {loadingReviews && (
               <View style={styles.loadingReviewsContainer}>
@@ -808,7 +701,7 @@ export default function ProductDetailsScreen() {
               <View style={styles.emptyReviewsContainer}>
                 <Ionicons name="chatbubble-outline" size={40} color="#E0DAD1" />
                 <Text style={styles.emptyReviewsText}>
-                  No reviews yet. Be the first to review!
+                  No reviews yet.
                 </Text>
               </View>
             )}
@@ -883,66 +776,6 @@ export default function ProductDetailsScreen() {
           )}
         </TouchableOpacity>
       </View>
-
-      <Modal
-        visible={showReviewModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowReviewModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Write a Review</Text>
-              <TouchableOpacity onPress={() => setShowReviewModal(false)}>
-                <Ionicons name="close" size={24} color="#32221B" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalBody}>
-              <Text style={styles.modalLabel}>Rating</Text>
-              {renderRatingStars(reviewRating, 32, true)}
-
-              <Text style={[styles.modalLabel, { marginTop: 20 }]}>
-                Your Review
-              </Text>
-              <TextInput
-                style={styles.reviewInput}
-                placeholder="Share your experience with this product..."
-                placeholderTextColor="#8F796F"
-                value={reviewComment}
-                onChangeText={setReviewComment}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-            </View>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowReviewModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  submittingReview && styles.submitButtonDisabled,
-                ]}
-                onPress={handleSubmitReview}
-                disabled={submittingReview}
-              >
-                {submittingReview ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Submit</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1302,24 +1135,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#8F796F",
   },
-  writeReviewButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFF",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 25,
-    borderWidth: 1,
-    borderColor: "#C35822",
-    marginBottom: 16,
-    gap: 6,
-  },
-  writeReviewText: {
-    fontSize: 14,
-    color: "#C35822",
-    fontWeight: "500",
-  },
   reviewCard: {
     backgroundColor: "#FFF",
     borderRadius: 12,
@@ -1366,13 +1181,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 2,
   },
-  starsRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  interactiveStar: {
-    marginRight: 4,
-  },
   reviewComment: {
     fontSize: 14,
     color: "#666",
@@ -1403,81 +1211,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#C35822",
     fontWeight: "500",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: "#FFF",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    minHeight: 400,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  modalBody: {
-    flex: 1,
-  },
-  modalLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#32221B",
-    marginBottom: 8,
-  },
-  reviewInput: {
-    backgroundColor: "#FBF8F4",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 14,
-    color: "#32221B",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-    minHeight: 100,
-  },
-  modalFooter: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 20,
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 25,
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-    alignItems: "center",
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    color: "#8F796F",
-    fontWeight: "500",
-  },
-  submitButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 25,
-    backgroundColor: "#C35822",
-    alignItems: "center",
-  },
-  submitButtonDisabled: {
-    backgroundColor: "#FFB6A5",
-  },
-  submitButtonText: {
-    fontSize: 14,
-    color: "#FFF",
-    fontWeight: "600",
   },
   bottomPadding: {
     height: 100,

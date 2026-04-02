@@ -46,7 +46,7 @@ export default function SellerProductsManageScreen() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
-  const [category, setCategory] = useState("Bottled");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [stock, setStock] = useState("");
   const [weight, setWeight] = useState("");
   const [calories, setCalories] = useState("");
@@ -110,6 +110,14 @@ export default function SellerProductsManageScreen() {
     }
   };
 
+  const toggleCategory = (category: string) => {
+    if (selectedCategories.includes(category)) {
+      setSelectedCategories(selectedCategories.filter(c => c !== category));
+    } else {
+      setSelectedCategories([...selectedCategories, category]);
+    }
+  };
+
   // Recipe functions
   const addRecipe = () => {
     setRecipes([
@@ -144,7 +152,7 @@ export default function SellerProductsManageScreen() {
     setName("");
     setDescription("");
     setPrice("");
-    setCategory("Bottled");
+    setSelectedCategories([]);
     setStock("");
     setWeight("");
     setCalories("");
@@ -183,7 +191,14 @@ export default function SellerProductsManageScreen() {
         setName(product.name || "");
         setDescription(product.description || "");
         setPrice(product.price?.toString() || "");
-        setCategory(product.category || "Bottled");
+        // Handle categories (can be string or array)
+        if (product.categories && Array.isArray(product.categories)) {
+          setSelectedCategories(product.categories);
+        } else if (product.category) {
+          setSelectedCategories([product.category]);
+        } else {
+          setSelectedCategories([]);
+        }
         setStock(product.stockQuantity?.toString() || "");
         setWeight(product.netWeight || "");
         setCalories(product.calories?.toString() || "");
@@ -254,9 +269,14 @@ export default function SellerProductsManageScreen() {
   };
 
   const handleSubmit = async () => {
-    // Validate required fields - ADDED storage and shelfLife
+    // Validate required fields
     if (!name || !price || !stock || !weight || !storage || !shelfLife) {
       Alert.alert("Error", "Please fill in all required fields (*)");
+      return;
+    }
+
+    if (selectedCategories.length === 0) {
+      Alert.alert("Error", "Please select at least one category");
       return;
     }
 
@@ -297,10 +317,10 @@ export default function SellerProductsManageScreen() {
 
       const productData = {
         name: name.trim(),
-        description:
-          description.trim() || `${name} - Authentic Filipino delicacy`,
+        description: description.trim() || `${name} - Authentic Filipino delicacy`,
         price: parseFloat(price),
-        category,
+        categories: selectedCategories, // Store as array for multiple categories
+        category: selectedCategories[0] || "Bottled", // Keep single category for backward compatibility
         stockQuantity: parseInt(stock),
         netWeight: weight.trim(),
         calories: calories ? parseFloat(calories) : null,
@@ -316,7 +336,7 @@ export default function SellerProductsManageScreen() {
         updatedAt: now,
       };
 
-      console.log("Saving product with image URL:", productData.imageUrl);
+      console.log("Saving product with categories:", productData.categories);
 
       if (isEditing) {
         const productRef = doc(db, "products", productId as string);
@@ -527,31 +547,42 @@ export default function SellerProductsManageScreen() {
             </View>
           </View>
 
-          {/* Category */}
+          {/* Categories - Multi-select */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Category</Text>
+            <Text style={styles.sectionTitle}>
+              Categories <Text style={styles.required}>*</Text>
+            </Text>
+            <Text style={styles.hintText}>Select one or more categories</Text>
             <View style={styles.categoriesContainer}>
               {CATEGORIES.map((cat) => (
                 <TouchableOpacity
                   key={cat}
                   style={[
                     styles.categoryChip,
-                    category === cat && styles.categoryChipActive,
+                    selectedCategories.includes(cat) && styles.categoryChipActive,
                   ]}
-                  onPress={() => setCategory(cat)}
+                  onPress={() => toggleCategory(cat)}
                   disabled={submitting}
                 >
                   <Text
                     style={[
                       styles.categoryChipText,
-                      category === cat && styles.categoryChipTextActive,
+                      selectedCategories.includes(cat) && styles.categoryChipTextActive,
                     ]}
                   >
                     {cat}
                   </Text>
+                  {selectedCategories.includes(cat) && (
+                    <Ionicons name="checkmark" size={14} color="#FFF" style={styles.categoryCheck} />
+                  )}
                 </TouchableOpacity>
               ))}
             </View>
+            {selectedCategories.length > 0 && (
+              <Text style={styles.selectedCount}>
+                Selected: {selectedCategories.length} category(ies)
+              </Text>
+            )}
           </View>
 
           {/* Recipes Section */}
@@ -662,7 +693,7 @@ export default function SellerProductsManageScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Additional Details - UPDATED with required markers */}
+          {/* Additional Details */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Additional Details</Text>
 
@@ -794,6 +825,11 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginBottom: 6,
   },
+  hintText: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginBottom: 12,
+  },
   imageUploader: {
     width: "100%",
     height: 180,
@@ -893,14 +929,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 8,
     backgroundColor: "#FBF8F4",
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "#E0DAD1",
-    minWidth: 70,
-    alignItems: "center",
+    gap: 6,
   },
   categoryChipActive: {
     backgroundColor: "#C35822",
@@ -913,6 +950,14 @@ const styles = StyleSheet.create({
   },
   categoryChipTextActive: {
     color: "#FFF",
+  },
+  categoryCheck: {
+    marginLeft: 2,
+  },
+  selectedCount: {
+    fontSize: 12,
+    color: "#C35822",
+    marginTop: 8,
   },
   recipeContainer: {
     marginBottom: 20,

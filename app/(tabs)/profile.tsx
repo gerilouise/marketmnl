@@ -1,23 +1,13 @@
-// app/(tabs)/profile.tsx - With custom logout modal
+// app/(tabs)/profile.tsx
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
-import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  Modal,
   ScrollView,
   StyleSheet,
   Switch,
@@ -26,6 +16,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { auth, db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 interface FollowedShop {
   id: string;
@@ -39,33 +31,54 @@ export default function ProfileScreen() {
   const [followedShops, setFollowedShops] = useState<FollowedShop[]>([]);
   const [loadingFollowed, setLoadingFollowed] = useState(true);
   const [wishlistCount, setWishlistCount] = useState(0);
-  const [debugMessage, setDebugMessage] = useState("Ready");
-  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [ordersCount, setOrdersCount] = useState(0);
+  const [reviewsCount, setReviewsCount] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [reviewCount, setReviewCount] = useState(0); // ADD THIS STATE
-  const { profile, addresses, loading, fetchProfile, fetchAddresses } =
-    useFirebaseProfile();
+  const { profile, addresses, loading, fetchProfile, fetchAddresses } = useFirebaseProfile();
 
   useEffect(() => {
     loadData();
-    loadReviewCount(); // ADD THIS
   }, []);
 
-  // ADD THIS FUNCTION inside your ProfileScreen component
-  const loadReviewCount = async () => {
-    try {
+  // Set up real-time listener for orders count
+  useFocusEffect(
+    useCallback(() => {
       const user = auth.currentUser;
-      if (!user) return;
+      if (!user) {
+        setOrdersCount(0);
+        return;
+      }
 
-      const reviewsRef = collection(db, "reviews");
-      const q = query(reviewsRef, where("userId", "==", user.uid));
-      const querySnapshot = await getDocs(q);
+      const ordersRef = collection(db, 'orders');
+      const q = query(ordersRef, where('userId', '==', user.uid));
 
-      setReviewCount(querySnapshot.size);
-    } catch (error) {
-      console.error("Error loading review count:", error);
-    }
-  };
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setOrdersCount(snapshot.size);
+      });
+
+      return () => unsubscribe();
+    }, [])
+  );
+
+  // Set up real-time listener for reviews count
+  useFocusEffect(
+    useCallback(() => {
+      const user = auth.currentUser;
+      if (!user) {
+        setReviewsCount(0);
+        return;
+      }
+
+      const reviewsRef = collection(db, 'product_reviews');
+      const q = query(reviewsRef, where('userId', '==', user.uid));
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setReviewsCount(snapshot.size);
+      });
+
+      return () => unsubscribe();
+    }, [])
+  );
 
   // Set up real-time listener for wishlist count
   useFocusEffect(
@@ -76,16 +89,15 @@ export default function ProfileScreen() {
         return;
       }
 
-      const wishlistRef = collection(db, "wishlists");
-      const q = query(wishlistRef, where("userId", "==", user.uid));
+      const wishlistRef = collection(db, 'wishlists');
+      const q = query(wishlistRef, where('userId', '==', user.uid));
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setWishlistCount(snapshot.size);
-        setDebugMessage(`Wishlist updated: ${snapshot.size} items`);
       });
 
       return () => unsubscribe();
-    }, []),
+    }, [])
   );
 
   // Set up real-time listener for followed shops
@@ -98,23 +110,21 @@ export default function ProfileScreen() {
         return;
       }
 
-      setDebugMessage(`Setting up follows listener...`);
       setLoadingFollowed(true);
 
-      const followsRef = collection(db, "follows");
-      const q = query(followsRef, where("userId", "==", user.uid));
+      const followsRef = collection(db, 'follows');
+      const q = query(followsRef, where('userId', '==', user.uid));
 
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        setDebugMessage(`Found ${snapshot.size} followed shops`);
         const shops: FollowedShop[] = [];
-
+        
         for (const docSnapshot of snapshot.docs) {
           const followData = docSnapshot.data();
           const shopId = followData.shopId;
-
-          const sellerRef = doc(db, "sellers", shopId);
+          
+          const sellerRef = doc(db, 'sellers', shopId);
           const sellerSnap = await getDoc(sellerRef);
-
+          
           if (sellerSnap.exists()) {
             const sellerData = sellerSnap.data();
             shops.push({
@@ -125,57 +135,36 @@ export default function ProfileScreen() {
             });
           }
         }
-
+        
         setFollowedShops(shops);
         setLoadingFollowed(false);
       });
 
       return () => unsubscribe();
-    }, []),
+    }, [])
   );
 
   const loadData = async () => {
-    setDebugMessage("Loading profile data...");
     await fetchProfile();
     await fetchAddresses();
-    setDebugMessage("Profile data loaded");
   };
 
-  const showLogoutModal = () => {
-    setDebugMessage("Logout button pressed");
-    setLogoutModalVisible(true);
-  };
-
-  const confirmLogout = async () => {
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    
     setLoggingOut(true);
-    setDebugMessage("Logging out...");
-    setLogoutModalVisible(false);
-
+    
     try {
-      // Sign out from Firebase
       await auth.signOut();
-      setDebugMessage("✅ Signed out successfully!");
-
-      // Clear local state
       setFollowedShops([]);
       setWishlistCount(0);
-      setReviewCount(0); // ADD THIS
-
-      // Navigate to login
-      setTimeout(() => {
-        router.replace("/auth/login");
-      }, 100);
+      setOrdersCount(0);
+      setReviewsCount(0);
+      router.replace("/auth/login");
     } catch (error: any) {
-      setDebugMessage(`❌ Logout error: ${error.message}`);
       Alert.alert("Error", "Failed to log out. Please try again.");
-    } finally {
       setLoggingOut(false);
     }
-  };
-
-  const cancelLogout = () => {
-    setLogoutModalVisible(false);
-    setDebugMessage("Logout cancelled");
   };
 
   const handleEditProfile = () => {
@@ -184,6 +173,13 @@ export default function ProfileScreen() {
 
   const navigateToStore = (storeId: string) => {
     router.push(`/store/${storeId}`);
+  };
+
+  const navigateToAllFollowing = () => {
+    router.push({
+      pathname: "/(tabs)/following",
+      params: { followedShops: JSON.stringify(followedShops) }
+    });
   };
 
   const navigateTo = (screen: string) => {
@@ -195,7 +191,7 @@ export default function ProfileScreen() {
         router.push("/(tabs)/orders");
         break;
       case "reviews":
-        router.push("/reviews"); // CHANGE THIS - navigate to reviews screen
+        Alert.alert("Coming Soon", "Reviews screen will be available soon!");
         break;
       case "wishlist":
         router.push("/(tabs)/wishlist");
@@ -253,154 +249,142 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Debug Panel
-        <View style={styles.debugPanel}>
-          <Text style={styles.debugTitle}>🔍 Debug:</Text>
-          <Text style={styles.debugText}>{debugMessage}</Text>
-          <Text style={styles.debugTextSmall}>
-            User: {user ? user.uid.substring(0, 8) + "..." : "Not logged in"}
-          </Text>
-        </View> */}
-
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileImageContainer}>
             {profile?.photoURL ? (
-              <Image
-                source={{ uri: profile.photoURL }}
-                style={styles.profileImage}
-              />
+              <Image source={{ uri: profile.photoURL }} style={styles.profileImage} />
             ) : (
               <View style={styles.profileImagePlaceholder}>
                 <Ionicons name="person" size={48} color="#C0B7AE" />
               </View>
             )}
-            <TouchableOpacity
-              style={styles.editImageButton}
-              onPress={handleEditProfile}
-            >
+            <TouchableOpacity style={styles.editImageButton} onPress={handleEditProfile}>
               <Ionicons name="camera" size={14} color="#FFF" />
             </TouchableOpacity>
           </View>
 
           <Text style={styles.profileName}>{profile?.fullName || "User"}</Text>
-          <Text style={styles.profileEmail}>
-            {profile?.email || user?.email || "No email"}
-          </Text>
+          <Text style={styles.profileEmail}>{profile?.email || user?.email || "No email"}</Text>
 
-          <TouchableOpacity
-            style={styles.editProfileButton}
-            onPress={handleEditProfile}
-          >
+          <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
             <Ionicons name="pencil-outline" size={14} color="#C35822" />
             <Text style={styles.editProfileText}>Edit Profile</Text>
           </TouchableOpacity>
 
-          {/* Stats Row - UPDATED to use reviewCount state */}
+          {/* Stats Row - Real-time counts */}
           <View style={styles.statsRow}>
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => navigateTo("orders")}
-            >
-              <Text style={styles.statNumber}>{profile?.ordersCount || 0}</Text>
+            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("orders")}>
+              <Text style={styles.statNumber}>{ordersCount}</Text>
               <Text style={styles.statLabel}>Orders</Text>
             </TouchableOpacity>
             <View style={styles.statDivider} />
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => navigateTo("reviews")}
-            >
-              <Text style={styles.statNumber}>{reviewCount}</Text>
+            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("reviews")}>
+              <Text style={styles.statNumber}>{reviewsCount}</Text>
               <Text style={styles.statLabel}>Reviews</Text>
             </TouchableOpacity>
             <View style={styles.statDivider} />
-            <TouchableOpacity
-              style={styles.statItem}
-              onPress={() => navigateTo("wishlist")}
-            >
+            <TouchableOpacity style={styles.statItem} onPress={() => navigateTo("wishlist")}>
               <Text style={styles.statNumber}>{wishlistCount}</Text>
               <Text style={styles.statLabel}>Wishlist</Text>
             </TouchableOpacity>
           </View>
         </View>
 
+        {/* Following Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Following</Text>
+            <Text style={styles.sectionCount}>{followedShops.length} shops</Text>
+          </View>
+
+          {loadingFollowed ? (
+            <ActivityIndicator size="small" color="#C35822" style={styles.sectionLoader} />
+          ) : followedShops.length > 0 ? (
+            <View>
+              {followedShops.slice(0, 3).map((shop) => (
+                <TouchableOpacity key={shop.id} style={styles.followedShopItem} onPress={() => navigateToStore(shop.id)}>
+                  {shop.storeImage ? (
+                    <Image source={{ uri: shop.storeImage }} style={styles.shopAvatar} />
+                  ) : (
+                    <View style={styles.shopAvatarPlaceholder}>
+                      <Ionicons name="storefront-outline" size={22} color="#C0B7AE" />
+                    </View>
+                  )}
+                  <View style={styles.shopInfo}>
+                    <Text style={styles.shopName}>{shop.storeName}</Text>
+                    {shop.description && (
+                      <Text style={styles.shopDescription} numberOfLines={1}>
+                        {shop.description}
+                      </Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#C0B7AE" />
+                </TouchableOpacity>
+              ))}
+              {followedShops.length > 3 && (
+                <TouchableOpacity style={styles.viewAllButton} onPress={navigateToAllFollowing}>
+                  <Text style={styles.viewAllButtonText}>View all {followedShops.length} shops</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="heart-outline" size={40} color="#E0DAD1" />
+              <Text style={styles.emptyStateText}>No shops followed yet</Text>
+              <TouchableOpacity onPress={() => router.push("/(tabs)/browse")}>
+                <Text style={styles.emptyStateLink}>Browse shops</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         {/* Address Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Shipping Address</Text>
+            <Text style={styles.sectionTitle}>Default Address</Text>
             <TouchableOpacity onPress={() => navigateTo("addresses")}>
               <Text style={styles.sectionLink}>Manage</Text>
             </TouchableOpacity>
           </View>
 
           {defaultAddress ? (
-            <View style={styles.addressCard}>
-              <View style={styles.addressIconRow}>
-                <Ionicons name="location-outline" size={18} color="#C35822" />
-                <Text style={styles.addressLabelTag}>
-                  {defaultAddress.label}
-                </Text>
+            <TouchableOpacity style={styles.addressItem} onPress={() => navigateTo("addresses")}>
+              <View style={styles.addressIcon}>
+                <Ionicons name="location-outline" size={20} color="#C35822" />
               </View>
-              <Text style={styles.addressName}>{defaultAddress.fullName}</Text>
-              <Text style={styles.addressText}>
-                {defaultAddress.street}, {defaultAddress.barangay},{" "}
-                {defaultAddress.city}
-              </Text>
-              <Text style={styles.addressText}>
-                {defaultAddress.province} {defaultAddress.zipCode}
-              </Text>
-              <Text style={styles.addressPhone}>{defaultAddress.phone}</Text>
-            </View>
+              <View style={styles.addressInfo}>
+                <Text style={styles.addressName}>{defaultAddress.fullName}</Text>
+                <Text style={styles.addressText}>
+                  {defaultAddress.street}, {defaultAddress.barangay}, {defaultAddress.city}
+                </Text>
+                <Text style={styles.addressText}>
+                  {defaultAddress.province} {defaultAddress.zipCode}
+                </Text>
+                <Text style={styles.addressPhone}>{defaultAddress.phone}</Text>
+                <View style={styles.addressLabel}>
+                  <Text style={styles.addressLabelText}>{defaultAddress.label}</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#C0B7AE" />
+            </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              style={styles.addAddressButton}
-              onPress={() => router.push("/(tabs)/add-address")}
-            >
-              <Ionicons name="add-circle-outline" size={22} color="#C35822" />
+            <TouchableOpacity style={styles.addAddressItem} onPress={() => router.push("/(tabs)/add-address")}>
+              <Ionicons name="add-circle-outline" size={24} color="#C35822" />
               <Text style={styles.addAddressText}>Add a shipping address</Text>
             </TouchableOpacity>
           )}
         </View>
 
         {/* Quick Actions */}
-        <View style={styles.quickActionsRow}>
-          <TouchableOpacity
-            style={styles.quickActionItem}
-            onPress={() => navigateTo("orders")}
-          >
-            <View style={styles.quickActionIcon}>
-              <Ionicons name="bag-handle-outline" size={22} color="#C35822" />
-            </View>
-            <Text style={styles.quickActionLabel}>Orders</Text>
+        <View style={styles.quickActions}>
+          <TouchableOpacity style={styles.quickActionButton} onPress={() => navigateTo("orders")}>
+            <Ionicons name="bag-handle-outline" size={22} color="#C35822" />
+            <Text style={styles.quickActionText}>My Orders</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.quickActionItem}
-            onPress={() => router.push("/chatbot")}
-          >
-            <View style={styles.quickActionIcon}>
-              <Ionicons
-                name="chatbubble-ellipses-outline"
-                size={22}
-                color="#C35822"
-              />
-            </View>
-            <Text style={styles.quickActionLabel}>Chat</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.quickActionItem}
-            onPress={() => navigateTo("following")}
-          >
-            <View style={styles.quickActionIcon}>
-              <Ionicons name="heart-outline" size={22} color="#C35822" />
-            </View>
-            <Text style={styles.quickActionLabel}>Following</Text>
-            {followedShops.length > 0 && (
-              <View style={styles.quickActionBadge}>
-                <Text style={styles.quickActionBadgeText}>
-                  {followedShops.length}
-                </Text>
-              </View>
-            )}
+          <TouchableOpacity style={styles.quickActionButton} onPress={() => router.push("/chatbot")}>
+            <Ionicons name="chatbubble-ellipses-outline" size={22} color="#C35822" />
+            <Text style={styles.quickActionText}>AI Chatbot</Text>
           </TouchableOpacity>
         </View>
 
@@ -409,14 +393,14 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Account</Text>
           <MenuItem
             icon="location-outline"
-            title="Addresses"
-            subtitle={`${addresses?.length || 0} saved`}
+            title="Shipping Addresses"
+            subtitle={`${addresses?.length || 0} saved addresses`}
             onPress={() => navigateTo("addresses")}
           />
           <MenuItem
             icon="star-outline"
-            title="Reviews"
-            subtitle={`${reviewCount} reviews`} // CHANGED to use reviewCount
+            title="My Reviews"
+            subtitle={`${reviewsCount} reviews written`}
             onPress={() => navigateTo("reviews")}
           />
         </View>
@@ -427,13 +411,9 @@ export default function ProfileScreen() {
           <View style={styles.menuItem}>
             <View style={styles.menuItemLeft}>
               <View style={styles.iconContainer}>
-                <Ionicons
-                  name="notifications-outline"
-                  size={22}
-                  color="#8F796F"
-                />
+                <Ionicons name="notifications-outline" size={22} color="#8F796F" />
               </View>
-              <Text style={styles.menuItemTitle}>Notifications</Text>
+              <Text style={styles.menuItemTitle}>Push Notifications</Text>
             </View>
             <Switch
               value={notificationsEnabled}
@@ -444,64 +424,32 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Logout Button - Red Outline */}
-        <TouchableOpacity style={styles.logoutButton} onPress={showLogoutModal}>
-          <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
-          <Text style={styles.logoutText}>Log Out</Text>
+        {/* Logout Button */}
+        <TouchableOpacity 
+          style={[styles.logoutButton, loggingOut && styles.logoutButtonDisabled]} 
+          onPress={handleLogout}
+          disabled={loggingOut}
+        >
+          {loggingOut ? (
+            <>
+              <ActivityIndicator size="small" color="#FF3B30" />
+              <Text style={styles.logoutText}>Logging out...</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
+              <Text style={styles.logoutText}>Log Out</Text>
+            </>
+          )}
         </TouchableOpacity>
 
         <View style={styles.bottomPadding} />
       </ScrollView>
-
-      {/* Custom Logout Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={logoutModalVisible}
-        onRequestClose={cancelLogout}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalIcon}>
-              <Ionicons name="log-out-outline" size={50} color="#FF3B30" />
-            </View>
-            <Text style={styles.modalTitle}>Log Out</Text>
-            <Text style={styles.modalMessage}>
-              Are you sure you want to log out?
-            </Text>
-            <Text style={styles.modalWarning}>
-              You will need to log in again.
-            </Text>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelModalButton]}
-                onPress={cancelLogout}
-                disabled={loggingOut}
-              >
-                <Text style={styles.cancelModalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.logoutModalButton]}
-                onPress={confirmLogout}
-                disabled={loggingOut}
-              >
-                {loggingOut ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Text style={styles.logoutModalButtonText}>Log Out</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  // ... keep all your existing styles exactly as they are ...
   container: {
     flex: 1,
     backgroundColor: "#FBF8F4",
@@ -524,32 +472,6 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "bold",
     color: "#32221B",
-  },
-  debugPanel: {
-    backgroundColor: "#FFF3E0",
-    marginHorizontal: 20,
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#C35822",
-  },
-  debugTitle: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#C35822",
-    marginBottom: 4,
-  },
-  debugText: {
-    fontSize: 12,
-    color: "#32221B",
-    fontFamily: "monospace",
-    marginBottom: 2,
-  },
-  debugTextSmall: {
-    fontSize: 10,
-    color: "#8F796F",
-    fontFamily: "monospace",
   },
   profileCard: {
     backgroundColor: "#FFF",
@@ -667,36 +589,96 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F5F0EB",
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: "600",
     color: "#32221B",
   },
+  sectionCount: {
+    fontSize: 13,
+    color: "#8F796F",
+  },
   sectionLink: {
     fontSize: 13,
     color: "#C35822",
     fontWeight: "500",
   },
-  addressCard: {
-    backgroundColor: "#FEF5ED",
-    borderRadius: 12,
-    padding: 12,
+  sectionLoader: {
+    paddingVertical: 20,
   },
-  addressIconRow: {
+  followedShopItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F5F0EB",
+  },
+  shopAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 12,
+  },
+  shopAvatarPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#F5F0EB",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  shopInfo: {
+    flex: 1,
+  },
+  shopName: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#32221B",
+    marginBottom: 2,
+  },
+  shopDescription: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  viewAllButton: {
+    paddingTop: 12,
+    alignItems: "center",
+  },
+  viewAllButtonText: {
+    fontSize: 13,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 24,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginTop: 8,
     marginBottom: 8,
   },
-  addressLabelTag: {
-    fontSize: 11,
-    fontWeight: "500",
+  emptyStateLink: {
+    fontSize: 13,
     color: "#C35822",
-    backgroundColor: "#FFF",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
+    fontWeight: "500",
+  },
+  addressItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  addressIcon: {
+    width: 32,
+    marginRight: 12,
+  },
+  addressInfo: {
+    flex: 1,
   },
   addressName: {
     fontSize: 14,
@@ -714,67 +696,55 @@ const styles = StyleSheet.create({
     color: "#8F796F",
     marginTop: 4,
   },
-  addAddressButton: {
+  addressLabel: {
+    backgroundColor: "#F5F0EB",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: "flex-start",
+    marginTop: 6,
+  },
+  addressLabelText: {
+    fontSize: 10,
+    color: "#8F796F",
+  },
+  addAddressItem: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingVertical: 16,
+    paddingVertical: 20,
   },
   addAddressText: {
     fontSize: 14,
     color: "#C35822",
     fontWeight: "500",
   },
-  quickActionsRow: {
+  quickActions: {
     flexDirection: "row",
     marginHorizontal: 20,
     gap: 12,
     marginBottom: 16,
   },
-  quickActionItem: {
+  quickActionButton: {
     flex: 1,
     backgroundColor: "#FFF",
     borderRadius: 12,
-    paddingVertical: 12,
+    padding: 14,
     alignItems: "center",
-    position: "relative",
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
   },
-  quickActionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FEF5ED",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  quickActionLabel: {
-    fontSize: 12,
+  quickActionText: {
+    fontSize: 14,
     fontWeight: "500",
     color: "#32221B",
-  },
-  quickActionBadge: {
-    position: "absolute",
-    top: 6,
-    right: 12,
-    backgroundColor: "#C35822",
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 4,
-  },
-  quickActionBadgeText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "#FFF",
   },
   menuItem: {
     flexDirection: "row",
@@ -831,6 +801,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#FF3B30",
   },
+  logoutButtonDisabled: {
+    opacity: 0.6,
+  },
   logoutText: {
     fontSize: 15,
     fontWeight: "600",
@@ -838,74 +811,5 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    backgroundColor: "#FFF",
-    borderRadius: 20,
-    padding: 24,
-    width: "85%",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  modalIcon: {
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#32221B",
-    marginBottom: 8,
-  },
-  modalMessage: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  modalWarning: {
-    fontSize: 12,
-    color: "#FF3B30",
-    textAlign: "center",
-    marginBottom: 24,
-  },
-  modalButtons: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: "center",
-  },
-  cancelModalButton: {
-    backgroundColor: "#F5F5F5",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-  },
-  cancelModalButtonText: {
-    color: "#8F796F",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  logoutModalButton: {
-    backgroundColor: "#FF3B30",
-  },
-  logoutModalButtonText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
   },
 });

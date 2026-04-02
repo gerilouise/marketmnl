@@ -2,7 +2,7 @@
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { db } from "@/lib/firebase";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
   collection,
@@ -424,7 +424,7 @@ export default function HomeScreen() {
         activeOpacity={0.8}
       >
         <View style={styles.chatButtonInner}>
-          <Ionicons name="chatbubble-ellipses" size={28} color="#FFF" />
+          <MaterialCommunityIcons name="robot-outline" size={30} color="white" />
         </View>
       </TouchableOpacity>
     </SafeAreaView>

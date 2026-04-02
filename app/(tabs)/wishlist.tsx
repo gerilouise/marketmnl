@@ -12,6 +12,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  setDoc,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
@@ -45,6 +46,7 @@ export default function WishlistScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [addingToCartId, setAddingToCartId] = useState<string | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const [addingAll, setAddingAll] = useState(false);
 
   // Load wishlist from Firebase
   const loadWishlist = async () => {
@@ -55,8 +57,6 @@ export default function WishlistScreen() {
         setLoading(false);
         return;
       }
-
-      console.log("Loading wishlist for user:", user.uid);
 
       const wishlistRef = collection(db, "wishlists");
       const q = query(wishlistRef, where("userId", "==", user.uid));
@@ -78,13 +78,11 @@ export default function WishlistScreen() {
         } as WishlistItem);
       });
 
-      // Sort manually in JavaScript instead
       items.sort((a, b) => {
         return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
       });
 
       setWishlistItems(items);
-      console.log("Wishlist loaded:", items.length, "items");
     } catch (error) {
       console.error("Error loading wishlist:", error);
       Alert.alert("Error", "Failed to load wishlist");
@@ -131,7 +129,6 @@ export default function WishlistScreen() {
     setAddingToCartId(item.productId);
 
     try {
-      // Check stock first
       const stockQuantity = await checkProductStock(item.productId);
 
       if (stockQuantity <= 0) {
@@ -143,14 +140,12 @@ export default function WishlistScreen() {
         return;
       }
 
-      // Check if item already exists in cart
-      const cartRef = collection(db, "carts");
       const cartItemId = `${user.uid}_${item.productId}`;
+      const cartRef = collection(db, "carts");
       const cartDocRef = doc(cartRef, cartItemId);
       const cartDocSnap = await getDoc(cartDocRef);
 
       if (cartDocSnap.exists()) {
-        // Update quantity if exists
         const currentQuantity = cartDocSnap.data().quantity;
         const newQuantity = currentQuantity + 1;
 
@@ -167,9 +162,8 @@ export default function WishlistScreen() {
           quantity: newQuantity,
           updatedAt: Timestamp.now(),
         });
-        Alert.alert("Success", `Quantity updated for ${item.productName}`);
+        Alert.alert("Success", `Updated quantity for ${item.productName}`);
       } else {
-        // Add new item
         await setDoc(cartDocRef, {
           id: cartItemId,
           userId: user.uid,
@@ -185,42 +179,16 @@ export default function WishlistScreen() {
         });
         Alert.alert("Success", `${item.productName} added to cart`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding to cart:", error);
-      Alert.alert("Error", "Failed to add item to cart");
+      Alert.alert("Error", error.message || "Failed to add item to cart");
     } finally {
       setAddingToCartId(null);
     }
   };
 
-  // ========== DIRECT DELETE TEST FUNCTION (gaya sa cart) ==========
-  const directDeleteTest = async (productId: string, productName: string) => {
-    console.log("=== DIRECT DELETE TEST ===");
-    console.log("Product ID to delete:", productId);
-    console.log("Product Name:", productName);
-
-    try {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      const itemId = `${user.uid}_${productId}`;
-      const itemRef = doc(db, "wishlists", itemId);
-      await deleteDoc(itemRef);
-      console.log("✅ DIRECT DELETE SUCCESSFUL!");
-
-      await loadWishlist(); // Refresh the wishlist
-      Alert.alert("Success", `"${productName}" removed from wishlist`);
-      return true;
-    } catch (error: any) {
-      console.error("❌ Direct delete failed:", error);
-      Alert.alert("Error", error.message);
-      return false;
-    }
-  };
-  // ================================================================
-
-  // Remove from wishlist - gamit ang directDeleteTest
-  const handleRemoveFromWishlist = (productId: string, productName: string) => {
+  // Remove from wishlist
+  const handleRemoveFromWishlist = async (productId: string, productName: string) => {
     Alert.alert(
       "Remove from Wishlist",
       `Remove "${productName}" from your wishlist?`,
@@ -231,17 +199,33 @@ export default function WishlistScreen() {
           style: "destructive",
           onPress: async () => {
             setDeletingItemId(productId);
-            await directDeleteTest(productId, productName);
-            setDeletingItemId(null);
+            try {
+              const user = auth.currentUser;
+              if (user) {
+                const itemId = `${user.uid}_${productId}`;
+                const itemRef = doc(db, "wishlists", itemId);
+                await deleteDoc(itemRef);
+                await loadWishlist();
+                Alert.alert("Success", `"${productName}" removed from wishlist`);
+              }
+            } catch (error) {
+              console.error("Error removing from wishlist:", error);
+              Alert.alert("Error", "Failed to remove item");
+            } finally {
+              setDeletingItemId(null);
+            }
           },
         },
       ],
     );
   };
 
-  // Add all to cart
+  // Add all to cart - Direct, no confirmation
   const handleAddAllToCart = async () => {
-    if (wishlistItems.length === 0) return;
+    if (wishlistItems.length === 0) {
+      Alert.alert("Info", "Your wishlist is empty");
+      return;
+    }
 
     const user = auth.currentUser;
     if (!user) {
@@ -249,75 +233,78 @@ export default function WishlistScreen() {
       return;
     }
 
-    Alert.alert(
-      "Add All to Cart",
-      `Add all ${wishlistItems.length} items to your cart?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Add All",
-          onPress: async () => {
-            let addedCount = 0;
-            let outOfStockCount = 0;
+    setAddingAll(true);
 
-            for (const item of wishlistItems) {
-              try {
-                // Check stock for each item
-                const stockQuantity = await checkProductStock(item.productId);
+    let addedCount = 0;
+    let outOfStockCount = 0;
+    let failedCount = 0;
 
-                if (stockQuantity <= 0) {
-                  outOfStockCount++;
-                  continue;
-                }
+    for (let i = 0; i < wishlistItems.length; i++) {
+      const item = wishlistItems[i];
+      
+      try {
+        // Get product stock
+        const productRef = doc(db, "products", item.productId);
+        const productSnap = await getDoc(productRef);
+        
+        if (!productSnap.exists()) {
+          failedCount++;
+          continue;
+        }
+        
+        const stockQuantity = productSnap.data().stockQuantity || 0;
 
-                const cartRef = collection(db, "carts");
-                const cartItemId = `${user.uid}_${item.productId}`;
-                const cartDocRef = doc(cartRef, cartItemId);
-                const cartDocSnap = await getDoc(cartDocRef);
+        if (stockQuantity <= 0) {
+          outOfStockCount++;
+          continue;
+        }
 
-                if (cartDocSnap.exists()) {
-                  const currentQuantity = cartDocSnap.data().quantity;
-                  const newQuantity = currentQuantity + 1;
+        // Check if already in cart
+        const cartItemId = `${user.uid}_${item.productId}`;
+        const cartDocRef = doc(db, "carts", cartItemId);
+        const cartDocSnap = await getDoc(cartDocRef);
 
-                  if (newQuantity <= stockQuantity) {
-                    await updateDoc(cartDocRef, {
-                      quantity: newQuantity,
-                      updatedAt: Timestamp.now(),
-                    });
-                    addedCount++;
-                  } else {
-                    outOfStockCount++;
-                  }
-                } else {
-                  await setDoc(cartDocRef, {
-                    id: cartItemId,
-                    userId: user.uid,
-                    productId: item.productId,
-                    productName: item.productName,
-                    productPrice: item.productPrice,
-                    sellerName: item.sellerName,
-                    sellerId: item.sellerId,
-                    quantity: 1,
-                    imageUrl: item.productImage || null,
-                    addedAt: Timestamp.now(),
-                    updatedAt: Timestamp.now(),
-                  });
-                  addedCount++;
-                }
-              } catch (error) {
-                console.error("Error adding item:", error);
-              }
-            }
+        if (cartDocSnap.exists()) {
+          const currentQuantity = cartDocSnap.data().quantity || 1;
+          const newQuantity = currentQuantity + 1;
+          
+          if (newQuantity <= stockQuantity) {
+            await updateDoc(cartDocRef, {
+              quantity: newQuantity,
+              updatedAt: Timestamp.now(),
+            });
+            addedCount++;
+          } else {
+            outOfStockCount++;
+          }
+        } else {
+          await setDoc(cartDocRef, {
+            id: cartItemId,
+            userId: user.uid,
+            productId: item.productId,
+            productName: item.productName,
+            productPrice: item.productPrice,
+            sellerName: item.sellerName,
+            sellerId: item.sellerId,
+            quantity: 1,
+            imageUrl: item.productImage || null,
+            addedAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+          });
+          addedCount++;
+        }
+      } catch (error) {
+        console.error("Error adding item:", error);
+        failedCount++;
+      }
+    }
 
-            let message = `Added ${addedCount} item(s) to cart.`;
-            if (outOfStockCount > 0) {
-              message += ` ${outOfStockCount} item(s) were out of stock.`;
-            }
-            Alert.alert("Done", message);
-          },
-        },
-      ],
-    );
+    let message = `Added ${addedCount} item(s) to cart.`;
+    if (outOfStockCount > 0) message += ` ${outOfStockCount} out of stock.`;
+    if (failedCount > 0) message += ` ${failedCount} failed.`;
+    Alert.alert("Done", message);
+    
+    setAddingAll(false);
   };
 
   // Navigate to product
@@ -333,13 +320,14 @@ export default function WishlistScreen() {
 
   const renderItem = ({ item }: { item: WishlistItem }) => {
     const isDeleting = deletingItemId === item.productId;
+    const isAddingToCart = addingToCartId === item.productId;
 
     return (
       <TouchableOpacity
         style={styles.wishlistItem}
         onPress={() => navigateToProduct(item.productId)}
         activeOpacity={0.7}
-        disabled={isDeleting}
+        disabled={isDeleting || isAddingToCart}
       >
         <View style={styles.imagePlaceholder}>
           {item.productImage ? (
@@ -363,37 +351,33 @@ export default function WishlistScreen() {
         </View>
 
         <View style={styles.actionButtons}>
-          {/* CART BUTTON */}
           <TouchableOpacity
             style={styles.cartButton}
             onPress={(e) => {
               e.stopPropagation();
               handleAddToCart(item);
             }}
-            disabled={addingToCartId === item.productId || isDeleting}
+            disabled={isAddingToCart || isDeleting}
           >
-            {addingToCartId === item.productId ? (
+            {isAddingToCart ? (
               <ActivityIndicator size="small" color="#FFF" />
             ) : (
               <Ionicons name="cart-outline" size={18} color="#FFF" />
             )}
           </TouchableOpacity>
 
-          {/* TEST DELETE BUTTON - Direktang deleteDoc gaya ng sa cart */}
           <TouchableOpacity
-            style={styles.testDeleteButton}
+            style={styles.deleteButton}
             onPress={(e) => {
               e.stopPropagation();
-              setDeletingItemId(item.productId);
-              directDeleteTest(item.productId, item.productName);
-              setDeletingItemId(null);
+              handleRemoveFromWishlist(item.productId, item.productName);
             }}
-            disabled={isDeleting}
+            disabled={isDeleting || isAddingToCart}
           >
             {isDeleting ? (
               <ActivityIndicator size="small" color="#FFF" />
             ) : (
-              <Ionicons name="trash" size={18} color="#FFF" />
+              <Ionicons name="trash-outline" size={18} color="#FFF" />
             )}
           </TouchableOpacity>
         </View>
@@ -401,7 +385,6 @@ export default function WishlistScreen() {
     );
   };
 
-  // Check if user is logged in
   const user = auth.currentUser;
   if (!user && !loading) {
     return (
@@ -467,13 +450,23 @@ export default function WishlistScreen() {
           wishlistItems.length > 0 ? (
             <View style={styles.footerContainer}>
               <TouchableOpacity
-                style={styles.addAllButton}
+                style={[styles.addAllButton, addingAll && styles.addAllButtonDisabled]}
                 onPress={handleAddAllToCart}
+                disabled={addingAll}
               >
-                <Ionicons name="cart-outline" size={18} color="#FFF" />
-                <Text style={styles.addAllButtonText}>
-                  Add All to Cart ({wishlistItems.length})
-                </Text>
+                {addingAll ? (
+                  <>
+                    <ActivityIndicator size="small" color="#FFF" />
+                    <Text style={styles.addAllButtonText}>Adding to Cart...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="cart-outline" size={18} color="#FFF" />
+                    <Text style={styles.addAllButtonText}>
+                      Add All to Cart ({wishlistItems.length})
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           ) : null
@@ -605,9 +598,9 @@ const styles = StyleSheet.create({
   },
   cartButton: {
     backgroundColor: "#C35822",
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: "#000",
@@ -616,11 +609,11 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  testDeleteButton: {
-    backgroundColor: "#db0606",
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  deleteButton: {
+    backgroundColor: "#FF3B30",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: "#000",
@@ -647,6 +640,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  addAllButtonDisabled: {
+    opacity: 0.6,
   },
   addAllButtonText: {
     color: "#FFF",
