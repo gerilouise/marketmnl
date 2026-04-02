@@ -95,6 +95,13 @@ export default function SellerLayout() {
           href: null, // This hides it from the tab bar
         }}
       />
+
+    <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null, // This hides it from the tab bar
+        }}
+      />
     </Tabs>
   );
 }

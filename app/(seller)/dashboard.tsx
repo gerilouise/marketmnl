@@ -291,6 +291,123 @@ export default function SellerDashboardScreen() {
     return () => unsubscribe();
   }, []);
 
+  // Set up real-time listener for products (NEW)
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const productsRef = collection(db, 'products');
+    const q = query(productsRef, where('sellerId', '==', user.uid));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log(`📦 Real-time products update: ${snapshot.size} products`);
+      
+      setStats(prev => ({
+        ...prev,
+        products: snapshot.size,
+      }));
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Set up real-time listener for reviews (NEW)
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    // First, get all product IDs for this seller
+    const productsRef = collection(db, 'products');
+    const productsQuery = query(productsRef, where('sellerId', '==', user.uid));
+    
+    let unsubscribeProducts: (() => void) | null = null;
+    let unsubscribeReviews: (() => void) | null = null;
+    
+    // Listen to products changes to update reviews listener
+    unsubscribeProducts = onSnapshot(productsQuery, (productsSnapshot) => {
+      const productIds: string[] = [];
+      productsSnapshot.forEach((doc) => {
+        productIds.push(doc.id);
+      });
+      
+      // If there are no products, reset rating
+      if (productIds.length === 0) {
+        setStats(prev => ({
+          ...prev,
+          rating: 0,
+        }));
+        return;
+      }
+      
+      // Unsubscribe from previous reviews listener if exists
+      if (unsubscribeReviews) {
+        unsubscribeReviews();
+      }
+      
+      // Create a new reviews listener for all products
+      // Note: This creates multiple listeners, one per product
+      // For better performance with many products, consider using a different approach
+      const reviewListeners: (() => void)[] = [];
+      
+      productIds.forEach((productId) => {
+        const reviewsRef = collection(db, 'reviews');
+        const reviewsQuery = query(reviewsRef, where('productId', '==', productId));
+        
+        const unsubscribe = onSnapshot(reviewsQuery, () => {
+          // Recalculate average rating when any review changes
+          const calculateAverageRating = async () => {
+            try {
+              let totalRatingSum = 0;
+              let totalReviewsCount = 0;
+              
+              // Get all products again
+              const currentProductsSnapshot = await getDocs(productsQuery);
+              const currentProductIds: string[] = [];
+              currentProductsSnapshot.forEach((doc) => {
+                currentProductIds.push(doc.id);
+              });
+              
+              // Fetch all reviews for all products
+              for (const pid of currentProductIds) {
+                const reviewsSnapshot = await getDocs(query(collection(db, 'reviews'), where('productId', '==', pid)));
+                reviewsSnapshot.forEach((reviewDoc) => {
+                  const reviewData = reviewDoc.data();
+                  totalRatingSum += reviewData.rating || 0;
+                  totalReviewsCount++;
+                });
+              }
+              
+              const averageRating = totalReviewsCount > 0 ? totalRatingSum / totalReviewsCount : 0;
+              
+              setStats(prev => ({
+                ...prev,
+                rating: averageRating,
+              }));
+              
+              console.log(`⭐ Rating updated: ${averageRating.toFixed(1)} from ${totalReviewsCount} reviews`);
+            } catch (error) {
+              console.error("Error calculating rating:", error);
+            }
+          };
+          
+          calculateAverageRating();
+        });
+        
+        reviewListeners.push(unsubscribe);
+      });
+      
+      // Combine all review listeners into one unsubscribe function
+      unsubscribeReviews = () => {
+        reviewListeners.forEach(unsubscribe => unsubscribe());
+      };
+    });
+    
+    return () => {
+      if (unsubscribeProducts) unsubscribeProducts();
+      if (unsubscribeReviews) unsubscribeReviews();
+    };
+  }, []);
+
   // Load data when screen mounts
   useEffect(() => {
     fetchDashboardData();

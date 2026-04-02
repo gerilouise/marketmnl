@@ -1,4 +1,4 @@
-// app/(seller)/products.tsx - Final version without debug
+// app/(seller)/products.tsx - With product details view on click
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
@@ -45,6 +45,10 @@ export default function SellerProductsScreen() {
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [productToDelete, setProductToDelete] = useState<{ id: string; name: string } | null>(null);
+  
+  // View Product Modal
+  const [viewModalVisible, setViewModalVisible] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
   // Fetch ONLY the logged-in user's products
   const fetchProducts = async () => {
@@ -166,6 +170,25 @@ export default function SellerProductsScreen() {
     setProductToDelete(null);
   };
 
+  // View product details
+  const viewProductDetails = (product: any) => {
+    setSelectedProduct(product);
+    setViewModalVisible(true);
+  };
+
+  const closeViewModal = () => {
+    setViewModalVisible(false);
+    setSelectedProduct(null);
+  };
+
+  // Edit product
+  const handleEditProduct = (productId: string) => {
+    router.push({
+      pathname: "/(seller)/product-manage",
+      params: { productId },
+    });
+  };
+
   // Fetch products when screen loads
   useEffect(() => {
     fetchProducts();
@@ -182,13 +205,6 @@ export default function SellerProductsScreen() {
     router.push("/(seller)/product-manage");
   };
 
-  const handleEditProduct = (productId: string) => {
-    router.push({
-      pathname: "/(seller)/product-manage",
-      params: { productId },
-    });
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchProducts();
@@ -199,7 +215,12 @@ export default function SellerProductsScreen() {
     const isDeleting = deletingProductId === item.id;
     
     return (
-      <View style={styles.productCard}>
+      <TouchableOpacity 
+        style={styles.productCard}
+        onPress={() => viewProductDetails(item)}
+        activeOpacity={0.7}
+        disabled={isDeleting}
+      >
         <View style={styles.productImagePlaceholder}>
           {item.imageUrl ? (
             <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
@@ -233,7 +254,10 @@ export default function SellerProductsScreen() {
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={[styles.editButton, isDeleting && styles.disabledButton]}
-            onPress={() => handleEditProduct(item.id)}
+            onPress={() => {
+              // Stop propagation so it doesn't trigger the parent onPress
+              handleEditProduct(item.id);
+            }}
             disabled={isDeleting}
           >
             <Ionicons name="create-outline" size={20} color="#FFF" />
@@ -244,7 +268,10 @@ export default function SellerProductsScreen() {
               styles.deleteButton,
               isDeleting && styles.disabledButton
             ]}
-            onPress={() => showDeleteConfirmation(item.id, item.name)}
+            onPress={() => {
+              // Stop propagation so it doesn't trigger the parent onPress
+              showDeleteConfirmation(item.id, item.name);
+            }}
             disabled={isDeleting}
           >
             {isDeleting ? (
@@ -254,7 +281,155 @@ export default function SellerProductsScreen() {
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Product Details Modal Component
+  const ProductDetailsModal = () => {
+    if (!selectedProduct) return null;
+
+    // Get all categories as an array
+    const categoriesList = selectedProduct.categories || [selectedProduct.category].filter(Boolean);
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={viewModalVisible}
+        onRequestClose={closeViewModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Product Details</Text>
+              <TouchableOpacity onPress={closeViewModal} style={styles.closeButton}>
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Product Image */}
+              <View style={styles.modalImageContainer}>
+                {selectedProduct.imageUrl ? (
+                  <Image source={{ uri: selectedProduct.imageUrl }} style={styles.modalImage} />
+                ) : (
+                  <View style={styles.modalImagePlaceholder}>
+                    <Ionicons name="image-outline" size={60} color="#CCC" />
+                  </View>
+                )}
+              </View>
+
+              {/* Product Name */}
+              <Text style={styles.modalProductName}>{selectedProduct.name}</Text>
+
+              {/* Price and Stock */}
+              <View style={styles.modalPriceStockRow}>
+                <Text style={styles.modalPrice}>₱{selectedProduct.price?.toFixed(2)}</Text>
+                <Text style={styles.modalStock}>Stock: {selectedProduct.stockQuantity || 0}</Text>
+              </View>
+
+              {/* Categories */}
+              {categoriesList.length > 0 && (
+                <View style={styles.modalCategories}>
+                  {categoriesList.map((cat: string, index: number) => (
+                    <View key={index} style={styles.modalCategoryChip}>
+                      <Text style={styles.modalCategoryText}>{cat}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Description */}
+              {selectedProduct.description && (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>Description</Text>
+                  <Text style={styles.modalDescription}>
+                    {selectedProduct.description}
+                  </Text>
+                </View>
+              )}
+
+              {/* Product Details */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Product Details</Text>
+                
+                <View style={styles.modalDetailRow}>
+                  <Text style={styles.modalDetailLabel}>Net Weight:</Text>
+                  <Text style={styles.modalDetailValue}>{selectedProduct.netWeight || "N/A"}</Text>
+                </View>
+                
+                {selectedProduct.calories && (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Calories:</Text>
+                    <Text style={styles.modalDetailValue}>{selectedProduct.calories} kcal</Text>
+                  </View>
+                )}
+                
+                {selectedProduct.origin && (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Origin:</Text>
+                    <Text style={styles.modalDetailValue}>{selectedProduct.origin}</Text>
+                  </View>
+                )}
+                
+                {selectedProduct.culturalBackground && (
+                  <View style={styles.modalDetailRow}>
+                    <Text style={styles.modalDetailLabel}>Cultural Background:</Text>
+                    <Text style={styles.modalDetailValue}>{selectedProduct.culturalBackground}</Text>
+                  </View>
+                )}
+                
+                <View style={styles.modalDetailRow}>
+                  <Text style={styles.modalDetailLabel}>Storage:</Text>
+                  <Text style={styles.modalDetailValue}>{selectedProduct.storage || "N/A"}</Text>
+                </View>
+                
+                <View style={styles.modalDetailRow}>
+                  <Text style={styles.modalDetailLabel}>Shelf Life:</Text>
+                  <Text style={styles.modalDetailValue}>{selectedProduct.shelfLife || "N/A"}</Text>
+                </View>
+              </View>
+
+              {/* Recipes */}
+              {selectedProduct.recipes && selectedProduct.recipes.length > 0 && (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>Recipes</Text>
+                  {selectedProduct.recipes.map((recipe: any, index: number) => (
+                    <View key={index} style={styles.modalRecipeItem}>
+                      <Text style={styles.modalRecipeName}>{recipe.name}</Text>
+                      <Text style={styles.modalRecipeDesc}>{recipe.description}</Text>
+                      <Text style={styles.modalRecipeMeta}>
+                        {recipe.prepTime} • {recipe.difficulty}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.editProductButton}
+                onPress={() => {
+                  closeViewModal();
+                  handleEditProduct(selectedProduct.id);
+                }}
+              >
+                <Ionicons name="create-outline" size={18} color="#FFF" />
+                <Text style={styles.editProductButtonText}>Edit Product</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.closeModalButton}
+                onPress={closeViewModal}
+              >
+                <Text style={styles.closeModalButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -386,6 +561,9 @@ export default function SellerProductsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Product Details Modal */}
+      <ProductDetailsModal />
     </SafeAreaView>
   );
 }
@@ -620,40 +798,180 @@ const styles = StyleSheet.create({
   modalContent: {
     backgroundColor: "#FFF",
     borderRadius: 20,
-    padding: 24,
-    width: "85%",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    padding: 20,
+    width: "90%",
+    maxHeight: "85%",
   },
-  modalIcon: {
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E0DAD1",
   },
   modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalImageContainer: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 16,
+  },
+  modalImagePlaceholder: {
+    width: 200,
+    height: 200,
+    borderRadius: 16,
+    backgroundColor: "#F0F0F0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalProductName: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#32221B",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalPriceStockRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 16,
+  },
+  modalPrice: {
     fontSize: 20,
     fontWeight: "bold",
+    color: "#C35822",
+  },
+  modalStock: {
+    fontSize: 14,
+    color: "#8F796F",
+  },
+  modalCategories: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 16,
+  },
+  modalCategoryChip: {
+    backgroundColor: "#F0F0F0",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+  },
+  modalCategoryText: {
+    fontSize: 12,
+    color: "#666",
+  },
+  modalSection: {
+    marginBottom: 16,
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
     color: "#32221B",
     marginBottom: 8,
   },
-  modalMessage: {
-    fontSize: 16,
+  modalDescription: {
+    fontSize: 14,
     color: "#666",
-    textAlign: "center",
+    lineHeight: 20,
+  },
+  modalDetailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  modalDetailLabel: {
+    fontSize: 13,
+    color: "#8F796F",
+  },
+  modalDetailValue: {
+    fontSize: 13,
+    color: "#32221B",
+    fontWeight: "500",
+  },
+  modalRecipeItem: {
+    backgroundColor: "#F9F9F9",
+    padding: 12,
+    borderRadius: 12,
     marginBottom: 8,
   },
-  modalWarning: {
-    fontSize: 12,
-    color: "#FF3B30",
-    textAlign: "center",
-    marginBottom: 24,
+  modalRecipeName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 4,
   },
-  modalButtons: {
+  modalRecipeDesc: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 4,
+  },
+  modalRecipeMeta: {
+    fontSize: 11,
+    color: "#8F796F",
+  },
+  modalFooter: {
     flexDirection: "row",
     gap: 12,
-    width: "100%",
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  editProductButton: {
+    flex: 1,
+    flexDirection: "row",
+    backgroundColor: "#C35822",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  editProductButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  closeModalButton: {
+    flex: 1,
+    backgroundColor: "#F5F5F5",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  closeModalButtonText: {
+    color: "#8F796F",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  deleteModalButton: {
+    backgroundColor: "#FF3B30",
+  },
+  deleteModalButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   modalButton: {
     flex: 1,
@@ -671,12 +989,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  deleteModalButton: {
-    backgroundColor: "#FF3B30",
+  modalIcon: {
+    marginBottom: 16,
   },
-  deleteModalButtonText: {
-    color: "#FFF",
+  modalMessage: {
     fontSize: 16,
-    fontWeight: "600",
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalWarning: {
+    fontSize: 12,
+    color: "#FF3B30",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
   },
 });
