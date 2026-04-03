@@ -331,13 +331,42 @@ export default function ProductDetailsScreen() {
   };
 
   const handleShare = async () => {
+    if (!product) {
+      Alert.alert("Error", "Product information not available");
+      return;
+    }
+
     try {
-      await Share.share({
-        message: `Check out ${product?.name} from ${storeName} on MarketMNL! ₱${product?.price}\n\n${product?.description}\n\nGet it here: ${Platform.OS === "ios" ? "marketmnl://product/" + product?.id : "https://marketmnl.com/product/" + product?.id}`,
-        title: product?.name,
+      // Create a beautiful share message
+      const productUrl = Platform.select({
+        ios: `marketmnl://product/${product.id}`,
+        android: `marketmnl://product/${product.id}`,
+        default: `https://marketmnl.com/product/${product.id}`,
       });
-    } catch (error) {
+
+      const shareMessage = `✨ *${product.name}* ✨\n\n` +
+        `🏪 Store: ${storeName}\n` +
+        `💰 Price: ₱${product.price.toLocaleString()}\n\n` +
+        `📝 ${product.description?.substring(0, 150)}${product.description?.length > 150 ? "..." : ""}\n\n` +
+        `⭐ Rating: ${product.rating?.toFixed(1) || "4.5"} ★\n\n` +
+        `👉 Check it out on MarketMNL: ${productUrl}\n\n` +
+        `📱 Download MarketMNL app: https://marketmnl.com/download`;
+
+      const result = await Share.share({
+        message: shareMessage,
+        title: product.name,
+        url: productUrl,
+      });
+
+      if (result.action === Share.sharedAction) {
+        console.log("Shared successfully");
+      }
+    } catch (error: any) {
       console.error("Error sharing:", error);
+      // Don't show alert for user cancellation
+      if (error.message !== "User canceled share dialog") {
+        Alert.alert("Share Failed", "Unable to share at this time. Please try again.");
+      }
     }
   };
 
@@ -666,8 +695,6 @@ export default function ProductDetailsScreen() {
               <Text style={styles.reviewsCount}>{reviews.length} reviews</Text>
             </View>
 
-            {/* Write Review Button - REMOVED */}
-
             {loadingReviews && (
               <View style={styles.loadingReviewsContainer}>
                 <ActivityIndicator size="small" color="#C35822" />
@@ -700,9 +727,7 @@ export default function ProductDetailsScreen() {
             {!loadingReviews && reviews.length === 0 && (
               <View style={styles.emptyReviewsContainer}>
                 <Ionicons name="chatbubble-outline" size={40} color="#E0DAD1" />
-                <Text style={styles.emptyReviewsText}>
-                  No reviews yet.
-                </Text>
+                <Text style={styles.emptyReviewsText}>No reviews yet.</Text>
               </View>
             )}
 

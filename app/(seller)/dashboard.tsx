@@ -12,9 +12,11 @@ import {
   orderBy, 
   onSnapshot,
   Timestamp,
-  updateDoc
+  updateDoc,
+  addDoc,
+  serverTimestamp
 } from "firebase/firestore";
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -64,6 +66,61 @@ export default function SellerDashboardScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+  
+  // Track previous orders to detect new ones
+  const previousOrderIds = useRef<Set<string>>(new Set());
+  // Track product IDs for rating calculation
+  const productIdsRef = useRef<string[]>([]);
+
+  // Function to create order notification
+  const createOrderNotification = async (sellerId: string, orderData: any, type: string) => {
+    try {
+      let title = "";
+      let message = "";
+      
+      switch (type) {
+        case "order_placed":
+          title = "New Order Received! 🎉";
+          message = `Order #${orderData.orderNumber} from ${orderData.customerName} - ₱${orderData.total.toFixed(2)}`;
+          break;
+        case "order_confirmed":
+          title = "Order Confirmed ✅";
+          message = `Order #${orderData.orderNumber} has been confirmed`;
+          break;
+        case "order_shipped":
+          title = "Order Shipped 🚚";
+          message = `Order #${orderData.orderNumber} is on its way`;
+          break;
+        case "order_delivered":
+          title = "Order Delivered 📦";
+          message = `Order #${orderData.orderNumber} has been delivered`;
+          break;
+        case "order_cancelled":
+          title = "Order Cancelled ❌";
+          message = `Order #${orderData.orderNumber} has been cancelled`;
+          break;
+        default:
+          title = "Order Update";
+          message = `Order #${orderData.orderNumber} has been updated`;
+      }
+      
+      const notificationData = {
+        userId: sellerId,
+        title: title,
+        message: message,
+        type: type,
+        orderId: orderData.id,
+        orderNumber: orderData.orderNumber,
+        read: false,
+        createdAt: serverTimestamp(),
+      };
+      
+      await addDoc(collection(db, 'notifications'), notificationData);
+      console.log(`✅ ${type} notification created for order ${orderData.orderNumber}`);
+    } catch (error) {
+      console.error("Error creating notification:", error);
+    }
+  };
 
   // Calculate revenue based on payment method and status
   const calculateRevenue = (order: any) => {
@@ -81,42 +138,11 @@ export default function SellerDashboardScreen() {
     return (status === 'pending' || status === 'confirmed' || status === 'shipped' || status === 'delivered') ? total : 0;
   };
 
-  // Fetch seller data from Firebase
-  const fetchDashboardData = async () => {
+  // Calculate average rating from reviews
+  const calculateAverageRating = async (productIds: string[]) => {
+    if (productIds.length === 0) return 0;
+    
     try {
-      const user = auth.currentUser;
-      if (!user) {
-        console.log("No user logged in");
-        setLoading(false);
-        return;
-      }
-
-      console.log("📊 Fetching dashboard data for seller:", user.uid);
-
-      // 1. Get seller name
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        setSellerName(userData.fullName?.split(' ')[0] || user.displayName || "Seller");
-      } else {
-        setSellerName(user.displayName || "Seller");
-      }
-
-      // 2. Get seller's products count
-      const productsRef = collection(db, 'products');
-      const productsQuery = query(productsRef, where('sellerId', '==', user.uid));
-      const productsSnapshot = await getDocs(productsQuery);
-      const productsCount = productsSnapshot.size;
-      
-      console.log(`📦 Found ${productsCount} products`);
-      
-      // 3. Get all product IDs for rating calculation
-      const productIds: string[] = [];
-      productsSnapshot.forEach((doc) => {
-        productIds.push(doc.id);
-      });
-      
-      // 4. Calculate average rating from reviews
       let totalRatingSum = 0;
       let totalReviewsCount = 0;
       
@@ -132,10 +158,46 @@ export default function SellerDashboardScreen() {
         });
       }
       
-      const averageRating = totalReviewsCount > 0 ? totalRatingSum / totalReviewsCount : 0;
-      console.log(`⭐ Average rating: ${averageRating.toFixed(1)} from ${totalReviewsCount} reviews`);
+      return totalReviewsCount > 0 ? totalRatingSum / totalReviewsCount : 0;
+    } catch (error) {
+      console.error("Error calculating rating:", error);
+      return 0;
+    }
+  };
+
+  // Fetch seller data from Firebase
+  const fetchDashboardData = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        console.log("No user logged in");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📊 Fetching dashboard data for seller:", user.uid);
+
+      // Get seller name
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setSellerName(userData.fullName?.split(' ')[0] || user.displayName || "Seller");
+      } else {
+        setSellerName(user.displayName || "Seller");
+      }
+
+      // Get products count and product IDs
+      const productsRef = collection(db, 'products');
+      const productsQuery = query(productsRef, where('sellerId', '==', user.uid));
+      const productsSnapshot = await getDocs(productsQuery);
+      const productsCount = productsSnapshot.size;
+      const productIds: string[] = [];
+      productsSnapshot.forEach((doc) => {
+        productIds.push(doc.id);
+      });
+      productIdsRef.current = productIds;
       
-      // 5. Get seller's orders and calculate revenue
+      // Get orders and calculate revenue
       const ordersRef = collection(db, 'orders');
       const ordersQuery = query(
         ordersRef,
@@ -154,12 +216,9 @@ export default function SellerDashboardScreen() {
         const orderTotal = orderData.total || 0;
         const paymentMethod = orderData.paymentMethod || 'Cash on Delivery';
         
-        // Calculate revenue based on payment method and status
         const revenueAmount = calculateRevenue(orderData);
         totalRevenue += revenueAmount;
         totalOrders++;
-        
-        console.log(`📋 Order ${orderData.orderNumber}: ${paymentMethod} - ${orderStatus} - ₱${orderTotal} (Revenue: ₱${revenueAmount})`);
 
         ordersList.push({
           id: doc.id,
@@ -173,6 +232,9 @@ export default function SellerDashboardScreen() {
         });
       });
 
+      // Calculate rating
+      const averageRating = await calculateAverageRating(productIds);
+
       setStats({
         orders: totalOrders,
         revenue: totalRevenue,
@@ -180,8 +242,11 @@ export default function SellerDashboardScreen() {
         rating: averageRating,
       });
 
-      // Show only last 5 orders
       setRecentOrders(ordersList.slice(0, 5));
+      
+      // Update previous orders tracking
+      const currentOrderIds = new Set(ordersList.map(o => o.id));
+      previousOrderIds.current = currentOrderIds;
       
       console.log(`✅ Dashboard summary: ${productsCount} products, ${totalOrders} orders, ₱${totalRevenue} revenue, ${averageRating.toFixed(1)}⭐`);
 
@@ -194,7 +259,7 @@ export default function SellerDashboardScreen() {
     }
   };
 
-  // Set up real-time listener for notifications
+  // Set up real-time listener for notifications (to get unread count)
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -233,13 +298,13 @@ export default function SellerDashboardScreen() {
     return () => unsubscribe();
   }, []);
 
-  // Set up real-time listener for orders (to update stats automatically)
+  // Set up real-time listener for orders (updates orders count, revenue, and recent orders)
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
 
     const ordersRef = collection(db, 'orders');
-    const q = query(ordersRef, where('sellerId', '==', user.uid));
+    const q = query(ordersRef, where('sellerId', '==', user.uid), orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       console.log(`📦 Real-time orders update: ${snapshot.size} orders`);
@@ -247,12 +312,16 @@ export default function SellerDashboardScreen() {
       let totalRevenue = 0;
       let totalOrders = 0;
       const ordersList: Order[] = [];
+      const currentOrderIds = new Set<string>();
       
       snapshot.forEach((doc) => {
         const orderData = doc.data();
         const orderStatus = orderData.status || 'pending';
         const orderTotal = orderData.total || 0;
         const paymentMethod = orderData.paymentMethod || 'Cash on Delivery';
+        const orderId = doc.id;
+        
+        currentOrderIds.add(orderId);
         
         // Calculate revenue based on payment method and status
         const revenueAmount = calculateRevenue(orderData);
@@ -260,7 +329,7 @@ export default function SellerDashboardScreen() {
         totalOrders++;
         
         ordersList.push({
-          id: doc.id,
+          id: orderId,
           orderNumber: orderData.orderNumber || doc.id.slice(-8).toUpperCase(),
           customerName: orderData.customerName || "Customer",
           items: orderData.items || [],
@@ -270,6 +339,28 @@ export default function SellerDashboardScreen() {
           createdAt: orderData.createdAt,
         });
       });
+      
+      // Check for new orders
+      const newOrders = ordersList.filter(order => !previousOrderIds.current.has(order.id));
+      
+      if (newOrders.length > 0 && previousOrderIds.current.size > 0) {
+        for (const newOrder of newOrders) {
+          console.log(`🆕 New order detected: ${newOrder.orderNumber}`);
+          await createOrderNotification(user.uid, newOrder, "order_placed");
+          
+          Alert.alert(
+            "New Order! 🎉",
+            `Order #${newOrder.orderNumber} from ${newOrder.customerName} - ₱${newOrder.total.toFixed(2)}`,
+            [
+              { text: "View Order", onPress: () => router.push("/(seller)/orders") },
+              { text: "Dismiss", style: "cancel" }
+            ]
+          );
+        }
+      }
+      
+      // Update tracking
+      previousOrderIds.current = currentOrderIds;
       
       // Sort by date (newest first)
       ordersList.sort((a, b) => {
@@ -291,7 +382,7 @@ export default function SellerDashboardScreen() {
     return () => unsubscribe();
   }, []);
 
-  // Set up real-time listener for products (NEW)
+  // Set up real-time listener for products (updates products count)
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -302,109 +393,78 @@ export default function SellerDashboardScreen() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       console.log(`📦 Real-time products update: ${snapshot.size} products`);
       
+      // Update product IDs ref for rating calculation
+      const newProductIds: string[] = [];
+      snapshot.forEach((doc) => {
+        newProductIds.push(doc.id);
+      });
+      productIdsRef.current = newProductIds;
+      
       setStats(prev => ({
         ...prev,
         products: snapshot.size,
       }));
+      
+      // Recalculate rating when products change
+      calculateAverageRating(newProductIds).then(averageRating => {
+        setStats(prev => ({
+          ...prev,
+          rating: averageRating,
+        }));
+        console.log(`⭐ Rating recalculated: ${averageRating.toFixed(1)}`);
+      });
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Set up real-time listener for reviews (NEW)
+  // Set up real-time listener for reviews (updates rating only)
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
 
-    // First, get all product IDs for this seller
-    const productsRef = collection(db, 'products');
-    const productsQuery = query(productsRef, where('sellerId', '==', user.uid));
+    // Listen to all reviews for the seller's products
+    // Since we can't listen to multiple collections efficiently, we'll listen to each product's reviews
+    let reviewUnsubscribes: (() => void)[] = [];
     
-    let unsubscribeProducts: (() => void) | null = null;
-    let unsubscribeReviews: (() => void) | null = null;
-    
-    // Listen to products changes to update reviews listener
-    unsubscribeProducts = onSnapshot(productsQuery, (productsSnapshot) => {
-      const productIds: string[] = [];
-      productsSnapshot.forEach((doc) => {
-        productIds.push(doc.id);
-      });
+    const setupReviewListeners = () => {
+      // Clean up existing listeners
+      reviewUnsubscribes.forEach(unsubscribe => unsubscribe());
+      reviewUnsubscribes = [];
       
-      // If there are no products, reset rating
-      if (productIds.length === 0) {
-        setStats(prev => ({
-          ...prev,
-          rating: 0,
-        }));
-        return;
-      }
-      
-      // Unsubscribe from previous reviews listener if exists
-      if (unsubscribeReviews) {
-        unsubscribeReviews();
-      }
-      
-      // Create a new reviews listener for all products
-      // Note: This creates multiple listeners, one per product
-      // For better performance with many products, consider using a different approach
-      const reviewListeners: (() => void)[] = [];
-      
-      productIds.forEach((productId) => {
+      // Set up listeners for each product
+      productIdsRef.current.forEach((productId) => {
         const reviewsRef = collection(db, 'reviews');
-        const reviewsQuery = query(reviewsRef, where('productId', '==', productId));
+        const q = query(reviewsRef, where('productId', '==', productId));
         
-        const unsubscribe = onSnapshot(reviewsQuery, () => {
-          // Recalculate average rating when any review changes
-          const calculateAverageRating = async () => {
-            try {
-              let totalRatingSum = 0;
-              let totalReviewsCount = 0;
-              
-              // Get all products again
-              const currentProductsSnapshot = await getDocs(productsQuery);
-              const currentProductIds: string[] = [];
-              currentProductsSnapshot.forEach((doc) => {
-                currentProductIds.push(doc.id);
-              });
-              
-              // Fetch all reviews for all products
-              for (const pid of currentProductIds) {
-                const reviewsSnapshot = await getDocs(query(collection(db, 'reviews'), where('productId', '==', pid)));
-                reviewsSnapshot.forEach((reviewDoc) => {
-                  const reviewData = reviewDoc.data();
-                  totalRatingSum += reviewData.rating || 0;
-                  totalReviewsCount++;
-                });
-              }
-              
-              const averageRating = totalReviewsCount > 0 ? totalRatingSum / totalReviewsCount : 0;
-              
-              setStats(prev => ({
-                ...prev,
-                rating: averageRating,
-              }));
-              
-              console.log(`⭐ Rating updated: ${averageRating.toFixed(1)} from ${totalReviewsCount} reviews`);
-            } catch (error) {
-              console.error("Error calculating rating:", error);
-            }
-          };
-          
-          calculateAverageRating();
+        const unsubscribe = onSnapshot(q, () => {
+          // Recalculate rating when any review changes
+          calculateAverageRating(productIdsRef.current).then(averageRating => {
+            setStats(prev => ({
+              ...prev,
+              rating: averageRating,
+            }));
+            console.log(`⭐ Rating updated from review change: ${averageRating.toFixed(1)}`);
+          });
         });
         
-        reviewListeners.push(unsubscribe);
+        reviewUnsubscribes.push(unsubscribe);
       });
-      
-      // Combine all review listeners into one unsubscribe function
-      unsubscribeReviews = () => {
-        reviewListeners.forEach(unsubscribe => unsubscribe());
-      };
-    });
+    };
+    
+    // Initial setup
+    setupReviewListeners();
+    
+    // Re-setup when product IDs change
+    const interval = setInterval(() => {
+      if (productIdsRef.current.length > 0) {
+        setupReviewListeners();
+      }
+    }, 5000);
     
     return () => {
-      if (unsubscribeProducts) unsubscribeProducts();
-      if (unsubscribeReviews) unsubscribeReviews();
+      reviewUnsubscribes.forEach(unsubscribe => unsubscribe());
+      clearInterval(interval);
     };
   }, []);
 
@@ -433,26 +493,6 @@ export default function SellerDashboardScreen() {
       pathname: "/(seller)/orders",
       params: { orderId: orderId }
     });
-  };
-
-  const markNotificationAsRead = async (notificationId: string) => {
-    try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await updateDoc(notificationRef, { read: true });
-    } catch (error) {
-      console.error("Error marking notification as read:", error);
-    }
-  };
-
-  const handleNotificationPress = async (notification: Notification) => {
-    await markNotificationAsRead(notification.id);
-    
-    if (notification.orderId) {
-      router.push({
-        pathname: "/(seller)/orders",
-        params: { orderId: notification.orderId }
-      });
-    }
   };
 
   const onRefresh = () => {
@@ -543,27 +583,6 @@ export default function SellerDashboardScreen() {
     </TouchableOpacity>
   );
 
-  const renderNotificationItem = ({ item }: { item: Notification }) => (
-    <TouchableOpacity
-      style={[styles.notificationItem, !item.read && styles.notificationUnread]}
-      onPress={() => handleNotificationPress(item)}
-    >
-      <View style={styles.notificationIcon}>
-        <Ionicons 
-          name={item.type === "order" ? "cart-outline" : "information-circle-outline"} 
-          size={24} 
-          color="#C35822" 
-        />
-      </View>
-      <View style={styles.notificationContent}>
-        <Text style={styles.notificationTitle}>{item.title}</Text>
-        <Text style={styles.notificationMessage}>{item.message}</Text>
-        <Text style={styles.notificationTime}>{formatDate(item.createdAt)}</Text>
-      </View>
-      {!item.read && <View style={styles.unreadDot} />}
-    </TouchableOpacity>
-  );
-
   const formatRating = stats.rating > 0 ? stats.rating.toFixed(1) : "0.0";
 
   if (loading && !refreshing) {
@@ -597,7 +616,7 @@ export default function SellerDashboardScreen() {
           </View>
           <TouchableOpacity 
             style={styles.notificationButton}
-            onPress={() => setShowNotifications(!showNotifications)}
+            onPress={() => router.push("/(seller)/notifications")}
           >
             <Ionicons name="notifications-outline" size={24} color="#32221B" />
             {unreadCount > 0 && (
@@ -611,32 +630,6 @@ export default function SellerDashboardScreen() {
         </View>
         <View style={styles.separator} />
       </View>
-
-      {/* Notifications Dropdown */}
-      {showNotifications && (
-        <View style={styles.notificationsDropdown}>
-          <View style={styles.notificationsHeader}>
-            <Text style={styles.notificationsTitle}>Notifications</Text>
-            <TouchableOpacity onPress={() => setShowNotifications(false)}>
-              <Ionicons name="close" size={20} color="#8F796F" />
-            </TouchableOpacity>
-          </View>
-          {notifications.length > 0 ? (
-            <FlatList
-              data={notifications}
-              renderItem={renderNotificationItem}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={true}
-              style={styles.notificationsList}
-            />
-          ) : (
-            <View style={styles.emptyNotifications}>
-              <Ionicons name="notifications-off-outline" size={40} color="#E0DAD1" />
-              <Text style={styles.emptyNotificationsText}>No notifications yet</Text>
-            </View>
-          )}
-        </View>
-      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -817,90 +810,6 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 10,
     fontWeight: "bold",
-  },
-  notificationsDropdown: {
-    position: "absolute",
-    top: 100,
-    right: 16,
-    left: 16,
-    backgroundColor: "#FFF",
-    borderRadius: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-    maxHeight: 400,
-    zIndex: 100,
-  },
-  notificationsHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  notificationsTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  notificationsList: {
-    maxHeight: 350,
-  },
-  notificationItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F5F5F5",
-  },
-  notificationUnread: {
-    backgroundColor: "#FFF3E0",
-  },
-  notificationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FEF5ED",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  notificationContent: {
-    flex: 1,
-  },
-  notificationTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#32221B",
-    marginBottom: 2,
-  },
-  notificationMessage: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginBottom: 2,
-  },
-  notificationTime: {
-    fontSize: 10,
-    color: "#C0B7AE",
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#C35822",
-    marginLeft: 8,
-  },
-  emptyNotifications: {
-    alignItems: "center",
-    paddingVertical: 30,
-  },
-  emptyNotificationsText: {
-    fontSize: 13,
-    color: "#8F796F",
-    marginTop: 8,
   },
   statsGrid: {
     flexDirection: "row",

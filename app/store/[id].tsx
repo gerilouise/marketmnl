@@ -1,4 +1,4 @@
-// app/store/[id].tsx - Fixed 2-column grid for odd number of items
+// app/store/[id].tsx - Complete updated version with improved share
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   Share,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,8 +27,9 @@ import {
   addDoc, 
   deleteDoc,
   setDoc,
-  Timestamp 
+  Timestamp
 } from 'firebase/firestore';
+import { useChat } from '@/app/contexts/ChatContext';
 
 interface Store {
   id: string;
@@ -56,6 +58,7 @@ interface Product {
 
 export default function StoreScreen() {
   const { id } = useLocalSearchParams();
+  const { createConversation } = useChat();
   const [store, setStore] = useState<Store | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
@@ -253,8 +256,9 @@ export default function StoreScreen() {
     }
   };
 
-  const handleChat = () => {
+  const handleChat = async () => {
     const user = auth.currentUser;
+    
     if (!user) {
       Alert.alert("Login Required", "Please log in to message the seller", [
         { text: "Cancel", style: "cancel" },
@@ -268,23 +272,79 @@ export default function StoreScreen() {
       return;
     }
     
-    router.push({
-      pathname: "/(tabs)/chat-detail",
-      params: { 
-        sellerId: id,
-        sellerName: store?.storeName || "Seller"
+    if (!store) {
+      Alert.alert("Error", "Store information not available");
+      return;
+    }
+    
+    setFollowingLoading(true);
+    
+    try {
+      console.log("Starting chat with seller:", store.uid, store.storeName);
+      
+      const conversationId = await createConversation(store.uid, store.storeName);
+      
+      if (!conversationId) {
+        Alert.alert("Error", "Failed to start conversation. Please try again.");
+        return;
       }
-    });
+      
+      console.log("Conversation created/found:", conversationId);
+      
+      router.push({
+        pathname: "/(tabs)/chat-detail",
+        params: { 
+          conversationId: conversationId,
+          sellerId: store.uid,
+          sellerName: store.storeName
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      Alert.alert("Error", "Failed to start conversation. Please try again.");
+    } finally {
+      setFollowingLoading(false);
+    }
   };
 
   const handleShare = async () => {
+    if (!store) {
+      Alert.alert("Error", "Store information not available");
+      return;
+    }
+
     try {
-      await Share.share({
-        message: `Check out ${store?.storeName} on MarketMNL!`,
-        title: store?.storeName,
+      // Create a beautiful share message with store details
+      const storeUrl = Platform.select({
+        ios: `marketmnl://store/${store.id}`,
+        android: `marketmnl://store/${store.id}`,
+        default: `https://marketmnl.com/store/${store.id}`,
       });
-    } catch (error) {
-      console.error('Error sharing:', error);
+
+      const shareMessage = `🏪 *${store.storeName}* 🏪\n\n` +
+        `📍 Location: ${store.location || "Online Store"}\n` +
+        `⭐ Rating: ${store.rating || 4.5} ★ (${store.reviewsCount || 0} reviews)\n` +
+        `📦 Products: ${products.length} items\n\n` +
+        `${store.description ? `📝 ${store.description.substring(0, 100)}${store.description.length > 100 ? "..." : ""}\n\n` : ""}` +
+        `👉 Check out this store on MarketMNL: ${storeUrl}\n\n` +
+        `📱 Download MarketMNL app: https://marketmnl.com/download`;
+
+      const result = await Share.share({
+        message: shareMessage,
+        title: store.storeName,
+        url: storeUrl,
+      });
+
+      if (result.action === Share.sharedAction) {
+        console.log("Store shared successfully");
+      }
+    } catch (error: any) {
+      console.error("Error sharing store:", error);
+      // Don't show alert for user cancellation
+      if (error.message !== "User canceled share dialog") {
+        Alert.alert("Share Failed", "Unable to share at this time. Please try again.");
+      }
     }
   };
 
@@ -350,15 +410,13 @@ export default function StoreScreen() {
   // Helper function to format data for 2-column grid
   const formatProductData = () => {
     const formattedData = [...filteredProducts];
-    // If odd number of items, add an empty placeholder
     if (formattedData.length % 2 !== 0) {
-      formattedData.push({} as Product); // Empty placeholder
+      formattedData.push({} as Product);
     }
     return formattedData;
   };
 
   const renderProductItem = ({ item }: { item: Product }) => {
-    // Check if it's an empty placeholder
     if (!item.id) {
       return <View style={styles.productCardPlaceholder} />;
     }
@@ -443,7 +501,6 @@ export default function StoreScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header with back button and share */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -455,9 +512,7 @@ export default function StoreScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Store Info Card with Avatar */}
         <View style={styles.storeCard}>
-          {/* Avatar on left side */}
           <View style={styles.avatarContainer}>
             {store.avatar ? (
               <Image source={{ uri: store.avatar }} style={styles.avatarImage} />
@@ -468,7 +523,6 @@ export default function StoreScreen() {
             )}
           </View>
 
-          {/* Store Details */}
           <View style={styles.storeDetails}>
             <Text style={styles.storeName}>{store.storeName}</Text>
             
@@ -489,14 +543,12 @@ export default function StoreScreen() {
               <Text style={styles.infoText}>{products.length} products</Text>
             </View>
 
-            {/* Description inside the same card */}
             {store.description && (
               <Text style={styles.description}>{store.description}</Text>
             )}
           </View>
         </View>
 
-        {/* Category Chips */}
         {categories.length > 1 && (
           <ScrollView 
             horizontal 
@@ -522,11 +574,20 @@ export default function StoreScreen() {
           </ScrollView>
         )}
 
-        {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.chatButton} onPress={handleChat}>
-            <Ionicons name="chatbubble-outline" size={18} color="#FFF" />
-            <Text style={styles.chatButtonText}>Chat Now</Text>
+          <TouchableOpacity 
+            style={styles.chatButton} 
+            onPress={handleChat}
+            disabled={followingLoading}
+          >
+            {followingLoading ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <>
+                <Ionicons name="chatbubble-outline" size={18} color="#FFF" />
+                <Text style={styles.chatButtonText}>Chat Now</Text>
+              </>
+            )}
           </TouchableOpacity>
           
           {!isOwner && (
@@ -552,7 +613,6 @@ export default function StoreScreen() {
             </TouchableOpacity>
           )}
           
-          {/* Edit Store Button */}
           {isOwner && (
             <TouchableOpacity 
               style={[styles.followButton, styles.editStoreButton]} 
@@ -564,7 +624,6 @@ export default function StoreScreen() {
           )}
         </View>
 
-        {/* Products Section */}
         <View style={styles.productsSection}>
           <View style={styles.productsHeader}>
             <Text style={styles.productsTitle}>Products ({filteredProducts.length})</Text>
@@ -586,7 +645,6 @@ export default function StoreScreen() {
           />
         </View>
 
-        {/* Bottom Padding */}
         <View style={styles.bottomPadding} />
       </ScrollView>
     </SafeAreaView>

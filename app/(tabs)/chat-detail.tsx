@@ -10,49 +10,98 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useChat } from '@/app/contexts/ChatContext';
 import { auth } from '@/lib/firebase';
 
 export default function ChatDetailScreen() {
-  const { currentConversation, messages, sendMessage, sending, selectConversation } = useChat();
+  const { conversationId, sellerId, sellerName } = useLocalSearchParams();
+  const { conversations, messages, sendMessage, sending, selectConversation, markAsRead, refreshConversations, loading } = useChat();
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
+  const [localLoading, setLocalLoading] = useState(true);
 
+  // Find and select the conversation when component mounts
   useEffect(() => {
-    return () => {
-      selectConversation(null);
+    const findAndSelectConversation = async () => {
+      console.log('Looking for conversation with ID:', conversationId);
+      console.log('All conversations:', conversations.map(c => ({ id: c.id, participants: c.participants })));
+      
+      if (conversationId) {
+        let conversation = conversations.find(c => c.id === conversationId);
+        
+        // If not found by ID, try to find by participants
+        if (!conversation && sellerId && auth.currentUser) {
+          conversation = conversations.find(
+            c => c.participants.includes(sellerId as string) && 
+                 c.participants.includes(auth.currentUser?.uid || '')
+          );
+          console.log('Found conversation by participants:', conversation?.id);
+        }
+        
+        if (conversation) {
+          selectConversation(conversation);
+          await markAsRead(conversation.id);
+        } else {
+          console.log('Conversation not found, refreshing...');
+          refreshConversations();
+          // Wait a bit and try again
+          setTimeout(() => {
+            const conv = conversations.find(c => c.id === conversationId);
+            if (conv) {
+              selectConversation(conv);
+              markAsRead(conv.id);
+            }
+          }, 1000);
+        }
+      }
+      setLocalLoading(false);
     };
-  }, []);
+    
+    findAndSelectConversation();
+  }, [conversationId, conversations, sellerId]);
 
   const handleSend = async () => {
-    if (!inputText.trim() || !currentConversation || sending) return;
+    if (!inputText.trim()) {
+      return;
+    }
     
-    try {
-      await sendMessage(currentConversation.id, inputText.trim());
+    if (!conversationId) {
+      Alert.alert('Error', 'No conversation selected');
+      return;
+    }
+    
+    console.log('Sending message to conversation:', conversationId);
+    console.log('Message:', inputText.trim());
+    
+    const success = await sendMessage(conversationId as string, inputText.trim());
+    
+    if (success) {
       setInputText('');
       setTimeout(() => {
         flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
       }, 100);
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } else {
+      Alert.alert('Error', 'Failed to send message. Please try again.');
     }
   };
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return '';
-    const date = timestamp.toDate();
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = timestamp.toDate();
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return '';
+    }
   };
 
   const renderMessage = ({ item }: { item: any }) => {
     const isUser = item.senderId === auth.currentUser?.uid;
-    const otherName = isUser ? 'You' : (currentConversation?.sellerId === item.senderId 
-      ? currentConversation?.sellerName 
-      : currentConversation?.buyerName);
     
     return (
       <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.sellerMessage]}>
@@ -66,7 +115,9 @@ export default function ChatDetailScreen() {
     );
   };
 
-  if (!currentConversation) {
+  const otherName = sellerName || 'Seller';
+
+  if (localLoading || (loading && conversations.length === 0)) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
@@ -76,16 +127,12 @@ export default function ChatDetailScreen() {
           <Text style={styles.headerTitle}>Chat</Text>
           <View style={{ width: 40 }} />
         </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No conversation selected</Text>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#C35822" />
         </View>
       </SafeAreaView>
     );
   }
-
-  const otherName = currentConversation.sellerId === auth.currentUser?.uid 
-    ? currentConversation.buyerName 
-    : currentConversation.sellerName;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -105,6 +152,13 @@ export default function ChatDetailScreen() {
         contentContainerStyle={styles.messagesList}
         inverted
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="chatbubble-outline" size={50} color="#E0DAD1" />
+            <Text style={styles.emptyText}>No messages yet</Text>
+            <Text style={styles.emptySubtext}>Send a message to start the conversation</Text>
+          </View>
+        }
       />
 
       <KeyboardAvoidingView
@@ -164,9 +218,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#32221B",
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   messagesList: {
     padding: 16,
     paddingBottom: 20,
+    flexGrow: 1,
   },
   messageContainer: {
     marginBottom: 12,
@@ -246,12 +306,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F0EB",
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
   },
   emptyText: {
     fontSize: 16,
+    color: "#32221B",
+    marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 14,
     color: "#8F796F",
+    marginTop: 4,
   },
 });

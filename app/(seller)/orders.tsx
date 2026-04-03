@@ -1,4 +1,4 @@
-// app/(seller)/orders.tsx - Fixed to match actual data structure
+// app/(seller)/orders.tsx
 import { auth, db } from "@/lib/firebase";
 import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
@@ -46,7 +46,12 @@ interface Order {
   subtotal: number;
   shippingFee: number;
   total: number;
-  // The actual field name from checkout is 'address', not 'shippingAddress'
+  deliveryOption?: {
+    id: string;
+    name: string;
+    description: string;
+    price: number;
+  };
   address: {
     fullName: string;
     phone: string;
@@ -81,8 +86,6 @@ export default function OrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
-
-  // Modal state for status update
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState<{
     id: string;
@@ -90,12 +93,9 @@ export default function OrdersScreen() {
     currentStatus: string;
     newStatus: string;
   } | null>(null);
-
-  // Modal state for order details
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
-  // Load orders from Firebase when screen opens
   const loadOrders = async () => {
     setLoading(true);
     try {
@@ -114,16 +114,7 @@ export default function OrdersScreen() {
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        console.log("📦 Order data:", {
-          orderNumber: data.orderNumber,
-          customerName: data.customerName,
-          customerEmail: data.customerEmail,
-          address: data.address,
-          userId: data.userId,
-        });
-        
-        const status =
-          data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
+        const status = data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
         ordersList.push({
           id: doc.id,
           ...data,
@@ -177,12 +168,7 @@ export default function OrdersScreen() {
   const updateOrderStatus = async () => {
     if (!orderToUpdate) return;
 
-    const {
-      id: orderId,
-      number: orderNumber,
-      currentStatus,
-      newStatus,
-    } = orderToUpdate;
+    const { id: orderId, number: orderNumber, currentStatus, newStatus } = orderToUpdate;
     setStatusModalVisible(false);
     setUpdatingOrderId(orderId);
 
@@ -190,7 +176,6 @@ export default function OrdersScreen() {
       const orderRef = doc(db, "orders", orderId);
       const dbStatus = newStatus.toLowerCase();
 
-      // Get the order to get customer ID before updating
       const orderDoc = await getDoc(orderRef);
       const orderData = orderDoc.data();
       const customerId = orderData?.userId;
@@ -202,9 +187,7 @@ export default function OrdersScreen() {
 
       setOrders((prev) =>
         prev.map((order) =>
-          order.id === orderId
-            ? { ...order, status: newStatus as Order["status"] }
-            : order,
+          order.id === orderId ? { ...order, status: newStatus as Order["status"] } : order,
         ),
       );
 
@@ -214,13 +197,8 @@ export default function OrdersScreen() {
         );
       }
 
-      // CREATE NOTIFICATION FOR THE CUSTOMER
       if (customerId) {
-        const notification = getOrderNotification(
-          orderNumber,
-          newStatus.toLowerCase(),
-          orderId,
-        );
+        const notification = getOrderNotification(orderNumber, newStatus.toLowerCase(), orderId);
         if (notification) {
           await createNotification({
             userId: customerId,
@@ -232,9 +210,6 @@ export default function OrdersScreen() {
             read: false,
             createdAt: Timestamp.now(),
           });
-          console.log(
-            `📧 Notification sent to customer for status: ${newStatus}`,
-          );
         }
       }
 
@@ -324,22 +299,10 @@ export default function OrdersScreen() {
         <View style={styles.orderHeader}>
           <View>
             <Text style={styles.orderNumber}>{item.orderNumber}</Text>
-            <Text style={styles.orderDateSmall}>
-              {formatDate(item.createdAt)}
-            </Text>
+            <Text style={styles.orderDateSmall}>{formatDate(item.createdAt)}</Text>
           </View>
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: getStatusColor(item.status) + "20" },
-            ]}
-          >
-            <Text
-              style={[
-                styles.statusText,
-                { color: getStatusColor(item.status) },
-              ]}
-            >
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + "20" }]}>
+            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
               {item.status}
             </Text>
           </View>
@@ -356,6 +319,12 @@ export default function OrdersScreen() {
             <Ionicons name="card-outline" size={12} color="#8F796F" />
             <Text style={styles.paymentMethodText}>{item.paymentMethod}</Text>
           </View>
+          {item.deliveryOption && (
+            <View style={styles.deliveryBadge}>
+              <Ionicons name="cube-outline" size={10} color="#C35822" />
+              <Text style={styles.deliveryBadgeText}>{item.deliveryOption.name}</Text>
+            </View>
+          )}
           <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
         </View>
 
@@ -410,11 +379,7 @@ export default function OrdersScreen() {
               )}
               {item.status === "Delivered" && (
                 <View style={styles.statusMessage}>
-                  <Ionicons
-                    name="checkmark-done-circle"
-                    size={20}
-                    color="#9C27B0"
-                  />
+                  <Ionicons name="checkmark-done-circle" size={20} color="#9C27B0" />
                   <Text style={styles.statusMessageText}>Delivered</Text>
                 </View>
               )}
@@ -454,13 +419,8 @@ export default function OrdersScreen() {
         </View>
         <View style={styles.notLoggedInContainer}>
           <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
-          <Text style={styles.notLoggedInText}>
-            Please log in to view orders
-          </Text>
-          <TouchableOpacity
-            style={styles.loginButton}
-            onPress={() => router.push("/auth/login")}
-          >
+          <Text style={styles.notLoggedInText}>Please log in to view orders</Text>
+          <TouchableOpacity style={styles.loginButton} onPress={() => router.push("/auth/login")}>
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
         </View>
@@ -485,17 +445,11 @@ export default function OrdersScreen() {
             {STATUS_CATEGORIES.map((status) => (
               <TouchableOpacity
                 key={status}
-                style={[
-                  styles.categoryChip,
-                  selectedStatus === status && styles.categoryChipActive,
-                ]}
+                style={[styles.categoryChip, selectedStatus === status && styles.categoryChipActive]}
                 onPress={() => setSelectedStatus(status)}
               >
                 <Text
-                  style={[
-                    styles.categoryChipText,
-                    selectedStatus === status && styles.categoryChipTextActive,
-                  ]}
+                  style={[styles.categoryChipText, selectedStatus === status && styles.categoryChipTextActive]}
                 >
                   {status}
                 </Text>
@@ -527,10 +481,7 @@ export default function OrdersScreen() {
             <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
             <Text style={styles.emptyText}>No orders found</Text>
             {selectedStatus !== "All" && (
-              <TouchableOpacity
-                style={styles.clearFilterButton}
-                onPress={() => setSelectedStatus("All")}
-              >
+              <TouchableOpacity style={styles.clearFilterButton} onPress={() => setSelectedStatus("All")}>
                 <Text style={styles.clearFilterText}>Clear Filter</Text>
               </TouchableOpacity>
             )}
@@ -551,35 +502,19 @@ export default function OrdersScreen() {
               <Ionicons name="alert-circle-outline" size={50} color="#C35822" />
             </View>
             <Text style={styles.modalTitle}>Update Order Status</Text>
-            <Text style={styles.modalMessage}>
-              Order #{orderToUpdate?.number}
-            </Text>
+            <Text style={styles.modalMessage}>Order #{orderToUpdate?.number}</Text>
             <Text style={styles.modalStatusChange}>
               Change status from{" "}
-              <Text style={{ fontWeight: "bold" }}>
-                {orderToUpdate?.currentStatus}
-              </Text>{" "}
-              to{" "}
-              <Text style={{ fontWeight: "bold", color: "#4CAF50" }}>
-                {orderToUpdate?.newStatus}
-              </Text>
-              ?
+              <Text style={{ fontWeight: "bold" }}>{orderToUpdate?.currentStatus}</Text> to{" "}
+              <Text style={{ fontWeight: "bold", color: "#4CAF50" }}>{orderToUpdate?.newStatus}</Text>?
             </Text>
-            <Text style={styles.modalWarning}>
-              This will notify the customer.
-            </Text>
+            <Text style={styles.modalWarning}>This will notify the customer.</Text>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelModalButton]}
-                onPress={cancelUpdate}
-              >
+              <TouchableOpacity style={[styles.modalButton, styles.cancelModalButton]} onPress={cancelUpdate}>
                 <Text style={styles.cancelModalButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmModalButton]}
-                onPress={updateOrderStatus}
-              >
+              <TouchableOpacity style={[styles.modalButton, styles.confirmModalButton]} onPress={updateOrderStatus}>
                 <Text style={styles.confirmModalButtonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
@@ -587,7 +522,7 @@ export default function OrdersScreen() {
         </View>
       </Modal>
 
-      {/* Order Details Modal - Fixed to use 'address' field */}
+      {/* Order Details Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -598,10 +533,7 @@ export default function OrdersScreen() {
           <View style={styles.detailsModalContent}>
             <View style={styles.detailsModalHeader}>
               <Text style={styles.detailsModalTitle}>Order Details</Text>
-              <TouchableOpacity
-                onPress={closeDetailsModal}
-                style={styles.closeButton}
-              >
+              <TouchableOpacity onPress={closeDetailsModal} style={styles.closeButton}>
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
@@ -611,56 +543,56 @@ export default function OrdersScreen() {
                 <>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Order Number</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedOrder.orderNumber}
-                    </Text>
+                    <Text style={styles.detailValue}>{selectedOrder.orderNumber}</Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Order Date</Text>
-                    <Text style={styles.detailValue}>
-                      {formatDate(selectedOrder.createdAt)}
-                    </Text>
+                    <Text style={styles.detailValue}>{formatDate(selectedOrder.createdAt)}</Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Customer Name</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedOrder.customerName || "N/A"}
-                    </Text>
+                    <Text style={styles.detailValue}>{selectedOrder.customerName || "N/A"}</Text>
                   </View>
+
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Customer Email</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedOrder.customerEmail || selectedOrder.userEmail || "N/A"}
-                    </Text>
+                    <Text style={styles.detailValue}>{selectedOrder.customerEmail || selectedOrder.userEmail || "N/A"}</Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Payment Method</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedOrder.paymentMethod}
-                    </Text>
+                    <Text style={styles.detailValue}>{selectedOrder.paymentMethod}</Text>
                   </View>
+
+                  {/* Delivery Option Section */}
+                  {selectedOrder.deliveryOption && (
+                    <>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Delivery Option</Text>
+                        <Text style={styles.detailValue}>{selectedOrder.deliveryOption.name}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Delivery Fee</Text>
+                        <Text style={styles.detailValue}>₱{selectedOrder.deliveryOption.price}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Estimated Delivery</Text>
+                        <Text style={styles.detailValue}>{selectedOrder.deliveryOption.description}</Text>
+                      </View>
+                    </>
+                  )}
 
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Order Status</Text>
                     <View
                       style={[
                         styles.statusBadge,
-                        {
-                          backgroundColor:
-                            getStatusColor(selectedOrder.status) + "20",
-                          alignSelf: "flex-start",
-                        },
+                        { backgroundColor: getStatusColor(selectedOrder.status) + "20", alignSelf: "flex-start" },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.statusText,
-                          { color: getStatusColor(selectedOrder.status) },
-                        ]}
-                      >
+                      <Text style={[styles.statusText, { color: getStatusColor(selectedOrder.status) }]}>
                         {selectedOrder.status}
                       </Text>
                     </View>
@@ -673,13 +605,9 @@ export default function OrdersScreen() {
                     <View key={index} style={styles.itemRow}>
                       <View style={styles.itemInfo}>
                         <Text style={styles.itemName}>{item.productName}</Text>
-                        <Text style={styles.itemQuantity}>
-                          Quantity: {item.quantity}
-                        </Text>
+                        <Text style={styles.itemQuantity}>Quantity: {item.quantity}</Text>
                       </View>
-                      <Text style={styles.itemPrice}>
-                        ₱{(item.productPrice * item.quantity).toFixed(2)}
-                      </Text>
+                      <Text style={styles.itemPrice}>₱{(item.productPrice * item.quantity).toFixed(2)}</Text>
                     </View>
                   ))}
 
@@ -688,50 +616,40 @@ export default function OrdersScreen() {
                   <Text style={styles.sectionTitle}>Price Details</Text>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Subtotal</Text>
-                    <Text style={styles.detailValue}>
-                      ₱{selectedOrder.subtotal.toFixed(2)}
-                    </Text>
+                    <Text style={styles.detailValue}>₱{selectedOrder.subtotal.toFixed(2)}</Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Shipping Fee</Text>
-                    <Text style={styles.detailValue}>
-                      ₱{selectedOrder.shippingFee.toFixed(2)}
-                    </Text>
+                    <Text style={styles.detailValue}>₱{selectedOrder.shippingFee.toFixed(2)}</Text>
                   </View>
+                  {selectedOrder.deliveryOption && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Delivery Option</Text>
+                      <Text style={styles.detailValue}>{selectedOrder.deliveryOption.name}</Text>
+                    </View>
+                  )}
                   <View style={[styles.detailRow, styles.totalRow]}>
                     <Text style={styles.totalLabel}>Total</Text>
-                    <Text style={styles.totalAmount}>
-                      ₱{selectedOrder.total.toFixed(2)}
-                    </Text>
+                    <Text style={styles.totalAmount}>₱{selectedOrder.total.toFixed(2)}</Text>
                   </View>
 
                   <View style={styles.divider} />
 
                   <Text style={styles.sectionTitle}>Shipping Address</Text>
-                  {/* Using 'address' field instead of 'shippingAddress' */}
-                  <Text style={styles.addressName}>
-                    {selectedOrder.address?.fullName || "N/A"}
-                  </Text>
-                  <Text style={styles.addressPhone}>
-                    {selectedOrder.address?.phone || "N/A"}
-                  </Text>
+                  <Text style={styles.addressName}>{selectedOrder.address?.fullName || "N/A"}</Text>
+                  <Text style={styles.addressPhone}>{selectedOrder.address?.phone || "N/A"}</Text>
                   <Text style={styles.addressText}>
                     {selectedOrder.address?.street && selectedOrder.address?.street !== ""
                       ? `${selectedOrder.address.street}, ${selectedOrder.address.barangay || ""}, ${selectedOrder.address.city || ""}, ${selectedOrder.address.province || ""} ${selectedOrder.address.zipCode || ""}`
                       : "No address provided"}
                   </Text>
-                  <Text style={styles.addressLabel}>
-                    Label: {selectedOrder.address?.label || "N/A"}
-                  </Text>
+                  <Text style={styles.addressLabel}>Label: {selectedOrder.address?.label || "N/A"}</Text>
                 </>
               )}
             </ScrollView>
 
             <View style={styles.detailsModalFooter}>
-              <TouchableOpacity
-                style={styles.closeDetailsButton}
-                onPress={closeDetailsModal}
-              >
+              <TouchableOpacity style={styles.closeDetailsButton} onPress={closeDetailsModal}>
                 <Text style={styles.closeDetailsButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
@@ -743,434 +661,86 @@ export default function OrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FBF8F4",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 15,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#32221B",
-  },
-  orderCount: {
-    fontSize: 14,
-    color: "#8F796F",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  notLoggedInContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
-  notLoggedInText: {
-    fontSize: 16,
-    color: "#8F796F",
-    textAlign: "center",
-    marginTop: 12,
-    marginBottom: 20,
-  },
-  loginButton: {
-    backgroundColor: "#C35822",
-    paddingHorizontal: 30,
-    paddingVertical: 12,
-    borderRadius: 25,
-  },
-  loginButtonText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  categoriesWrapper: {
-    marginBottom: 16,
-    paddingHorizontal: 20,
-  },
-  categoriesScrollContent: {
-    paddingRight: 20,
-  },
-  categoriesContainer: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  categoryChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: "#FFF",
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  categoryChipActive: {
-    backgroundColor: "#C35822",
-    borderColor: "#C35822",
-  },
-  categoryChipText: {
-    fontSize: 14,
-    color: "#8F796F",
-    fontWeight: "500",
-    textAlign: "center",
-  },
-  categoryChipTextActive: {
-    color: "#FFF",
-  },
-  ordersList: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  orderCard: {
-    backgroundColor: "#FFF",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  orderHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
-  },
-  orderNumber: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  orderDateSmall: {
-    fontSize: 10,
-    color: "#8F796F",
-    marginTop: 2,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  customerName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-    marginBottom: 4,
-  },
-  productName: {
-    fontSize: 14,
-    color: "#8F796F",
-    marginBottom: 12,
-  },
-  datePriceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  paymentMethodContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  paymentMethodText: {
-    fontSize: 12,
-    color: "#8F796F",
-  },
-  orderTotal: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#C35822",
-  },
-  actionButtonsContainer: {
-    marginTop: 4,
-    minHeight: 36,
-  },
-  actionButtonsRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  actionButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 100,
-  },
-  actionButtonText: {
-    color: "#FFF",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  confirmButton: {
-    backgroundColor: "#4CAF50",
-  },
-  cancelButton: {
-    backgroundColor: "#FF3B30",
-  },
-  shippedButton: {
-    backgroundColor: "#2196F3",
-  },
-  deliveredButton: {
-    backgroundColor: "#9C27B0",
-  },
-  statusMessage: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  statusMessageText: {
-    fontSize: 14,
-    color: "#666",
-    fontWeight: "500",
-  },
-  emptyContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: "#8F796F",
-    marginTop: 12,
-  },
-  clearFilterButton: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: "#FFF",
-    borderRadius: 25,
-    borderWidth: 1,
-    borderColor: "#C35822",
-  },
-  clearFilterText: {
-    color: "#C35822",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    backgroundColor: "#FFF",
-    borderRadius: 20,
-    padding: 24,
-    width: "85%",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  modalIcon: {
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#32221B",
-    marginBottom: 8,
-  },
-  modalMessage: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  modalStatusChange: {
-    fontSize: 14,
-    color: "#32221B",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  modalWarning: {
-    fontSize: 12,
-    color: "#C35822",
-    textAlign: "center",
-    marginBottom: 24,
-  },
-  modalButtons: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: "center",
-  },
-  cancelModalButton: {
-    backgroundColor: "#F5F5F5",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-  },
-  cancelModalButtonText: {
-    color: "#8F796F",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  confirmModalButton: {
-    backgroundColor: "#4CAF50",
-  },
-  confirmModalButtonText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  detailsModalContent: {
-    backgroundColor: "#FFF",
-    borderRadius: 20,
-    padding: 20,
-    width: "90%",
-    maxHeight: "85%",
-  },
-  detailsModalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0DAD1",
-  },
-  detailsModalTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  closeButton: {
-    padding: 4,
-  },
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: "#8F796F",
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#32221B",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#F0F0F0",
-    marginVertical: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-    marginBottom: 12,
-  },
-  itemRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F5F5F5",
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#32221B",
-  },
-  itemQuantity: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginTop: 2,
-  },
-  itemPrice: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#C35822",
-  },
-  totalRow: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  totalAmount: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#C35822",
-  },
-  addressName: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#32221B",
-    marginBottom: 2,
-  },
-  addressPhone: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginBottom: 4,
-  },
-  addressText: {
-    fontSize: 12,
-    color: "#666",
-    lineHeight: 16,
-    marginBottom: 4,
-  },
-  addressLabel: {
-    fontSize: 12,
-    color: "#C35822",
-    fontWeight: "500",
-  },
-  detailsModalFooter: {
-    marginTop: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  closeDetailsButton: {
-    backgroundColor: "#C35822",
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: "center",
-  },
-  closeDetailsButtonText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+  container: { flex: 1, backgroundColor: "#FBF8F4" },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15 },
+  headerTitle: { fontSize: 28, fontWeight: "bold", color: "#32221B" },
+  orderCount: { fontSize: 14, color: "#8F796F" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  notLoggedInContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20 },
+  notLoggedInText: { fontSize: 16, color: "#8F796F", textAlign: "center", marginTop: 12, marginBottom: 20 },
+  loginButton: { backgroundColor: "#C35822", paddingHorizontal: 30, paddingVertical: 12, borderRadius: 25 },
+  loginButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
+  categoriesWrapper: { marginBottom: 16, paddingHorizontal: 20 },
+  categoriesScrollContent: { paddingRight: 20 },
+  categoriesContainer: { flexDirection: "row", gap: 8 },
+  categoryChip: { paddingHorizontal: 20, paddingVertical: 8, backgroundColor: "#FFF", borderRadius: 20, borderWidth: 1, borderColor: "#E0DAD1", alignItems: "center", justifyContent: "center" },
+  categoryChipActive: { backgroundColor: "#C35822", borderColor: "#C35822" },
+  categoryChipText: { fontSize: 14, color: "#8F796F", fontWeight: "500", textAlign: "center" },
+  categoryChipTextActive: { color: "#FFF" },
+  ordersList: { paddingHorizontal: 20, paddingBottom: 20 },
+  orderCard: { backgroundColor: "#FFF", borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  orderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 },
+  orderNumber: { fontSize: 14, fontWeight: "600", color: "#32221B" },
+  orderDateSmall: { fontSize: 10, color: "#8F796F", marginTop: 2 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  statusText: { fontSize: 12, fontWeight: "500" },
+  customerName: { fontSize: 16, fontWeight: "600", color: "#32221B", marginBottom: 4 },
+  productName: { fontSize: 14, color: "#8F796F", marginBottom: 12 },
+  datePriceRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 },
+  paymentMethodContainer: { flexDirection: "row", alignItems: "center", gap: 4 },
+  paymentMethodText: { fontSize: 12, color: "#8F796F" },
+  deliveryBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "#FEF5ED", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, gap: 4 },
+  deliveryBadgeText: { fontSize: 10, color: "#C35822", fontWeight: "500" },
+  orderTotal: { fontSize: 16, fontWeight: "600", color: "#C35822" },
+  actionButtonsContainer: { marginTop: 4, minHeight: 36 },
+  actionButtonsRow: { flexDirection: "row", gap: 8 },
+  actionButton: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, alignItems: "center", justifyContent: "center", minWidth: 100 },
+  actionButtonText: { color: "#FFF", fontSize: 13, fontWeight: "600" },
+  confirmButton: { backgroundColor: "#4CAF50" },
+  cancelButton: { backgroundColor: "#FF3B30" },
+  shippedButton: { backgroundColor: "#2196F3" },
+  deliveredButton: { backgroundColor: "#9C27B0" },
+  statusMessage: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
+  statusMessageText: { fontSize: 14, color: "#666", fontWeight: "500" },
+  emptyContainer: { alignItems: "center", justifyContent: "center", paddingVertical: 60 },
+  emptyText: { fontSize: 16, color: "#8F796F", marginTop: 12 },
+  clearFilterButton: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: "#FFF", borderRadius: 25, borderWidth: 1, borderColor: "#C35822" },
+  clearFilterText: { color: "#C35822", fontSize: 14, fontWeight: "500" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.5)", justifyContent: "center", alignItems: "center" },
+  modalContent: { backgroundColor: "#FFF", borderRadius: 20, padding: 24, width: "85%", alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
+  modalIcon: { marginBottom: 16 },
+  modalTitle: { fontSize: 20, fontWeight: "bold", color: "#32221B", marginBottom: 8 },
+  modalMessage: { fontSize: 16, color: "#666", textAlign: "center", marginBottom: 8 },
+  modalStatusChange: { fontSize: 14, color: "#32221B", textAlign: "center", marginBottom: 8 },
+  modalWarning: { fontSize: 12, color: "#C35822", textAlign: "center", marginBottom: 24 },
+  modalButtons: { flexDirection: "row", gap: 12, width: "100%" },
+  modalButton: { flex: 1, paddingVertical: 12, borderRadius: 25, alignItems: "center" },
+  cancelModalButton: { backgroundColor: "#F5F5F5", borderWidth: 1, borderColor: "#E0DAD1" },
+  cancelModalButtonText: { color: "#8F796F", fontSize: 16, fontWeight: "600" },
+  confirmModalButton: { backgroundColor: "#4CAF50" },
+  confirmModalButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
+  detailsModalContent: { backgroundColor: "#FFF", borderRadius: 20, padding: 20, width: "90%", maxHeight: "85%" },
+  detailsModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#E0DAD1" },
+  detailsModalTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
+  closeButton: { padding: 4 },
+  detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  detailLabel: { fontSize: 14, color: "#8F796F" },
+  detailValue: { fontSize: 14, fontWeight: "500", color: "#32221B" },
+  divider: { height: 1, backgroundColor: "#F0F0F0", marginVertical: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: "600", color: "#32221B", marginBottom: 12 },
+  itemRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#F5F5F5" },
+  itemInfo: { flex: 1 },
+  itemName: { fontSize: 14, fontWeight: "500", color: "#32221B" },
+  itemQuantity: { fontSize: 12, color: "#8F796F", marginTop: 2 },
+  itemPrice: { fontSize: 14, fontWeight: "600", color: "#C35822" },
+  totalRow: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  totalLabel: { fontSize: 16, fontWeight: "600", color: "#32221B" },
+  totalAmount: { fontSize: 18, fontWeight: "bold", color: "#C35822" },
+  addressName: { fontSize: 14, fontWeight: "500", color: "#32221B", marginBottom: 2 },
+  addressPhone: { fontSize: 12, color: "#8F796F", marginBottom: 4 },
+  addressText: { fontSize: 12, color: "#666", lineHeight: 16, marginBottom: 4 },
+  addressLabel: { fontSize: 12, color: "#C35822", fontWeight: "500" },
+  detailsModalFooter: { marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  closeDetailsButton: { backgroundColor: "#C35822", paddingVertical: 12, borderRadius: 25, alignItems: "center" },
+  closeDetailsButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
 });

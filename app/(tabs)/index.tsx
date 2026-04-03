@@ -11,6 +11,7 @@ import {
   orderBy,
   query,
   where,
+  Timestamp,
 } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -23,15 +24,20 @@ import {
   Text,
   TouchableOpacity,
   View,
+  RefreshControl,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+const { width } = Dimensions.get("window");
+
 export default function HomeScreen() {
   const [showChat, setShowChat] = useState(false);
-  const [wishlist, setWishlist] = useState({});
+  const [wishlist, setWishlist] = useState<{ [key: string]: boolean }>({});
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
   const [newArrivals, setNewArrivals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const { getCurrentUser } = useFirebaseAuth();
@@ -79,27 +85,48 @@ export default function HomeScreen() {
     try {
       setLoading(true);
       const productsRef = collection(db, "products");
-
-      // Get latest 10 products for featured
-      const featuredQuery = query(
+      
+      // Get all products ordered by createdAt
+      const allProductsQuery = query(
         productsRef,
         orderBy("createdAt", "desc"),
-        limit(10),
+        limit(20)
       );
-      const featuredSnapshot = await getDocs(featuredQuery);
+      const allProductsSnapshot = await getDocs(allProductsQuery);
       const productsList: any[] = [];
-
-      featuredSnapshot.forEach((doc) => {
-        productsList.push({ id: doc.id, ...doc.data() });
+      
+      allProductsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        productsList.push({ 
+          id: doc.id, 
+          ...data,
+          rating: data.rating || 4.5,
+          sellerName: data.sellerName || "MarketMNL"
+        });
       });
-
-      setFeaturedProducts(productsList.slice(0, 4)); // First 4 for featured
-      setNewArrivals(productsList.slice(4, 7)); // Next 3 for new arrivals
+      
+      console.log(`Fetched ${productsList.length} products`);
+      
+      // Separate products into featured and new arrivals
+      setFeaturedProducts(productsList.slice(0, 4));
+      setNewArrivals(productsList.slice(4, 7));
+      
+      console.log(`Featured: ${productsList.slice(0, 4).length} products`);
+      console.log(`New Arrivals: ${productsList.slice(4, 7).length} products`);
+      
     } catch (error) {
       console.error("Error fetching products:", error);
+      Alert.alert("Error", "Failed to load products");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchProducts();
+    await loadUnreadNotifications();
   };
 
   useEffect(() => {
@@ -110,7 +137,8 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadUnreadNotifications();
-    }, []),
+      fetchProducts();
+    }, [])
   );
 
   // Categories data
@@ -121,25 +149,25 @@ export default function HomeScreen() {
     { id: "4", name: "Meat", icon: "🥩" },
   ];
 
-  const toggleWishlist = (productId) => {
+  const toggleWishlist = (productId: string) => {
     setWishlist((prev) => ({
       ...prev,
       [productId]: !prev[productId],
     }));
   };
 
-  const navigateToProduct = (productId) => {
+  const navigateToProduct = (productId: string) => {
     router.push(`/product/${productId}`);
   };
 
-  const navigateToCategory = (categoryName) => {
+  const navigateToCategory = (categoryName: string) => {
     router.push({
       pathname: "/browse",
       params: { category: categoryName },
     });
   };
 
-  const navigateToSeeAll = (section) => {
+  const navigateToSeeAll = (section: string) => {
     router.push({
       pathname: "/browse",
       params: { section: section },
@@ -155,7 +183,7 @@ export default function HomeScreen() {
       ]);
       return;
     }
-    router.push("/(customer)/chat-list");
+    router.push("/(tabs)/chat-list");
   };
 
   // Get user's name from profile
@@ -163,12 +191,13 @@ export default function HomeScreen() {
     const user = getCurrentUser();
     if (!user) return "Guest";
     if (profile?.fullName) return profile.fullName.split(" ")[0];
-    return "Loading...";
+    if (user.displayName) return user.displayName.split(" ")[0];
+    return "Customer";
   };
 
   const isLoggedIn = () => getCurrentUser() !== null;
 
-  const renderCategoryItem = ({ item }) => (
+  const renderCategoryItem = ({ item }: { item: any }) => (
     <TouchableOpacity
       style={styles.categoryItem}
       onPress={() => navigateToCategory(item.name)}
@@ -180,16 +209,19 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  const renderFeaturedItem = ({ item }) => (
+  const renderFeaturedItem = ({ item }: { item: any }) => (
     <TouchableOpacity
       style={styles.productCard}
       onPress={() => navigateToProduct(item.id)}
+      activeOpacity={0.8}
     >
       <View style={styles.productImagePlaceholder}>
         {item.imageUrl ? (
           <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
         ) : (
-          <Ionicons name="image-outline" size={30} color="#CCC" />
+          <View style={styles.noImageContainer}>
+            <Ionicons name="image-outline" size={40} color="#CCC" />
+          </View>
         )}
         <TouchableOpacity
           style={styles.wishlistButton}
@@ -200,26 +232,27 @@ export default function HomeScreen() {
         >
           <Ionicons
             name={wishlist[item.id] ? "heart" : "heart-outline"}
-            size={20}
+            size={18}
             color={wishlist[item.id] ? "#C35822" : "#8F796F"}
           />
         </TouchableOpacity>
       </View>
-      <Text style={styles.productName} numberOfLines={1} ellipsizeMode="tail">
+      <Text style={styles.productName} numberOfLines={1}>
         {item.name}
       </Text>
       <View style={styles.productRating}>
-        <Ionicons name="star" size={14} color="#FFD700" />
-        <Text style={styles.ratingText}>{item.rating || 4.5}</Text>
+        <Ionicons name="star" size={12} color="#FFD700" />
+        <Text style={styles.ratingText}>{item.rating?.toFixed(1) || "4.5"}</Text>
       </View>
-      <Text style={styles.productPrice}>₱{item.price}</Text>
+      <Text style={styles.productPrice}>₱{item.price?.toLocaleString()}</Text>
     </TouchableOpacity>
   );
 
-  const renderNewArrivalItem = ({ item }) => (
+  const renderNewArrivalItem = ({ item }: { item: any }) => (
     <TouchableOpacity
       style={styles.newArrivalCard}
       onPress={() => navigateToProduct(item.id)}
+      activeOpacity={0.8}
     >
       <View style={styles.newArrivalImagePlaceholder}>
         {item.imageUrl ? (
@@ -228,29 +261,23 @@ export default function HomeScreen() {
             style={styles.newArrivalImage}
           />
         ) : (
-          <Ionicons name="image-outline" size={30} color="#CCC" />
+          <View style={styles.noImageContainerSmall}>
+            <Ionicons name="image-outline" size={30} color="#CCC" />
+          </View>
         )}
       </View>
       <View style={styles.newArrivalInfo}>
-        <Text
-          style={styles.newArrivalName}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
+        <Text style={styles.newArrivalName} numberOfLines={1}>
           {item.name}
         </Text>
-        <Text
-          style={styles.newArrivalSeller}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
+        <Text style={styles.newArrivalSeller} numberOfLines={1}>
           {item.sellerName || "MarketMNL"}
         </Text>
         <View style={styles.newArrivalRating}>
-          <Ionicons name="star" size={14} color="#FFD700" />
-          <Text style={styles.ratingText}>{item.rating || 4.5}</Text>
+          <Ionicons name="star" size={12} color="#FFD700" />
+          <Text style={styles.ratingText}>{item.rating?.toFixed(1) || "4.5"}</Text>
         </View>
-        <Text style={styles.newArrivalPrice}>₱{item.price}</Text>
+        <Text style={styles.newArrivalPrice}>₱{item.price?.toLocaleString()}</Text>
       </View>
       <TouchableOpacity
         style={styles.addButton}
@@ -264,12 +291,12 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
-          <Text style={styles.loadingText}>Loading products...</Text>
+          <Text style={styles.loadingText}>Loading delicious products...</Text>
         </View>
       </SafeAreaView>
     );
@@ -277,7 +304,17 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
+        }
+      >
         <View>
           <View style={styles.header}>
             <View>
@@ -297,7 +334,7 @@ export default function HomeScreen() {
                   <Ionicons
                     name="notifications-outline"
                     size={24}
-                    color="#8F796F"
+                    color="#32221B"
                   />
                   {unreadCount > 0 && (
                     <View style={styles.notificationBadge}>
@@ -309,13 +346,14 @@ export default function HomeScreen() {
                 </View>
               </TouchableOpacity>
               <TouchableOpacity onPress={navigateToChat}>
-                <Ionicons name="chatbubble-outline" size={24} color="#8F796F" />
+                <Ionicons name="chatbubble-outline" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
           </View>
           <View style={styles.separator} />
         </View>
 
+        {/* Promo Banner */}
         <TouchableOpacity
           style={styles.promoContainer}
           onPress={() => navigateToSeeAll("promo")}
@@ -359,7 +397,7 @@ export default function HomeScreen() {
           />
         </View>
 
-        {/* Featured Products Section */}
+        {/* Featured Products Section - Horizontal Scroll */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Featured Products</Text>
           <TouchableOpacity
@@ -380,10 +418,14 @@ export default function HomeScreen() {
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.featuredList}
+              snapToInterval={172} // Width of product card + margin
+              decelerationRate="fast"
+              snapToAlignment="start"
             />
           ) : (
-            <View style={styles.emptyFeatured}>
-              <Text style={styles.emptyText}>No products yet</Text>
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cube-outline" size={50} color="#E0DAD1" />
+              <Text style={styles.emptyText}>No featured products yet</Text>
             </View>
           )}
         </View>
@@ -408,8 +450,9 @@ export default function HomeScreen() {
               </View>
             ))
           ) : (
-            <View style={styles.emptyNewArrivals}>
-              <Text style={styles.emptyText}>No new arrivals</Text>
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cube-outline" size={50} color="#E0DAD1" />
+              <Text style={styles.emptyText}>No new arrivals yet</Text>
             </View>
           )}
         </View>
@@ -434,7 +477,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FAF8F4",
+    backgroundColor: "#FBF8F4",
   },
   loadingContainer: {
     flex: 1,
@@ -451,7 +494,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 10,
     paddingBottom: 15,
   },
   headerIcons: {
@@ -460,7 +503,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   greeting: {
-    fontSize: 16,
+    fontSize: 14,
     color: "#8F796F",
   },
   userName: {
@@ -477,16 +520,17 @@ const styles = StyleSheet.create({
   separator: {
     height: 1,
     backgroundColor: "#E0DAD1",
-    marginHorizontal: 25,
+    marginHorizontal: 20,
     marginBottom: 20,
   },
   promoContainer: {
     marginHorizontal: 20,
     marginBottom: 25,
-    borderRadius: 15,
+    borderRadius: 16,
     overflow: "hidden",
     height: 180,
     position: "relative",
+    backgroundColor: "#FFF",
   },
   promoImage: {
     width: "100%",
@@ -556,8 +600,7 @@ const styles = StyleSheet.create({
   },
   categoryItem: {
     alignItems: "center",
-    marginRight: 10,
-    marginLeft: 20,
+    marginHorizontal: 15,
     justifyContent: "center",
   },
   categoryIcon: {
@@ -575,44 +618,42 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   categoryIconText: {
-    fontSize: 24,
+    fontSize: 30,
   },
   categoryName: {
     fontSize: 12,
-    color: "#333",
+    color: "#32221B",
+    fontWeight: "500",
   },
   featuredContainer: {
-    alignItems: "center",
+    width: "100%",
     marginBottom: 35,
   },
   featuredList: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
     paddingBottom: 5,
+    gap: 12,
   },
   productCard: {
     width: 160,
-    marginRight: 12,
     backgroundColor: "#FFF",
     borderRadius: 12,
-    padding: 10,
-    paddingBottom: 15,
+    padding: 12,
+    marginRight: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   productImagePlaceholder: {
     width: "100%",
-    height: 110,
-    backgroundColor: "#F0F0F0",
+    height: 120,
+    backgroundColor: "#F5F0EB",
     borderRadius: 8,
     marginBottom: 8,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    borderStyle: "dashed",
     position: "relative",
     overflow: "hidden",
   },
@@ -621,18 +662,30 @@ const styles = StyleSheet.create({
     height: "100%",
     borderRadius: 8,
   },
+  noImageContainer: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  noImageContainerSmall: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   wishlistButton: {
     position: "absolute",
-    top: 5,
-    right: 5,
+    top: 8,
+    right: 8,
     backgroundColor: "#FFF",
     borderRadius: 15,
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
@@ -640,17 +693,17 @@ const styles = StyleSheet.create({
   productName: {
     fontSize: 14,
     fontWeight: "500",
+    color: "#32221B",
     marginBottom: 4,
-    width: "100%",
   },
   productRating: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 4,
+    gap: 2,
   },
   ratingText: {
-    fontSize: 12,
-    marginLeft: 4,
+    fontSize: 11,
     color: "#666",
   },
   productPrice: {
@@ -662,7 +715,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   newArrivalItem: {
-    marginBottom: 15,
+    marginBottom: 12,
   },
   newArrivalCard: {
     flexDirection: "row",
@@ -672,21 +725,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   newArrivalImagePlaceholder: {
     width: 70,
     height: 70,
-    backgroundColor: "#F0F0F0",
+    backgroundColor: "#F5F0EB",
     borderRadius: 8,
     marginRight: 12,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    borderStyle: "dashed",
     overflow: "hidden",
   },
   newArrivalImage: {
@@ -698,24 +748,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   newArrivalName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "600",
+    color: "#32221B",
     marginBottom: 2,
-    width: "100%",
   },
   newArrivalSeller: {
     fontSize: 12,
-    color: "#666",
+    color: "#8F796F",
     marginBottom: 4,
-    width: "100%",
   },
   newArrivalRating: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 4,
+    gap: 2,
   },
   newArrivalPrice: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "600",
     color: "#C35822",
   },
@@ -726,6 +776,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#C35822",
     justifyContent: "center",
     alignItems: "center",
+    shadowColor: "#C35822",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
   bottomPadding: {
     height: 80,
@@ -749,25 +804,24 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 8,
   },
-  emptyFeatured: {
-    width: "100%",
-    padding: 40,
+  emptyContainer: {
     alignItems: "center",
-  },
-  emptyNewArrivals: {
-    width: "100%",
-    padding: 20,
-    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    marginHorizontal: 20,
   },
   emptyText: {
     fontSize: 14,
     color: "#8F796F",
+    marginTop: 8,
   },
   notificationBadge: {
     position: "absolute",
     top: -5,
     right: -8,
-    backgroundColor: "#C35822",
+    backgroundColor: "#FF3B30",
     borderRadius: 10,
     minWidth: 18,
     height: 18,

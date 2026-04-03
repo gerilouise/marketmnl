@@ -11,9 +11,9 @@ import {
   updateDoc,
   doc,
   getDoc,
-  setDoc,
   Timestamp,
-  limit
+  limit,
+  setDoc
 } from 'firebase/firestore';
 
 interface Message {
@@ -37,8 +37,6 @@ interface Conversation {
   buyerId: string;
   sellerName: string;
   buyerName: string;
-  sellerImage?: string;
-  buyerImage?: string;
 }
 
 interface ChatContextType {
@@ -47,10 +45,11 @@ interface ChatContextType {
   messages: Message[];
   loading: boolean;
   sending: boolean;
-  sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendMessage: (conversationId: string, text: string) => Promise<boolean>;
   createConversation: (sellerId: string, sellerName: string) => Promise<string | null>;
   markAsRead: (conversationId: string) => Promise<void>;
   selectConversation: (conversation: Conversation | null) => void;
+  refreshConversations: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -75,9 +74,12 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) {
+      console.log('No user logged in, skipping conversations load');
       setLoading(false);
       return;
     }
+
+    console.log('Loading conversations for user:', user.uid);
 
     const conversationsRef = collection(db, 'conversations');
     const q = query(
@@ -87,11 +89,20 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      console.log(`Found ${snapshot.size} conversations`);
       const convos: Conversation[] = [];
       snapshot.forEach((doc) => {
-        convos.push({ id: doc.id, ...doc.data() } as Conversation);
+        const data = doc.data();
+        convos.push({ 
+          id: doc.id, 
+          ...data,
+          unreadCount: data.unreadCount || {}
+        } as Conversation);
       });
       setConversations(convos);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error loading conversations:', error);
       setLoading(false);
     });
 
@@ -110,15 +121,20 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
+    console.log('Loading messages for conversation:', currentConversation.id);
+
     const messagesRef = collection(db, 'conversations', currentConversation.id, 'messages');
     const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(50));
 
     unsubscribeMessages = onSnapshot(q, (snapshot) => {
+      console.log(`Found ${snapshot.size} messages`);
       const msgs: Message[] = [];
       snapshot.forEach((doc) => {
         msgs.unshift({ id: doc.id, ...doc.data(), conversationId: currentConversation.id } as Message);
       });
       setMessages(msgs);
+    }, (error) => {
+      console.error('Error loading messages:', error);
     });
 
     return () => {
@@ -129,45 +145,75 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [currentConversation]);
 
-  const sendMessage = async (conversationId: string, text: string) => {
+  const sendMessage = async (conversationId: string, text: string): Promise<boolean> => {
     const user = auth.currentUser;
-    if (!user) throw new Error('Not logged in');
-    if (!text.trim()) return;
+    if (!user) {
+      console.error('Not logged in');
+      return false;
+    }
+    if (!text.trim()) return false;
 
     setSending(true);
     try {
-      const conversationRef = doc(db, 'conversations', conversationId);
-      const messagesRef = collection(conversationRef, 'messages');
+      console.log('Sending message to conversation:', conversationId);
+      console.log('Message text:', text);
+      console.log('Sender:', user.uid);
       
-      // Add message
-      await addDoc(messagesRef, {
+      const conversationRef = doc(db, 'conversations', conversationId);
+      
+      // Get conversation data first
+      const conversationSnap = await getDoc(conversationRef);
+      
+      if (!conversationSnap.exists()) {
+        console.error('Conversation not found:', conversationId);
+        return false;
+      }
+      
+      const conversationData = conversationSnap.data() as Conversation;
+      console.log('Conversation data:', conversationData);
+      
+      // Determine other participant
+      const otherParticipant = conversationData.participants.find(p => p !== user.uid);
+      console.log('Other participant:', otherParticipant);
+      
+      // Prepare unread count update
+      const currentUnread = conversationData.unreadCount || {};
+      const newUnreadCount = { ...currentUnread };
+      
+      // Increment unread for other participant, reset for sender
+      if (otherParticipant) {
+        newUnreadCount[otherParticipant] = (newUnreadCount[otherParticipant] || 0) + 1;
+      }
+      newUnreadCount[user.uid] = 0;
+      
+      // Add message to subcollection
+      const messagesRef = collection(conversationRef, 'messages');
+      const messageData = {
         text: text.trim(),
         senderId: user.uid,
         senderName: user.displayName || user.email?.split('@')[0] || 'User',
         timestamp: Timestamp.now(),
         read: false,
+      };
+      
+      await addDoc(messagesRef, messageData);
+      console.log('Message added to Firestore');
+      
+      // Update conversation
+      await updateDoc(conversationRef, {
+        lastMessage: text.trim(),
+        lastMessageTime: Timestamp.now(),
+        lastMessageSenderId: user.uid,
+        unreadCount: newUnreadCount,
+        updatedAt: Timestamp.now(),
       });
-
-      // Update conversation last message
-      const conversation = conversations.find(c => c.id === conversationId);
-      if (conversation) {
-        const otherParticipant = conversation.participants.find(p => p !== user.uid);
-        const unreadCount = { ...conversation.unreadCount };
-        if (otherParticipant) {
-          unreadCount[otherParticipant] = (unreadCount[otherParticipant] || 0) + 1;
-        }
-        
-        await updateDoc(conversationRef, {
-          lastMessage: text.trim(),
-          lastMessageTime: Timestamp.now(),
-          lastMessageSenderId: user.uid,
-          unreadCount: unreadCount,
-          updatedAt: Timestamp.now(),
-        });
-      }
+      
+      console.log('Conversation updated successfully');
+      return true;
+      
     } catch (error) {
       console.error('Error sending message:', error);
-      throw error;
+      return false;
     } finally {
       setSending(false);
     }
@@ -181,7 +227,7 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
       const conversationRef = doc(db, 'conversations', conversationId);
       const conversation = conversations.find(c => c.id === conversationId);
       
-      if (conversation && conversation.unreadCount[user.uid] > 0) {
+      if (conversation && conversation.unreadCount && conversation.unreadCount[user.uid] > 0) {
         const newUnreadCount = { ...conversation.unreadCount };
         delete newUnreadCount[user.uid];
         
@@ -197,6 +243,7 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
               : c
           )
         );
+        console.log('Marked conversation as read:', conversationId);
       }
     } catch (error) {
       console.error('Error marking as read:', error);
@@ -205,7 +252,13 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
 
   const createConversation = async (sellerId: string, sellerName: string): Promise<string | null> => {
     const user = auth.currentUser;
-    if (!user) return null;
+    if (!user) {
+      console.error('No user logged in');
+      return null;
+    }
+
+    console.log('Creating conversation with seller:', sellerId, sellerName);
+    console.log('Current user:', user.uid);
 
     try {
       // Check if conversation already exists
@@ -214,16 +267,32 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
       );
       
       if (existingConversation) {
+        console.log('Conversation already exists:', existingConversation.id);
         return existingConversation.id;
       }
 
       // Get buyer info
-      const buyerDoc = await getDoc(doc(db, 'users', user.uid));
-      const buyerData = buyerDoc.data();
-      const buyerName = buyerData?.fullName || user.displayName || user.email?.split('@')[0] || 'Customer';
+      let buyerName = 'Customer';
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          buyerName = userData.fullName || user.displayName || user.email?.split('@')[0] || 'Customer';
+        } else {
+          buyerName = user.displayName || user.email?.split('@')[0] || 'Customer';
+        }
+      } catch (error) {
+        console.error('Error getting user data:', error);
+        buyerName = user.displayName || 'Customer';
+      }
+
+      console.log('Buyer name:', buyerName);
+      console.log('Seller name:', sellerName);
 
       // Create new conversation
       const conversationsRef = collection(db, 'conversations');
+      const conversationId = `${user.uid}_${sellerId}_${Date.now()}`;
+      
       const newConversation = {
         participants: [user.uid, sellerId],
         sellerId: sellerId,
@@ -239,7 +308,9 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
       };
 
       const docRef = await addDoc(conversationsRef, newConversation);
+      console.log('Conversation created with ID:', docRef.id);
       return docRef.id;
+      
     } catch (error) {
       console.error('Error creating conversation:', error);
       return null;
@@ -248,10 +319,16 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
 
   const selectConversation = (conversation: Conversation | null) => {
     if (currentConversation?.id === conversation?.id) return;
+    console.log('Selecting conversation:', conversation?.id);
     setCurrentConversation(conversation);
     if (conversation) {
       markAsRead(conversation.id);
     }
+  };
+
+  const refreshConversations = () => {
+    setLoading(true);
+    // The onSnapshot will automatically refresh
   };
 
   return (
@@ -266,6 +343,7 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
         createConversation,
         markAsRead,
         selectConversation,
+        refreshConversations,
       }}
     >
       {children}

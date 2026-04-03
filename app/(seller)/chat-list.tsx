@@ -29,7 +29,7 @@ export default function SellerChatListScreen() {
 
   const navigateToChat = (conversation: any) => {
     selectConversation(conversation);
-    router.push('/(seller)/chat-detail');
+    router.push(`/(seller)/chat-detail?conversationId=${conversation.id}`);
   };
 
   const formatTime = (timestamp: any) => {
@@ -107,7 +107,6 @@ export default function SellerChatListScreen() {
                     {otherName?.substring(0, 2).toUpperCase() || '??'}
                   </Text>
                 </View>
-                {item.online && <View style={styles.onlineIndicator} />}
               </View>
 
               <View style={styles.chatInfo}>
@@ -219,17 +218,6 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 16,
     fontWeight: "600",
-  },
-  onlineIndicator: {
-    position: "absolute",
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#4CAF50",
-    borderWidth: 2,
-    borderColor: "#FFF",
   },
   chatInfo: {
     flex: 1,

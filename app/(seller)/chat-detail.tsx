@@ -1,4 +1,4 @@
-// app/(customer)/chat-detail.tsx
+// app/(seller)/chat-detail.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,76 +18,71 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useChat } from '@/app/contexts/ChatContext';
 import { auth } from '@/lib/firebase';
 
-export default function CustomerChatDetailScreen() {
-  const { sellerId, sellerName } = useLocalSearchParams();
-  const { conversations, currentConversation, messages, sendMessage, sending, selectConversation, createConversation } = useChat();
+export default function SellerChatDetailScreen() {
+  const { conversationId } = useLocalSearchParams();
+  const { conversations, messages, sendMessage, sending, selectConversation, markAsRead, loading } = useChat();
   const [inputText, setInputText] = useState('');
-  const [loading, setLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
+  const [localLoading, setLocalLoading] = useState(true);
 
+  // Find and select the conversation when component mounts
   useEffect(() => {
-    const initChat = async () => {
-      setLoading(true);
-      try {
-        // Check if conversation already exists with this seller
-        const existingConversation = conversations.find(
-          c => c.participants.includes(sellerId as string)
-        );
+    const findAndSelectConversation = async () => {
+      console.log('Seller chat - Looking for conversation:', conversationId);
+      
+      if (conversationId) {
+        const conversation = conversations.find(c => c.id === conversationId);
         
-        if (existingConversation) {
-          selectConversation(existingConversation);
-        } else if (sellerId) {
-          // Create new conversation
-          const convId = await createConversation(sellerId as string, sellerName as string);
-          if (convId) {
-            // Find the newly created conversation in the list
-            const newConv = conversations.find(c => c.id === convId);
-            if (newConv) {
-              selectConversation(newConv);
-            }
-          }
+        if (conversation) {
+          selectConversation(conversation);
+          await markAsRead(conversation.id);
+        } else {
+          console.log('Conversation not found in seller chat');
         }
-      } catch (error) {
-        console.error('Error initializing chat:', error);
-      } finally {
-        setLoading(false);
       }
+      setLocalLoading(false);
     };
     
-    initChat();
-    
-    return () => {
-      selectConversation(null);
-    };
-  }, [sellerId]);
+    findAndSelectConversation();
+  }, [conversationId, conversations]);
 
   const handleSend = async () => {
-    if (!inputText.trim() || !currentConversation || sending) return;
+    if (!inputText.trim()) return;
     
-    try {
-      await sendMessage(currentConversation.id, inputText.trim());
+    if (!conversationId) {
+      Alert.alert('Error', 'No conversation selected');
+      return;
+    }
+    
+    const success = await sendMessage(conversationId as string, inputText.trim());
+    
+    if (success) {
       setInputText('');
       setTimeout(() => {
         flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
       }, 100);
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } else {
+      Alert.alert('Error', 'Failed to send message');
     }
   };
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return '';
-    const date = timestamp.toDate();
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = timestamp.toDate();
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return '';
+    }
   };
 
   const renderMessage = ({ item }: { item: any }) => {
     const isUser = item.senderId === auth.currentUser?.uid;
     
     return (
-      <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.sellerMessage]}>
-        <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.sellerBubble]}>
-          <Text style={[styles.messageText, isUser ? styles.userMessageText : styles.sellerMessageText]}>
+      <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.customerMessage]}>
+        <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.customerBubble]}>
+          <Text style={[styles.messageText, isUser ? styles.userMessageText : styles.customerMessageText]}>
             {item.text}
           </Text>
           <Text style={styles.messageTime}>{formatTime(item.timestamp)}</Text>
@@ -95,14 +91,17 @@ export default function CustomerChatDetailScreen() {
     );
   };
 
-  if (loading) {
+  const currentConversation = conversations.find(c => c.id === conversationId);
+  const otherName = currentConversation?.buyerName || 'Customer';
+
+  if (localLoading || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{sellerName || 'Chat'}</Text>
+          <Text style={styles.headerTitle}>Chat</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.loadingContainer}>
@@ -111,30 +110,6 @@ export default function CustomerChatDetailScreen() {
       </SafeAreaView>
     );
   }
-
-  if (!currentConversation) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#32221B" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{sellerName || 'Chat'}</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Unable to start conversation</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.retryButton}>
-            <Text style={styles.retryButtonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const otherName = currentConversation.sellerId === auth.currentUser?.uid 
-    ? currentConversation.buyerName 
-    : currentConversation.sellerName;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -154,6 +129,13 @@ export default function CustomerChatDetailScreen() {
         contentContainerStyle={styles.messagesList}
         inverted
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="chatbubble-outline" size={50} color="#E0DAD1" />
+            <Text style={styles.emptyText}>No messages yet</Text>
+            <Text style={styles.emptySubtext}>When customers message you, they'll appear here</Text>
+          </View>
+        }
       />
 
       <KeyboardAvoidingView
@@ -163,7 +145,7 @@ export default function CustomerChatDetailScreen() {
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            placeholder="Type a message..."
+            placeholder="Type a reply..."
             placeholderTextColor="#8F796F"
             value={inputText}
             onChangeText={setInputText}
@@ -221,6 +203,7 @@ const styles = StyleSheet.create({
   messagesList: {
     padding: 16,
     paddingBottom: 20,
+    flexGrow: 1,
   },
   messageContainer: {
     marginBottom: 12,
@@ -229,7 +212,7 @@ const styles = StyleSheet.create({
   userMessage: {
     justifyContent: "flex-end",
   },
-  sellerMessage: {
+  customerMessage: {
     justifyContent: "flex-start",
   },
   messageBubble: {
@@ -241,7 +224,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#C35822",
     borderBottomRightRadius: 4,
   },
-  sellerBubble: {
+  customerBubble: {
     backgroundColor: "#FFF",
     borderBottomLeftRadius: 4,
     shadowColor: "#000",
@@ -257,7 +240,7 @@ const styles = StyleSheet.create({
   userMessageText: {
     color: "#FFF",
   },
-  sellerMessageText: {
+  customerMessageText: {
     color: "#32221B",
   },
   messageTime: {
@@ -300,25 +283,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F0EB",
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    justifyContent: "center",
+    paddingVertical: 40,
   },
   emptyText: {
     fontSize: 16,
-    color: "#8F796F",
-    marginBottom: 16,
+    color: "#32221B",
+    marginTop: 12,
   },
-  retryButton: {
-    backgroundColor: "#C35822",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-  },
-  retryButtonText: {
-    color: "#FFF",
+  emptySubtext: {
     fontSize: 14,
-    fontWeight: "600",
+    color: "#8F796F",
+    marginTop: 4,
   },
 });

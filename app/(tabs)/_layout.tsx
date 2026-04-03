@@ -147,6 +147,13 @@ export default function TabLayout() {
           href: null, // Hide from tab bar
         }}
       />
+
+      <Tabs.Screen
+        name="my-reviews"
+        options={{
+          href: null, // Hide from tab bar
+        }}
+      />
     </Tabs>
   );
 }

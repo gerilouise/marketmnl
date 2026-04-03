@@ -60,7 +60,7 @@ export default function ProfileScreen() {
     }, [])
   );
 
-  // Set up real-time listener for reviews count
+  // Set up real-time listener for reviews count (FIXED: using 'reviews' collection)
   useFocusEffect(
     useCallback(() => {
       const user = auth.currentUser;
@@ -69,7 +69,8 @@ export default function ProfileScreen() {
         return;
       }
 
-      const reviewsRef = collection(db, 'product_reviews');
+      // Use 'reviews' collection instead of 'product_reviews'
+      const reviewsRef = collection(db, 'reviews');
       const q = query(reviewsRef, where('userId', '==', user.uid));
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -191,7 +192,7 @@ export default function ProfileScreen() {
         router.push("/(tabs)/orders");
         break;
       case "reviews":
-        Alert.alert("Coming Soon", "Reviews screen will be available soon!");
+        router.push("/(tabs)/my-reviews");
         break;
       case "wishlist":
         router.push("/(tabs)/wishlist");

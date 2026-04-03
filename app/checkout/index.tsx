@@ -24,6 +24,31 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
+// Delivery options
+const DELIVERY_OPTIONS = [
+  { 
+    id: "standard", 
+    name: "Standard Delivery", 
+    description: "3-7 business days", 
+    price: 50,
+    icon: "cube-outline"
+  },
+  { 
+    id: "express", 
+    name: "Express Delivery", 
+    description: "1-3 business days", 
+    price: 150,
+    icon: "rocket-outline"
+  },
+  { 
+    id: "same-day", 
+    name: "Same Day Delivery", 
+    description: "Available in Metro Manila", 
+    price: 200,
+    icon: "time-outline"
+  },
+];
+
 export default function CheckoutScreen() {
   const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } =
     useCart();
@@ -31,6 +56,7 @@ export default function CheckoutScreen() {
   const [checkoutItems, setCheckoutItems] = useState<any[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [selectedPayment, setSelectedPayment] = useState("Cash on Delivery");
+  const [selectedDelivery, setSelectedDelivery] = useState(DELIVERY_OPTIONS[0]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showOrderSuccess, setShowOrderSuccess] = useState(false);
   const [orderNumber, setOrderNumber] = useState("");
@@ -109,8 +135,8 @@ export default function CheckoutScreen() {
     );
   };
 
-  const shippingFee = 50;
   const subtotal = calculateSubtotal();
+  const shippingFee = selectedDelivery.price;
   const total = subtotal + shippingFee;
 
   // Function to update product stock after order
@@ -237,6 +263,12 @@ export default function CheckoutScreen() {
         total,
         paymentMethod: selectedPayment,
         paymentDetails: paymentDetails || null,
+        deliveryOption: {
+          id: selectedDelivery.id,
+          name: selectedDelivery.name,
+          description: selectedDelivery.description,
+          price: selectedDelivery.price,
+        },
         address: {
           fullName: selectedAddress.fullName,
           phone: selectedAddress.phone,
@@ -251,13 +283,14 @@ export default function CheckoutScreen() {
         customerName: user.displayName || selectedAddress.fullName || "Customer",
         customerEmail: user.email || "",
         userId: user.uid,
-        userEmail: user.email,
+        userEmail: user.email || "",
       };
 
       console.log("🚀 Sending order with customer info:", {
         customerName: orderData.customerName,
         customerEmail: orderData.customerEmail,
         userId: orderData.userId,
+        deliveryOption: orderData.deliveryOption,
       });
 
       // Create the order
@@ -496,6 +529,52 @@ export default function CheckoutScreen() {
           ) : null}
         </View>
 
+        {/* Delivery Options Section - NEW */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Delivery Options</Text>
+          {DELIVERY_OPTIONS.map((option) => (
+            <TouchableOpacity
+              key={option.id}
+              style={[
+                styles.deliveryOption,
+                selectedDelivery.id === option.id && styles.deliveryOptionSelected,
+              ]}
+              onPress={() => setSelectedDelivery(option)}
+            >
+              <View style={styles.deliveryOptionLeft}>
+                <View style={[
+                  styles.deliveryIconContainer,
+                  selectedDelivery.id === option.id && styles.deliveryIconContainerSelected
+                ]}>
+                  <Ionicons 
+                    name={option.icon as any} 
+                    size={22} 
+                    color={selectedDelivery.id === option.id ? "#C35822" : "#8F796F"} 
+                  />
+                </View>
+                <View style={styles.deliveryInfo}>
+                  <Text style={[
+                    styles.deliveryName,
+                    selectedDelivery.id === option.id && styles.deliveryNameSelected
+                  ]}>
+                    {option.name}
+                  </Text>
+                  <Text style={styles.deliveryDescription}>{option.description}</Text>
+                </View>
+              </View>
+              <View style={styles.deliveryRight}>
+                <Text style={styles.deliveryPrice}>₱{option.price}</Text>
+                <View style={[
+                  styles.radioCircle,
+                  selectedDelivery.id === option.id && styles.radioCircleSelected
+                ]}>
+                  {selectedDelivery.id === option.id && <View style={styles.radioInner} />}
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Payment Method Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
@@ -531,16 +610,20 @@ export default function CheckoutScreen() {
             <Text style={styles.sectionTitle}>Price Details</Text>
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Subtotal</Text>
-              <Text style={styles.priceValue}>₱{subtotal}</Text>
+              <Text style={styles.priceValue}>₱{subtotal.toFixed(2)}</Text>
             </View>
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Shipping Fee</Text>
-              <Text style={styles.priceValue}>₱{shippingFee}</Text>
+              <Text style={styles.priceValue}>₱{shippingFee.toFixed(2)}</Text>
+            </View>
+            <View style={styles.priceRow}>
+              <Text style={styles.priceLabel}>Delivery Option</Text>
+              <Text style={styles.priceValue}>{selectedDelivery.name}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>₱{total}</Text>
+              <Text style={styles.totalValue}>₱{total.toFixed(2)}</Text>
             </View>
           </View>
         )}
@@ -567,7 +650,7 @@ export default function CheckoutScreen() {
               <Text style={styles.placeOrderText}>Processing...</Text>
             </View>
           ) : (
-            <Text style={styles.placeOrderText}>Place Order • ₱{total}</Text>
+            <Text style={styles.placeOrderText}>Place Order • ₱{total.toFixed(2)}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -686,7 +769,7 @@ export default function CheckoutScreen() {
                 }
               }}
             >
-              <Text style={styles.confirmButtonText}>Pay ₱{total}</Text>
+              <Text style={styles.confirmButtonText}>Pay ₱{total.toFixed(2)}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -701,6 +784,9 @@ export default function CheckoutScreen() {
             </View>
             <Text style={styles.successTitle}>Order Placed Successfully!</Text>
             <Text style={styles.orderNumber}>Order #{orderNumber}</Text>
+            <Text style={styles.deliveryInfoText}>
+              Delivery: {selectedDelivery.name} • ₱{selectedDelivery.price}
+            </Text>
             <Text style={styles.successMessage}>
               Thank you for shopping with us! Your order has been confirmed.
             </Text>
@@ -868,6 +954,83 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   changeButtonText: { color: "#C35822", fontSize: 13, fontWeight: "500" },
+  // Delivery Options Styles
+  deliveryOption: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    backgroundColor: "#FFF",
+  },
+  deliveryOptionSelected: {
+    borderColor: "#C35822",
+    backgroundColor: "#FFF9F5",
+  },
+  deliveryOptionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  deliveryIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#F5F0EB",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  deliveryIconContainerSelected: {
+    backgroundColor: "#FEF5ED",
+  },
+  deliveryInfo: {
+    flex: 1,
+  },
+  deliveryName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 2,
+  },
+  deliveryNameSelected: {
+    color: "#C35822",
+  },
+  deliveryDescription: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  deliveryRight: {
+    alignItems: "flex-end",
+  },
+  deliveryPrice: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#C35822",
+    marginBottom: 4,
+  },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#C35822",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  radioCircleSelected: {
+    borderColor: "#C35822",
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#C35822",
+  },
   paymentOption: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1007,6 +1170,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#C35822",
     fontWeight: "600",
+    marginBottom: 8,
+  },
+  deliveryInfoText: {
+    fontSize: 13,
+    color: "#8F796F",
     marginBottom: 12,
   },
   successMessage: {
