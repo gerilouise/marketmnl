@@ -1,131 +1,215 @@
-// app/(customer)/chat-detail.tsx
-import React, { useState, useRef, useEffect } from 'react';
+// app/(tabs)/chat-detail.tsx
+import { useChat } from "@/app/contexts/ChatContext";
+import { auth } from "@/lib/firebase";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useLocalSearchParams } from "expo-router";
+import { Timestamp } from "firebase/firestore";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Alert,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useChat } from '@/app/contexts/ChatContext';
-import { auth } from '@/lib/firebase';
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ChatDetailScreen() {
-  const { conversationId, sellerId, sellerName } = useLocalSearchParams();
-  const { conversations, messages, sendMessage, sending, selectConversation, markAsRead, refreshConversations, loading } = useChat();
-  const [inputText, setInputText] = useState('');
+  const params = useLocalSearchParams();
+  const {
+    conversations,
+    messages,
+    sendMessage,
+    sending,
+    selectConversation,
+    markAsRead,
+    createConversation,
+  } = useChat();
+  const [inputText, setInputText] = useState("");
   const flatListRef = useRef<FlatList>(null);
-  const [localLoading, setLocalLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentConversationData, setCurrentConversationData] =
+    useState<any>(null);
 
-  // Find and select the conversation when component mounts
+  const conversationId = params.conversationId as string;
+  const sellerId = params.sellerId as string;
+  const sellerName = params.sellerName as string;
+
+  // Find and set the correct conversation
   useEffect(() => {
-    const findAndSelectConversation = async () => {
-      console.log('Looking for conversation with ID:', conversationId);
-      console.log('All conversations:', conversations.map(c => ({ id: c.id, participants: c.participants })));
-      
-      if (conversationId) {
-        let conversation = conversations.find(c => c.id === conversationId);
-        
-        // If not found by ID, try to find by participants
-        if (!conversation && sellerId && auth.currentUser) {
-          conversation = conversations.find(
-            c => c.participants.includes(sellerId as string) && 
-                 c.participants.includes(auth.currentUser?.uid || '')
-          );
-          console.log('Found conversation by participants:', conversation?.id);
+    const findConversation = async () => {
+      setIsLoading(true);
+
+      try {
+        let conversation = null;
+
+        // If we have a conversationId, find it in the list
+        if (conversationId) {
+          conversation = conversations.find((c) => c.id === conversationId);
         }
-        
+
+        // If not found and we have seller info, create or find existing
+        if (!conversation && sellerId && sellerName) {
+          // Check if conversation already exists with this seller
+          conversation = conversations.find(
+            (c) =>
+              c.participants.includes(sellerId) &&
+              c.participants.includes(auth.currentUser?.uid || ""),
+          );
+
+          if (!conversation) {
+            // Create new conversation
+            const newId = await createConversation(sellerId, sellerName);
+            if (newId) {
+              // Wait a bit for the conversation to be added to the list
+              setTimeout(() => {
+                const newConv = conversations.find((c) => c.id === newId);
+                if (newConv) {
+                  setCurrentConversationData(newConv);
+                  selectConversation(newConv);
+                  markAsRead(newConv.id);
+                  setIsLoading(false);
+                } else {
+                  setIsLoading(false);
+                  Alert.alert("Error", "Could not create conversation");
+                }
+              }, 1000);
+              return;
+            }
+          }
+        }
+
         if (conversation) {
+          setCurrentConversationData(conversation);
           selectConversation(conversation);
           await markAsRead(conversation.id);
-        } else {
-          console.log('Conversation not found, refreshing...');
-          refreshConversations();
-          // Wait a bit and try again
-          setTimeout(() => {
-            const conv = conversations.find(c => c.id === conversationId);
-            if (conv) {
-              selectConversation(conv);
-              markAsRead(conv.id);
-            }
-          }, 1000);
+        } else if (!sellerId && !sellerName && !conversationId) {
+          Alert.alert("Error", "No conversation specified");
         }
+      } catch (error) {
+        console.error("Error finding conversation:", error);
+        Alert.alert("Error", "Could not load conversation");
+      } finally {
+        setIsLoading(false);
       }
-      setLocalLoading(false);
     };
-    
-    findAndSelectConversation();
-  }, [conversationId, conversations, sellerId]);
+
+    findConversation();
+  }, [conversationId, sellerId, sellerName, conversations]);
+
+  // Update when messages change
+  useEffect(() => {
+    if (messages.length > 0 && flatListRef.current) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages]);
 
   const handleSend = async () => {
-    if (!inputText.trim()) {
+    if (!inputText.trim() || sending) return;
+
+    if (!currentConversationData) {
+      Alert.alert("Error", "No active conversation");
       return;
     }
-    
-    if (!conversationId) {
-      Alert.alert('Error', 'No conversation selected');
-      return;
-    }
-    
-    console.log('Sending message to conversation:', conversationId);
-    console.log('Message:', inputText.trim());
-    
-    const success = await sendMessage(conversationId as string, inputText.trim());
-    
+
+    const success = await sendMessage(currentConversationData.id, inputText);
     if (success) {
-      setInputText('');
+      setInputText("");
       setTimeout(() => {
-        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     } else {
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      Alert.alert("Error", "Failed to send message");
     }
   };
 
-  const formatTime = (timestamp: any) => {
-    if (!timestamp) return '';
-    try {
-      const date = timestamp.toDate();
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
-      return '';
+  const formatTime = (timestamp: Timestamp) => {
+    if (!timestamp) return "";
+    const date = timestamp.toDate();
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const formatDate = (timestamp: Timestamp) => {
+    if (!timestamp) return "";
+    const date = timestamp.toDate();
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return "Today";
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday";
+    } else {
+      return date.toLocaleDateString([], { month: "short", day: "numeric" });
     }
   };
 
-  const renderMessage = ({ item }: { item: any }) => {
-    const isUser = item.senderId === auth.currentUser?.uid;
-    
+  const renderMessage = ({ item, index }: { item: any; index: number }) => {
+    if (!item || !item.id) return null;
+
+    const isMyMessage = item.senderId === auth.currentUser?.uid;
+    const prevMessage = index > 0 ? messages[index - 1] : null;
+    const showDate =
+      index === 0 ||
+      (prevMessage &&
+        prevMessage.timestamp?.toDate().toDateString() !==
+          item.timestamp?.toDate().toDateString());
+
     return (
-      <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.sellerMessage]}>
-        <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.sellerBubble]}>
-          <Text style={[styles.messageText, isUser ? styles.userMessageText : styles.sellerMessageText]}>
+      <View key={item.id}>
+        {showDate && item.timestamp && (
+          <View style={styles.dateContainer}>
+            <Text style={styles.dateText}>{formatDate(item.timestamp)}</Text>
+          </View>
+        )}
+        <View
+          style={[
+            styles.messageContainer,
+            isMyMessage ? styles.myMessage : styles.otherMessage,
+          ]}
+        >
+          {!isMyMessage && (
+            <Text style={styles.senderName}>
+              {item.senderName ||
+                currentConversationData?.sellerName ||
+                "Seller"}
+            </Text>
+          )}
+          <Text
+            style={[
+              styles.messageText,
+              isMyMessage ? styles.myMessageText : styles.otherMessageText,
+            ]}
+          >
             {item.text}
           </Text>
-          <Text style={styles.messageTime}>{formatTime(item.timestamp)}</Text>
+          {item.timestamp && (
+            <Text style={styles.timeText}>{formatTime(item.timestamp)}</Text>
+          )}
         </View>
       </View>
     );
   };
 
-  const otherName = sellerName || 'Seller';
-
-  if (localLoading || (loading && conversations.length === 0)) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Chat</Text>
-          <View style={{ width: 40 }} />
+          <Text style={styles.headerTitle}>Loading...</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
@@ -134,14 +218,54 @@ export default function ChatDetailScreen() {
     );
   }
 
+  if (!currentConversationData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
+            <Ionicons name="arrow-back" size={24} color="#32221B" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Error</Text>
+        </View>
+        <View style={styles.errorContainer}>
+          <Ionicons name="chatbubble-outline" size={60} color="#E0DAD1" />
+          <Text style={styles.errorText}>Could not load conversation</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const otherPersonName =
+    currentConversationData.sellerId === auth.currentUser?.uid
+      ? currentConversationData.buyerName
+      : currentConversationData.sellerName;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{otherName}</Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerTitle}>{otherPersonName}</Text>
+          <Text style={styles.headerSubtitle}>
+            {currentConversationData.sellerId === auth.currentUser?.uid
+              ? "Customer"
+              : "Seller"}
+          </Text>
+        </View>
       </View>
 
       <FlatList
@@ -150,39 +274,44 @@ export default function ChatDetailScreen() {
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.messagesList}
-        inverted
-        showsVerticalScrollIndicator={false}
+        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Ionicons name="chatbubble-outline" size={50} color="#E0DAD1" />
+            <Ionicons name="chatbubbles-outline" size={60} color="#E0DAD1" />
             <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>Send a message to start the conversation</Text>
+            <Text style={styles.emptySubtext}>
+              Send a message to start the conversation
+            </Text>
           </View>
         }
       />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            placeholder="Type a message..."
-            placeholderTextColor="#8F796F"
             value={inputText}
             onChangeText={setInputText}
+            placeholder="Type a message..."
+            placeholderTextColor="#8F796F"
             multiline
+            maxLength={500}
           />
           <TouchableOpacity
-            style={[styles.sendButton, (!inputText.trim() || sending) && styles.sendButtonDisabled]}
+            style={[
+              styles.sendButton,
+              (!inputText.trim() || sending) && styles.sendButtonDisabled,
+            ]}
             onPress={handleSend}
             disabled={!inputText.trim() || sending}
           >
             {sending ? (
-              <ActivityIndicator size="small" color="#C35822" />
+              <ActivityIndicator size="small" color="#FFF" />
             ) : (
-              <Ionicons name="send" size={20} color={inputText.trim() ? "#C35822" : "#E0DAD1"} />
+              <Ionicons name="send" size={20} color="#FFF" />
             )}
           </TouchableOpacity>
         </View>
@@ -198,79 +327,128 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#FBF8F4",
+    backgroundColor: "#FFF",
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
+    padding: 4,
+  },
+  headerInfo: {
+    flex: 1,
+    marginLeft: 12,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "600",
     color: "#32221B",
   },
+  headerSubtitle: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 2,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: "#32221B",
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
+  retryButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
   messagesList: {
-    padding: 16,
-    paddingBottom: 20,
-    flexGrow: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  dateContainer: {
+    alignItems: "center",
+    marginVertical: 12,
+  },
+  dateText: {
+    fontSize: 12,
+    color: "#8F796F",
+    backgroundColor: "#F0F0F0",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   messageContainer: {
-    marginBottom: 12,
-    flexDirection: "row",
-  },
-  userMessage: {
-    justifyContent: "flex-end",
-  },
-  sellerMessage: {
-    justifyContent: "flex-start",
-  },
-  messageBubble: {
     maxWidth: "80%",
+    marginVertical: 4,
     padding: 12,
     borderRadius: 20,
   },
-  userBubble: {
+  myMessage: {
+    alignSelf: "flex-end",
     backgroundColor: "#C35822",
-    borderBottomRightRadius: 4,
   },
-  sellerBubble: {
+  otherMessage: {
+    alignSelf: "flex-start",
     backgroundColor: "#FFF",
-    borderBottomLeftRadius: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  senderName: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#C35822",
+    marginBottom: 4,
   },
   messageText: {
     fontSize: 15,
     lineHeight: 20,
   },
-  userMessageText: {
+  myMessageText: {
     color: "#FFF",
   },
-  sellerMessageText: {
+  otherMessageText: {
     color: "#32221B",
   },
-  messageTime: {
+  timeText: {
     fontSize: 10,
     color: "#8F796F",
     marginTop: 4,
     alignSelf: "flex-end",
+  },
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: "#32221B",
+    marginTop: 12,
+    fontWeight: "500",
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginTop: 8,
+    textAlign: "center",
   },
   inputContainer: {
     flexDirection: "row",
@@ -280,44 +458,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     borderTopWidth: 1,
     borderTopColor: "#E0DAD1",
-    gap: 8,
   },
   input: {
     flex: 1,
     backgroundColor: "#F5F0EB",
-    borderRadius: 25,
+    borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
+    maxHeight: 100,
     fontSize: 15,
     color: "#32221B",
-    maxHeight: 100,
   },
   sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FFF",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#C35822",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
+    marginLeft: 8,
   },
   sendButtonDisabled: {
-    backgroundColor: "#F5F0EB",
-  },
-  emptyContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 40,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: "#32221B",
-    marginTop: 12,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: "#8F796F",
-    marginTop: 4,
+    backgroundColor: "#E0DAD1",
   },
 });

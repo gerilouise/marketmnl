@@ -1,49 +1,59 @@
 // app/(customer)/chat-list.tsx
-import React, { useState, useCallback } from 'react';
+import { useChat } from "@/app/contexts/ChatContext";
+import { auth } from "@/lib/firebase";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Image,
   ActivityIndicator,
+  FlatList,
   RefreshControl,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import { useChat } from '@/app/contexts/ChatContext';
-import { auth } from '@/lib/firebase';
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ChatListScreen() {
-  const { conversations, selectConversation, loading } = useChat();
+  const { conversations, selectConversation, loading, refreshConversations } =
+    useChat();
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
+      // Refresh conversations when screen comes into focus
+      refreshConversations();
       setRefreshing(false);
-    }, [])
+    }, []),
   );
 
   const navigateToChat = (conversation: any) => {
+    // Select the conversation first
     selectConversation(conversation);
-    router.push('/(tabs)/chat-detail');
+    // Navigate with the conversation ID
+    router.push({
+      pathname: "/(tabs)/chat-detail",
+      params: { conversationId: conversation.id },
+    });
   };
 
   const formatTime = (timestamp: any) => {
-    if (!timestamp) return '';
+    if (!timestamp) return "";
     const date = timestamp.toDate();
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const hours = diff / (1000 * 60 * 60);
-    
+
     if (hours < 24) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     } else if (hours < 48) {
-      return 'Yesterday';
+      return "Yesterday";
     } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return date.toLocaleDateString([], { month: "short", day: "numeric" });
     }
   };
 
@@ -52,6 +62,12 @@ export default function ChatListScreen() {
     if (!user) return 0;
     return conversation.unreadCount?.[user.uid] || 0;
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refreshConversations();
+    setTimeout(() => setRefreshing(false), 500);
+  }, []);
 
   if (loading) {
     return (
@@ -79,13 +95,17 @@ export default function ChatListScreen() {
           const unreadCount = getUnreadCount(item);
           const isSeller = item.sellerId === auth.currentUser?.uid;
           const otherName = isSeller ? item.buyerName : item.sellerName;
-          
+
           return (
-            <TouchableOpacity style={styles.chatItem} onPress={() => navigateToChat(item)}>
+            <TouchableOpacity
+              style={styles.chatItem}
+              onPress={() => navigateToChat(item)}
+              activeOpacity={0.7}
+            >
               <View style={styles.avatarContainer}>
                 <View style={styles.avatarPlaceholder}>
                   <Text style={styles.avatarText}>
-                    {otherName?.substring(0, 2).toUpperCase() || '??'}
+                    {otherName?.substring(0, 2).toUpperCase() || "??"}
                   </Text>
                 </View>
               </View>
@@ -93,16 +113,26 @@ export default function ChatListScreen() {
               <View style={styles.chatInfo}>
                 <View style={styles.chatHeader}>
                   <Text style={styles.sellerName}>{otherName}</Text>
-                  <Text style={styles.timeText}>{formatTime(item.lastMessageTime)}</Text>
+                  <Text style={styles.timeText}>
+                    {formatTime(item.lastMessageTime)}
+                  </Text>
                 </View>
-                <Text style={[styles.lastMessage, unreadCount > 0 && styles.unreadMessage]} numberOfLines={1}>
-                  {item.lastMessage || 'No messages yet'}
+                <Text
+                  style={[
+                    styles.lastMessage,
+                    unreadCount > 0 && styles.unreadMessage,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.lastMessage || "No messages yet"}
                 </Text>
               </View>
 
               {unreadCount > 0 && (
                 <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                  <Text style={styles.unreadText}>
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -111,7 +141,7 @@ export default function ChatListScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => setRefreshing(false)}
+            onRefresh={onRefresh}
             colors={["#C35822"]}
           />
         }

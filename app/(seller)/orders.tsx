@@ -18,6 +18,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Modal,
   RefreshControl,
   ScrollView,
@@ -33,16 +34,27 @@ interface OrderItem {
   productName: string;
   quantity: number;
   productPrice: number;
+  imageUrl?: string;
+  refundStatus?: "pending" | "approved" | "rejected" | "refunded" | null;
+  refundRequestId?: string;
 }
 
 interface RefundRequest {
   id: string;
+  userId: string;
+  userEmail: string;
+  orderId: string;
+  orderNumber: string;
   productId: string;
   productName: string;
+  sellerId?: string;
+  sellerName: string;
   reason: string;
   otherReason?: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "refunded";
+  images?: string[];
   createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
 interface Order {
@@ -52,7 +64,7 @@ interface Order {
   customerName: string;
   customerEmail: string;
   items: OrderItem[];
-  status: "Pending" | "Confirmed" | "Shipped" | "Delivered" | "Cancelled";
+  status: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
   subtotal: number;
   shippingFee: number;
   total: number;
@@ -88,11 +100,13 @@ const STATUS_CATEGORIES = [
   "Shipped",
   "Delivered",
   "Cancelled",
+  "Refund",
 ];
 
 export default function OrdersScreen() {
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [orders, setOrders] = useState<Order[]>([]);
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
@@ -108,13 +122,15 @@ export default function OrdersScreen() {
 
   // Refund modal states
   const [refundModalVisible, setRefundModalVisible] = useState(false);
-  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
   const [selectedRefund, setSelectedRefund] = useState<RefundRequest | null>(
     null,
   );
   const [processingRefund, setProcessingRefund] = useState(false);
+  const [refundImagesModalVisible, setRefundImagesModalVisible] =
+    useState(false);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
 
-  const loadOrders = async () => {
+  const loadOrdersAndRefunds = async () => {
     setLoading(true);
     try {
       const user = auth.currentUser;
@@ -124,33 +140,66 @@ export default function OrdersScreen() {
         return;
       }
 
+      // Load orders
       const ordersRef = collection(db, "orders");
-      const q = query(ordersRef, where("sellerId", "==", user.uid));
-
-      const querySnapshot = await getDocs(q);
+      const ordersQuery = query(ordersRef, where("sellerId", "==", user.uid));
+      const ordersSnapshot = await getDocs(ordersQuery);
       const ordersList: Order[] = [];
 
-      for (const docSnapshot of querySnapshot.docs) {
+      for (const docSnapshot of ordersSnapshot.docs) {
         const data = docSnapshot.data();
-        const status =
-          data.status?.charAt(0).toUpperCase() + data.status?.slice(1);
         ordersList.push({
           id: docSnapshot.id,
           ...data,
-          status: status || "Pending",
+          status: data.status || "pending",
         } as Order);
       }
 
-      ordersList.sort((a, b) => {
+      // Load all refund requests for this seller
+      const refundsRef = collection(db, "refund_requests");
+      const refundsQuery = query(refundsRef, where("sellerId", "==", user.uid));
+      const refundsSnapshot = await getDocs(refundsQuery);
+      const refundsList: RefundRequest[] = [];
+
+      refundsSnapshot.forEach((doc) => {
+        refundsList.push({ id: doc.id, ...doc.data() } as RefundRequest);
+      });
+
+      // Apply refund status to orders
+      const ordersWithRefundStatus = ordersList.map((order) => {
+        const updatedItems = order.items.map((item) => {
+          const refundRequest = refundsList.find(
+            (r) =>
+              r.orderNumber === order.orderNumber &&
+              r.productId === item.productId,
+          );
+          if (refundRequest) {
+            return {
+              ...item,
+              refundStatus: refundRequest.status,
+              refundRequestId: refundRequest.id,
+            };
+          }
+          return {
+            ...item,
+            refundStatus: null,
+            refundRequestId: undefined,
+          };
+        });
+        return { ...order, items: updatedItems };
+      });
+
+      ordersWithRefundStatus.sort((a, b) => {
         if (a.createdAt && b.createdAt) {
           return b.createdAt.seconds - a.createdAt.seconds;
         }
         return 0;
       });
 
-      setOrders(ordersList);
+      setOrders(ordersWithRefundStatus);
+      setRefundRequests(refundsList);
     } catch (error) {
-      console.error("Error loading orders:", error);
+      console.error("Error loading data:", error);
       Alert.alert("Error", "Failed to load orders");
     } finally {
       setLoading(false);
@@ -158,35 +207,11 @@ export default function OrdersScreen() {
     }
   };
 
-  const loadRefundRequests = async (orderId: string) => {
-    try {
-      const refundsRef = collection(db, "refund_requests");
-      const q = query(refundsRef, where("orderId", "==", orderId));
-      const querySnapshot = await getDocs(q);
-
-      const requests: RefundRequest[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        requests.push({
-          id: doc.id,
-          productId: data.productId,
-          productName: data.productName,
-          reason: data.reason,
-          otherReason: data.otherReason,
-          status: data.status,
-          createdAt: data.createdAt,
-        });
-      });
-
-      setRefundRequests(requests);
-    } catch (error) {
-      console.error("Error loading refund requests:", error);
-    }
-  };
-
   const updateRefundStatus = async (
     refundId: string,
-    status: "approved" | "rejected",
+    status: "approved" | "rejected" | "refunded",
+    order: Order,
+    product: OrderItem,
   ) => {
     setProcessingRefund(true);
     try {
@@ -203,26 +228,64 @@ export default function OrdersScreen() {
         ),
       );
 
-      // Notify customer about refund decision
-      if (selectedOrder) {
-        const notificationTitle =
-          status === "approved" ? "Refund Approved ✓" : "Refund Request Update";
-        const notificationMessage =
-          status === "approved"
-            ? `Your refund for order #${selectedOrder.orderNumber} has been approved. The amount will be credited to your account within 3-5 business days.`
-            : `Your refund request for order #${selectedOrder.orderNumber} has been reviewed. Please contact support for more information.`;
+      // Update orders state
+      setOrders((prevOrders) =>
+        prevOrders.map((o) => {
+          if (o.id === order.id) {
+            return {
+              ...o,
+              items: o.items.map((item) => {
+                if (item.productId === product.productId) {
+                  return { ...item, refundStatus: status };
+                }
+                return item;
+              }),
+            };
+          }
+          return o;
+        }),
+      );
 
-        await createNotification({
-          userId: selectedOrder.userId,
-          title: notificationTitle,
-          message: notificationMessage,
-          type: "order_refund_updated",
-          orderId: selectedOrder.id,
-          orderNumber: selectedOrder.orderNumber,
-          read: false,
-          createdAt: Timestamp.now(),
+      // Update selected order if open
+      if (selectedOrder && selectedOrder.id === order.id) {
+        setSelectedOrder((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            items: prev.items.map((item) => {
+              if (item.productId === product.productId) {
+                return { ...item, refundStatus: status };
+              }
+              return item;
+            }),
+          };
         });
       }
+
+      // Notify customer about refund decision
+      const notificationTitle =
+        status === "approved"
+          ? "Refund Approved ✓"
+          : status === "refunded"
+            ? "Refund Completed"
+            : "Refund Request Update";
+      const notificationMessage =
+        status === "approved"
+          ? `Your refund for ${product.productName} (Order #${order.orderNumber}) has been approved. The amount will be credited within 3-5 business days.`
+          : status === "refunded"
+            ? `Your refund for ${product.productName} (Order #${order.orderNumber}) has been processed.`
+            : `Your refund request for ${product.productName} (Order #${order.orderNumber}) has been reviewed. Please contact support for more information.`;
+
+      await createNotification({
+        userId: order.userId,
+        title: notificationTitle,
+        message: notificationMessage,
+        type: "order_refund_updated",
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        read: false,
+        createdAt: Timestamp.now(),
+      });
 
       Alert.alert("Success", `Refund request ${status} successfully`);
     } catch (error) {
@@ -235,19 +298,22 @@ export default function OrdersScreen() {
 
   const openRefundRequests = async (order: Order) => {
     setSelectedOrder(order);
-    await loadRefundRequests(order.id);
     setRefundModalVisible(true);
   };
 
   const closeRefundModal = () => {
     setRefundModalVisible(false);
-    setRefundRequests([]);
     setSelectedRefund(null);
+  };
+
+  const viewRefundImages = (images: string[]) => {
+    setSelectedImages(images);
+    setRefundImagesModalVisible(true);
   };
 
   useFocusEffect(
     useCallback(() => {
-      loadOrders();
+      loadOrdersAndRefunds();
     }, []),
   );
 
@@ -299,14 +365,14 @@ export default function OrdersScreen() {
       setOrders((prev) =>
         prev.map((order) =>
           order.id === orderId
-            ? { ...order, status: newStatus as Order["status"] }
+            ? { ...order, status: dbStatus as Order["status"] }
             : order,
         ),
       );
 
       if (selectedOrder && selectedOrder.id === orderId) {
         setSelectedOrder((prev) =>
-          prev ? { ...prev, status: newStatus as Order["status"] } : null,
+          prev ? { ...prev, status: dbStatus as Order["status"] } : null,
         );
       }
 
@@ -351,42 +417,80 @@ export default function OrdersScreen() {
   };
 
   const handleConfirmOrder = (orderId: string, orderNumber: string) => {
-    showStatusConfirmation(orderId, orderNumber, "Pending", "Confirmed");
+    showStatusConfirmation(orderId, orderNumber, "pending", "confirmed");
   };
 
   const handleMarkAsShipped = (orderId: string, orderNumber: string) => {
-    showStatusConfirmation(orderId, orderNumber, "Confirmed", "Shipped");
+    showStatusConfirmation(orderId, orderNumber, "confirmed", "shipped");
   };
 
   const handleCancelOrder = async (orderId: string, orderNumber: string) => {
-    showStatusConfirmation(orderId, orderNumber, "Pending", "Cancelled");
+    showStatusConfirmation(orderId, orderNumber, "pending", "cancelled");
   };
 
   const handleMarkAsDelivered = (orderId: string, orderNumber: string) => {
-    showStatusConfirmation(orderId, orderNumber, "Shipped", "Delivered");
+    showStatusConfirmation(orderId, orderNumber, "shipped", "delivered");
   };
 
   const getFilteredOrders = () => {
     if (selectedStatus === "All") {
       return orders;
     }
-    return orders.filter((order) => order.status === selectedStatus);
+    if (selectedStatus === "Refund") {
+      // Show orders that have any refund request (pending, approved, rejected)
+      return orders.filter((order) =>
+        order.items.some((item) => item.refundStatus !== null),
+      );
+    }
+    return orders.filter(
+      (order) => order.status === selectedStatus.toLowerCase(),
+    );
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Pending":
+      case "pending":
         return "#FFA500";
-      case "Confirmed":
+      case "confirmed":
         return "#4CAF50";
-      case "Shipped":
+      case "shipped":
         return "#2196F3";
-      case "Delivered":
+      case "delivered":
         return "#9C27B0";
-      case "Cancelled":
+      case "cancelled":
         return "#FF3B30";
       default:
         return "#8F796F";
+    }
+  };
+
+  const getRefundStatusColor = (status: string | null | undefined) => {
+    switch (status) {
+      case "pending":
+        return "#FF9800";
+      case "approved":
+        return "#4CAF50";
+      case "refunded":
+        return "#4CAF50";
+      case "rejected":
+        return "#F44336";
+      default:
+        return "#8F796F";
+    }
+  };
+
+  const getRefundStatusLabel = (status: string | null | undefined) => {
+    switch (status) {
+      case "pending":
+        return "Refund Pending";
+      case "approved":
+        return "Refund Approved";
+      case "refunded":
+        return "Refunded";
+      case "rejected":
+        return "Refund Rejected";
+      default:
+        return "";
     }
   };
 
@@ -416,6 +520,10 @@ export default function OrdersScreen() {
     const isUpdating = updatingOrderId === item.id;
     const mainProduct = item.items[0];
     const otherItemsCount = item.items.length - 1;
+    const hasRefundRequests = item.items.some((i) => i.refundStatus !== null);
+    const pendingRefundCount = item.items.filter(
+      (i) => i.refundStatus === "pending",
+    ).length;
 
     return (
       <TouchableOpacity
@@ -442,7 +550,7 @@ export default function OrdersScreen() {
                 { color: getStatusColor(item.status) },
               ]}
             >
-              {item.status}
+              {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
             </Text>
           </View>
         </View>
@@ -471,12 +579,24 @@ export default function OrdersScreen() {
           <Text style={styles.orderTotal}>₱{item.total.toFixed(2)}</Text>
         </View>
 
+        {/* Show refund badge if any */}
+        {hasRefundRequests && (
+          <View style={styles.refundBadgeContainer}>
+            <Ionicons name="cash-outline" size={14} color="#C35822" />
+            <Text style={styles.refundBadgeText}>
+              {pendingRefundCount > 0
+                ? `${pendingRefundCount} pending refund request${pendingRefundCount > 1 ? "s" : ""}`
+                : "Has refund requests"}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.actionButtonsContainer}>
           {isUpdating ? (
             <ActivityIndicator size="small" color="#C35822" />
           ) : (
             <>
-              {item.status === "Pending" && (
+              {item.status === "pending" && (
                 <View style={styles.actionButtonsRow}>
                   <TouchableOpacity
                     style={[styles.actionButton, styles.confirmButton]}
@@ -498,7 +618,7 @@ export default function OrdersScreen() {
                   </TouchableOpacity>
                 </View>
               )}
-              {item.status === "Confirmed" && (
+              {item.status === "confirmed" && (
                 <TouchableOpacity
                   style={[styles.actionButton, styles.shippedButton]}
                   onPress={(e) => {
@@ -509,7 +629,7 @@ export default function OrdersScreen() {
                   <Text style={styles.actionButtonText}>Mark as Shipped</Text>
                 </TouchableOpacity>
               )}
-              {item.status === "Shipped" && (
+              {item.status === "shipped" && (
                 <TouchableOpacity
                   style={[styles.actionButton, styles.deliveredButton]}
                   onPress={(e) => {
@@ -520,7 +640,7 @@ export default function OrdersScreen() {
                   <Text style={styles.actionButtonText}>Mark as Delivered</Text>
                 </TouchableOpacity>
               )}
-              {item.status === "Delivered" && (
+              {(item.status === "delivered" || hasRefundRequests) && (
                 <TouchableOpacity
                   style={styles.refundRequestsButton}
                   onPress={(e) => {
@@ -534,7 +654,7 @@ export default function OrdersScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
-              {item.status === "Cancelled" && (
+              {item.status === "cancelled" && (
                 <View style={styles.statusMessage}>
                   <Ionicons name="close-circle" size={20} color="#FF3B30" />
                   <Text style={styles.statusMessageText}>Cancelled</Text>
@@ -598,25 +718,58 @@ export default function OrdersScreen() {
           contentContainerStyle={styles.categoriesScrollContent}
         >
           <View style={styles.categoriesContainer}>
-            {STATUS_CATEGORIES.map((status) => (
-              <TouchableOpacity
-                key={status}
-                style={[
-                  styles.categoryChip,
-                  selectedStatus === status && styles.categoryChipActive,
-                ]}
-                onPress={() => setSelectedStatus(status)}
-              >
-                <Text
+            {STATUS_CATEGORIES.map((status) => {
+              let count = 0;
+              if (status === "All") {
+                count = orders.length;
+              } else if (status === "Refund") {
+                count = orders.filter((order) =>
+                  order.items.some((item) => item.refundStatus !== null),
+                ).length;
+              } else {
+                count = orders.filter(
+                  (order) => order.status === status.toLowerCase(),
+                ).length;
+              }
+              return (
+                <TouchableOpacity
+                  key={status}
                   style={[
-                    styles.categoryChipText,
-                    selectedStatus === status && styles.categoryChipTextActive,
+                    styles.categoryChip,
+                    selectedStatus === status && styles.categoryChipActive,
                   ]}
+                  onPress={() => setSelectedStatus(status)}
                 >
-                  {status}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      selectedStatus === status &&
+                        styles.categoryChipTextActive,
+                    ]}
+                  >
+                    {status}
+                  </Text>
+                  {count > 0 && (
+                    <View
+                      style={[
+                        styles.categoryBadge,
+                        selectedStatus === status && styles.categoryBadgeActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryBadgeText,
+                          selectedStatus === status &&
+                            styles.categoryBadgeTextActive,
+                        ]}
+                      >
+                        {count}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </ScrollView>
       </View>
@@ -632,7 +785,7 @@ export default function OrdersScreen() {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              loadOrders();
+              loadOrdersAndRefunds();
             }}
             colors={["#C35822"]}
             tintColor="#C35822"
@@ -673,11 +826,13 @@ export default function OrdersScreen() {
             <Text style={styles.modalStatusChange}>
               Change status from{" "}
               <Text style={{ fontWeight: "bold" }}>
-                {orderToUpdate?.currentStatus}
+                {orderToUpdate?.currentStatus.charAt(0).toUpperCase() +
+                  orderToUpdate?.currentStatus.slice(1)}
               </Text>{" "}
               to{" "}
               <Text style={{ fontWeight: "bold", color: "#4CAF50" }}>
-                {orderToUpdate?.newStatus}
+                {orderToUpdate?.newStatus.charAt(0).toUpperCase() +
+                  orderToUpdate?.newStatus.slice(1)}
               </Text>
               ?
             </Text>
@@ -805,7 +960,8 @@ export default function OrdersScreen() {
                           { color: getStatusColor(selectedOrder.status) },
                         ]}
                       >
-                        {selectedOrder.status}
+                        {selectedOrder.status.charAt(0).toUpperCase() +
+                          selectedOrder.status.slice(1)}
                       </Text>
                     </View>
                   </View>
@@ -820,6 +976,18 @@ export default function OrdersScreen() {
                         <Text style={styles.itemQuantity}>
                           Quantity: {item.quantity}
                         </Text>
+                        {item.refundStatus && (
+                          <Text
+                            style={[
+                              styles.itemRefundStatus,
+                              {
+                                color: getRefundStatusColor(item.refundStatus),
+                              },
+                            ]}
+                          >
+                            {getRefundStatusLabel(item.refundStatus)}
+                          </Text>
+                        )}
                       </View>
                       <Text style={styles.itemPrice}>
                         ₱{(item.productPrice * item.quantity).toFixed(2)}
@@ -915,7 +1083,9 @@ export default function OrdersScreen() {
                 Order #{selectedOrder?.orderNumber}
               </Text>
 
-              {refundRequests.length === 0 ? (
+              {selectedOrder &&
+              selectedOrder.items.filter((i) => i.refundStatus !== null)
+                .length === 0 ? (
                 <View style={styles.noRefundsContainer}>
                   <Ionicons name="cash-outline" size={50} color="#E0DAD1" />
                   <Text style={styles.noRefundsText}>
@@ -923,83 +1093,181 @@ export default function OrdersScreen() {
                   </Text>
                 </View>
               ) : (
-                refundRequests.map((request) => (
-                  <View key={request.id} style={styles.refundRequestCard}>
-                    <Text style={styles.refundProductName}>
-                      {request.productName}
-                    </Text>
-                    <View style={styles.refundReasonBox}>
-                      <Text style={styles.refundReasonLabel}>Reason:</Text>
-                      <Text style={styles.refundReasonText}>
-                        {request.reason === "others"
-                          ? request.otherReason
-                          : request.reason === "missing_items"
-                            ? "Missing Items"
-                            : request.reason === "damaged_item"
-                              ? "Damaged Item"
-                              : request.reason === "duplicate_order"
-                                ? "Duplicate Order"
-                                : request.reason === "wrong_item"
-                                  ? "Wrong Item Received"
-                                  : request.reason}
-                      </Text>
-                    </View>
-                    <Text style={styles.refundDate}>
-                      Requested: {formatShortDate(request.createdAt)}
-                    </Text>
-
-                    <View style={styles.refundStatusContainer}>
-                      <Text
-                        style={[
-                          styles.refundStatusText,
-                          request.status === "pending" &&
-                            styles.refundStatusPending,
-                          request.status === "approved" &&
-                            styles.refundStatusApproved,
-                          request.status === "rejected" &&
-                            styles.refundStatusRejected,
-                        ]}
-                      >
-                        {request.status === "pending"
-                          ? "Pending Review"
-                          : request.status === "approved"
-                            ? "Approved"
-                            : "Rejected"}
-                      </Text>
-
-                      {request.status === "pending" && (
-                        <View style={styles.refundActionButtons}>
-                          <TouchableOpacity
-                            style={[
-                              styles.refundActionButton,
-                              styles.approveButton,
-                            ]}
-                            onPress={() =>
-                              updateRefundStatus(request.id, "approved")
-                            }
-                            disabled={processingRefund}
-                          >
-                            <Text style={styles.approveButtonText}>
-                              Approve
+                selectedOrder?.items
+                  .filter((item) => item.refundStatus !== null)
+                  .map((item, idx) => {
+                    const refundRequest = refundRequests.find(
+                      (r) =>
+                        r.orderNumber === selectedOrder.orderNumber &&
+                        r.productId === item.productId,
+                    );
+                    return (
+                      <View key={idx} style={styles.refundRequestCard}>
+                        <View style={styles.refundProductHeader}>
+                          {item.imageUrl ? (
+                            <Image
+                              source={{ uri: item.imageUrl }}
+                              style={styles.refundProductImage}
+                            />
+                          ) : (
+                            <View style={styles.refundProductImagePlaceholder}>
+                              <Ionicons
+                                name="image-outline"
+                                size={24}
+                                color="#CCC"
+                              />
+                            </View>
+                          )}
+                          <View style={styles.refundProductInfo}>
+                            <Text style={styles.refundProductName}>
+                              {item.productName}
                             </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.refundActionButton,
-                              styles.rejectButton,
-                            ]}
-                            onPress={() =>
-                              updateRefundStatus(request.id, "rejected")
-                            }
-                            disabled={processingRefund}
-                          >
-                            <Text style={styles.rejectButtonText}>Reject</Text>
-                          </TouchableOpacity>
+                            <Text style={styles.refundProductQuantity}>
+                              Quantity: {item.quantity}
+                            </Text>
+                          </View>
                         </View>
-                      )}
-                    </View>
-                  </View>
-                ))
+
+                        {refundRequest && (
+                          <>
+                            <View style={styles.refundReasonBox}>
+                              <Text style={styles.refundReasonLabel}>
+                                Reason:
+                              </Text>
+                              <Text style={styles.refundReasonText}>
+                                {refundRequest.reason === "others"
+                                  ? refundRequest.otherReason
+                                  : refundRequest.reason === "missing_items"
+                                    ? "Missing Items"
+                                    : refundRequest.reason === "damaged_item"
+                                      ? "Damaged Item"
+                                      : refundRequest.reason ===
+                                          "duplicate_order"
+                                        ? "Duplicate Order"
+                                        : refundRequest.reason === "wrong_item"
+                                          ? "Wrong Item Received"
+                                          : refundRequest.reason}
+                              </Text>
+                            </View>
+
+                            {refundRequest.images &&
+                              refundRequest.images.length > 0 && (
+                                <TouchableOpacity
+                                  style={styles.viewImagesButton}
+                                  onPress={() =>
+                                    viewRefundImages(refundRequest.images!)
+                                  }
+                                >
+                                  <Ionicons
+                                    name="images-outline"
+                                    size={16}
+                                    color="#C35822"
+                                  />
+                                  <Text style={styles.viewImagesText}>
+                                    View {refundRequest.images.length} photo
+                                    {refundRequest.images.length > 1 ? "s" : ""}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+
+                            <Text style={styles.refundDate}>
+                              Requested:{" "}
+                              {formatShortDate(refundRequest.createdAt)}
+                            </Text>
+
+                            <View style={styles.refundStatusContainer}>
+                              <Text
+                                style={[
+                                  styles.refundStatusText,
+                                  item.refundStatus === "pending" &&
+                                    styles.refundStatusPending,
+                                  item.refundStatus === "approved" &&
+                                    styles.refundStatusApproved,
+                                  item.refundStatus === "refunded" &&
+                                    styles.refundStatusApproved,
+                                  item.refundStatus === "rejected" &&
+                                    styles.refundStatusRejected,
+                                ]}
+                              >
+                                {item.refundStatus === "pending"
+                                  ? "Pending Review"
+                                  : item.refundStatus === "approved"
+                                    ? "Approved"
+                                    : item.refundStatus === "refunded"
+                                      ? "Refunded"
+                                      : "Rejected"}
+                              </Text>
+
+                              {item.refundStatus === "pending" && (
+                                <View style={styles.refundActionButtons}>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.refundActionButton,
+                                      styles.approveButton,
+                                    ]}
+                                    onPress={() =>
+                                      updateRefundStatus(
+                                        refundRequest.id,
+                                        "approved",
+                                        selectedOrder,
+                                        item,
+                                      )
+                                    }
+                                    disabled={processingRefund}
+                                  >
+                                    <Text style={styles.approveButtonText}>
+                                      Approve
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.refundActionButton,
+                                      styles.rejectButton,
+                                    ]}
+                                    onPress={() =>
+                                      updateRefundStatus(
+                                        refundRequest.id,
+                                        "rejected",
+                                        selectedOrder,
+                                        item,
+                                      )
+                                    }
+                                    disabled={processingRefund}
+                                  >
+                                    <Text style={styles.rejectButtonText}>
+                                      Reject
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              )}
+
+                              {item.refundStatus === "approved" && (
+                                <TouchableOpacity
+                                  style={[
+                                    styles.refundActionButton,
+                                    styles.markRefundedButton,
+                                  ]}
+                                  onPress={() =>
+                                    updateRefundStatus(
+                                      refundRequest.id,
+                                      "refunded",
+                                      selectedOrder,
+                                      item,
+                                    )
+                                  }
+                                  disabled={processingRefund}
+                                >
+                                  <Text style={styles.markRefundedButtonText}>
+                                    Mark as Refunded
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          </>
+                        )}
+                      </View>
+                    );
+                  })
               )}
             </ScrollView>
 
@@ -1011,6 +1279,41 @@ export default function OrdersScreen() {
                 <Text style={styles.closeDetailsButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Refund Images Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={refundImagesModalVisible}
+        onRequestClose={() => setRefundImagesModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.imagesModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Refund Photos</Text>
+              <TouchableOpacity
+                onPress={() => setRefundImagesModalVisible(false)}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+            >
+              {selectedImages.map((image, index) => (
+                <Image
+                  key={index}
+                  source={{ uri: image }}
+                  style={styles.fullImage}
+                />
+              ))}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1055,23 +1358,34 @@ const styles = StyleSheet.create({
   categoriesScrollContent: { paddingRight: 20 },
   categoriesContainer: { flexDirection: "row", gap: 8 },
   categoryChip: {
-    paddingHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
     paddingVertical: 8,
     backgroundColor: "#FFF",
-    borderRadius: 20,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: "#E0DAD1",
-    alignItems: "center",
-    justifyContent: "center",
+    gap: 6,
   },
   categoryChipActive: { backgroundColor: "#C35822", borderColor: "#C35822" },
   categoryChipText: {
     fontSize: 14,
     color: "#8F796F",
     fontWeight: "500",
-    textAlign: "center",
   },
   categoryChipTextActive: { color: "#FFF" },
+  categoryBadge: {
+    backgroundColor: "#F0F0F0",
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: "center",
+  },
+  categoryBadgeActive: { backgroundColor: "rgba(255,255,255,0.3)" },
+  categoryBadgeText: { fontSize: 11, color: "#8F796F", fontWeight: "600" },
+  categoryBadgeTextActive: { color: "#FFF" },
   ordersList: { paddingHorizontal: 20, paddingBottom: 20 },
   orderCard: {
     backgroundColor: "#FFF",
@@ -1126,6 +1440,18 @@ const styles = StyleSheet.create({
   },
   deliveryBadgeText: { fontSize: 10, color: "#C35822", fontWeight: "500" },
   orderTotal: { fontSize: 16, fontWeight: "600", color: "#C35822" },
+  refundBadgeContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "#FEF5ED",
+    borderRadius: 12,
+    alignSelf: "flex-start",
+  },
+  refundBadgeText: { fontSize: 12, color: "#C35822", fontWeight: "500" },
   actionButtonsContainer: { marginTop: 4, minHeight: 36 },
   actionButtonsRow: { flexDirection: "row", gap: 8 },
   actionButton: {
@@ -1285,6 +1611,7 @@ const styles = StyleSheet.create({
   itemInfo: { flex: 1 },
   itemName: { fontSize: 14, fontWeight: "500", color: "#32221B" },
   itemQuantity: { fontSize: 12, color: "#8F796F", marginTop: 2 },
+  itemRefundStatus: { fontSize: 11, fontWeight: "500", marginTop: 4 },
   itemPrice: { fontSize: 14, fontWeight: "600", color: "#C35822" },
   totalRow: {
     marginTop: 8,
@@ -1317,6 +1644,15 @@ const styles = StyleSheet.create({
   },
   closeDetailsButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   // Refund Modal Styles
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E0DAD1",
+  },
   refundModalContent: {
     backgroundColor: "#FFF",
     borderRadius: 20,
@@ -1339,15 +1675,49 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E0DAD1",
   },
+  refundProductHeader: {
+    flexDirection: "row",
+    marginBottom: 12,
+  },
+  refundProductImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+  },
+  refundProductImagePlaceholder: {
+    width: 50,
+    height: 50,
+    backgroundColor: "#F0F0F0",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  refundProductInfo: {
+    flex: 1,
+    marginLeft: 12,
+    justifyContent: "center",
+  },
   refundProductName: {
     fontSize: 15,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  refundProductQuantity: {
+    fontSize: 12,
+    color: "#8F796F",
   },
   refundReasonBox: { marginBottom: 8 },
   refundReasonLabel: { fontSize: 12, color: "#8F796F", marginBottom: 4 },
   refundReasonText: { fontSize: 14, color: "#32221B", lineHeight: 18 },
+  viewImagesButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
+  viewImagesText: { fontSize: 12, color: "#C35822", fontWeight: "500" },
   refundDate: { fontSize: 11, color: "#8F796F", marginBottom: 12 },
   refundStatusContainer: {
     flexDirection: "row",
@@ -1376,10 +1746,24 @@ const styles = StyleSheet.create({
   approveButtonText: { color: "#FFF", fontSize: 12, fontWeight: "600" },
   rejectButton: { backgroundColor: "#F44336" },
   rejectButtonText: { color: "#FFF", fontSize: 12, fontWeight: "600" },
+  markRefundedButton: { backgroundColor: "#2196F3" },
+  markRefundedButtonText: { color: "#FFF", fontSize: 12, fontWeight: "600" },
   noRefundsContainer: {
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 40,
   },
   noRefundsText: { fontSize: 14, color: "#8F796F", marginTop: 12 },
+  imagesModalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    width: "90%",
+    height: "60%",
+  },
+  fullImage: {
+    width: 300,
+    height: 400,
+    resizeMode: "contain",
+  },
 });

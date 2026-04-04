@@ -1,50 +1,58 @@
 // app/(seller)/chat-list.tsx
-import React, { useState, useCallback } from 'react';
+import { useChat } from "@/app/contexts/ChatContext";
+import { auth } from "@/lib/firebase";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
   ActivityIndicator,
+  FlatList,
   RefreshControl,
+  StyleSheet,
+  Text,
   TextInput,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import { useChat } from '@/app/contexts/ChatContext';
-import { auth } from '@/lib/firebase';
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SellerChatListScreen() {
-  const { conversations, selectConversation, loading } = useChat();
+  const { conversations, selectConversation, loading, refreshConversations } =
+    useChat();
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   useFocusEffect(
     useCallback(() => {
+      refreshConversations();
       setRefreshing(false);
-    }, [])
+    }, []),
   );
 
   const navigateToChat = (conversation: any) => {
     selectConversation(conversation);
-    router.push(`/(seller)/chat-detail?conversationId=${conversation.id}`);
+    router.push({
+      pathname: "/(seller)/chat-detail",
+      params: { conversationId: conversation.id },
+    });
   };
 
   const formatTime = (timestamp: any) => {
-    if (!timestamp) return '';
+    if (!timestamp) return "";
     const date = timestamp.toDate();
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const hours = diff / (1000 * 60 * 60);
-    
+
     if (hours < 24) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     } else if (hours < 48) {
-      return 'Yesterday';
+      return "Yesterday";
     } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return date.toLocaleDateString([], { month: "short", day: "numeric" });
     }
   };
 
@@ -54,9 +62,17 @@ export default function SellerChatListScreen() {
     return conversation.unreadCount?.[user.uid] || 0;
   };
 
-  const filteredConversations = conversations.filter(conversation => {
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refreshConversations();
+    setTimeout(() => setRefreshing(false), 500);
+  }, []);
+
+  const filteredConversations = conversations.filter((conversation) => {
     const isSeller = conversation.sellerId === auth.currentUser?.uid;
-    const otherName = isSeller ? conversation.buyerName : conversation.sellerName;
+    const otherName = isSeller
+      ? conversation.buyerName
+      : conversation.sellerName;
     return otherName?.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
@@ -79,9 +95,13 @@ export default function SellerChatListScreen() {
         <Text style={styles.headerTitle}>Messages</Text>
       </View>
 
-      {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search-outline" size={20} color="#8F796F" style={styles.searchIcon} />
+        <Ionicons
+          name="search-outline"
+          size={20}
+          color="#8F796F"
+          style={styles.searchIcon}
+        />
         <TextInput
           style={styles.searchInput}
           placeholder="Search conversations..."
@@ -98,13 +118,17 @@ export default function SellerChatListScreen() {
           const unreadCount = getUnreadCount(item);
           const isSeller = item.sellerId === auth.currentUser?.uid;
           const otherName = isSeller ? item.buyerName : item.sellerName;
-          
+
           return (
-            <TouchableOpacity style={styles.chatItem} onPress={() => navigateToChat(item)}>
+            <TouchableOpacity
+              style={styles.chatItem}
+              onPress={() => navigateToChat(item)}
+              activeOpacity={0.7}
+            >
               <View style={styles.avatarContainer}>
                 <View style={styles.avatarPlaceholder}>
                   <Text style={styles.avatarText}>
-                    {otherName?.substring(0, 2).toUpperCase() || '??'}
+                    {otherName?.substring(0, 2).toUpperCase() || "??"}
                   </Text>
                 </View>
               </View>
@@ -112,14 +136,19 @@ export default function SellerChatListScreen() {
               <View style={styles.chatInfo}>
                 <View style={styles.chatHeader}>
                   <Text style={styles.sellerName}>{otherName}</Text>
-                  <Text style={styles.timeText}>{formatTime(item.lastMessageTime)}</Text>
+                  <Text style={styles.timeText}>
+                    {formatTime(item.lastMessageTime)}
+                  </Text>
                 </View>
                 <View style={styles.messageContainer}>
-                  <Text 
-                    style={[styles.lastMessage, unreadCount > 0 && styles.unreadMessage]} 
+                  <Text
+                    style={[
+                      styles.lastMessage,
+                      unreadCount > 0 && styles.unreadMessage,
+                    ]}
                     numberOfLines={1}
                   >
-                    {item.lastMessage || 'No messages yet'}
+                    {item.lastMessage || "No messages yet"}
                   </Text>
                   {unreadCount > 0 && <View style={styles.unreadBadge} />}
                 </View>
@@ -130,7 +159,7 @@ export default function SellerChatListScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => setRefreshing(false)}
+            onRefresh={onRefresh}
             colors={["#C35822"]}
           />
         }
