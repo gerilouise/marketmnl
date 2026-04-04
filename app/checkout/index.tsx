@@ -1,13 +1,18 @@
 // app/checkout/index.tsx
 import { useCart } from "@/app/contexts/CartContext";
-import { createOrder } from "@/app/services/orders";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import { Timestamp, doc, getDoc, writeBatch } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import {
+  Timestamp,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  updateDoc,
+} from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -26,28 +31,79 @@ const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
 // Delivery options
 const DELIVERY_OPTIONS = [
-  { 
-    id: "standard", 
-    name: "Standard Delivery", 
-    description: "3-7 business days", 
+  {
+    id: "standard",
+    name: "Standard Delivery",
+    description: "3-7 business days",
     price: 50,
-    icon: "cube-outline"
+    icon: "cube-outline",
   },
-  { 
-    id: "express", 
-    name: "Express Delivery", 
-    description: "1-3 business days", 
+  {
+    id: "express",
+    name: "Express Delivery",
+    description: "1-3 business days",
     price: 150,
-    icon: "rocket-outline"
+    icon: "rocket-outline",
   },
-  { 
-    id: "same-day", 
-    name: "Same Day Delivery", 
-    description: "Available in Metro Manila", 
+  {
+    id: "same-day",
+    name: "Same Day Delivery",
+    description: "Available in Metro Manila",
     price: 200,
-    icon: "time-outline"
+    icon: "time-outline",
   },
 ];
+
+// Helper function to generate order number
+const generateOrderNumber = (): string => {
+  const prefix = "MNL";
+  const timestamp = Date.now().toString().slice(-8);
+  const random = Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, "0");
+  return `${prefix}-${timestamp}-${random}`;
+};
+
+// Helper function to split shipping fee based on item count
+const splitShippingFee = (
+  itemsBySeller: Map<
+    string,
+    { sellerId: string; sellerName: string; items: any[] }
+  >,
+  totalShippingFee: number,
+): Map<string, number> => {
+  // Calculate total number of items across all sellers
+  let totalItems = 0;
+  for (const [, sellerData] of itemsBySeller) {
+    totalItems += sellerData.items.length;
+  }
+
+  // Calculate shipping fee per seller based on their item count percentage
+  const shippingFeePerSeller = new Map();
+  for (const [sellerId, sellerData] of itemsBySeller) {
+    const itemCount = sellerData.items.length;
+    const percentage = itemCount / totalItems;
+    const sellerShippingFee =
+      Math.round(percentage * totalShippingFee * 100) / 100; // Round to 2 decimals
+    shippingFeePerSeller.set(sellerId, sellerShippingFee);
+  }
+
+  // Adjust for rounding differences (add remaining cents to the first seller)
+  let totalAllocated = 0;
+  for (const fee of shippingFeePerSeller.values()) {
+    totalAllocated += fee;
+  }
+  const difference = totalShippingFee - totalAllocated;
+  if (Math.abs(difference) > 0) {
+    const firstSellerId = itemsBySeller.keys().next().value;
+    shippingFeePerSeller.set(
+      firstSellerId,
+      shippingFeePerSeller.get(firstSellerId) + difference,
+    );
+  }
+
+  return shippingFeePerSeller;
+};
 
 export default function CheckoutScreen() {
   const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } =
@@ -60,6 +116,7 @@ export default function CheckoutScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showOrderSuccess, setShowOrderSuccess] = useState(false);
   const [orderNumber, setOrderNumber] = useState("");
+  const [orderCount, setOrderCount] = useState(1);
   const [isAddressSelectedFromModal, setIsAddressSelectedFromModal] =
     useState(false);
 
@@ -139,36 +196,6 @@ export default function CheckoutScreen() {
   const shippingFee = selectedDelivery.price;
   const total = subtotal + shippingFee;
 
-  // Function to update product stock after order
-  const updateProductStock = async (items: any[]) => {
-    const batch = writeBatch(db);
-    
-    for (const item of items) {
-      const productRef = doc(db, "products", item.productId);
-      const productSnap = await getDoc(productRef);
-      
-      if (productSnap.exists()) {
-        const currentStock = productSnap.data().stockQuantity || 0;
-        const newStock = currentStock - item.quantity;
-        
-        if (newStock < 0) {
-          throw new Error(`Insufficient stock for ${item.productName}. Only ${currentStock} available.`);
-        }
-        
-        batch.update(productRef, {
-          stockQuantity: newStock,
-          updatedAt: Timestamp.now()
-        });
-        console.log(`📦 Updated stock for ${item.productName}: ${currentStock} → ${newStock}`);
-      } else {
-        throw new Error(`Product ${item.productName} not found`);
-      }
-    }
-    
-    await batch.commit();
-    console.log("✅ All product stocks updated successfully");
-  };
-
   const handlePaymentSelection = () => {
     if (!selectedAddress) {
       Alert.alert("No Address", "Please add a shipping address first");
@@ -202,29 +229,41 @@ export default function CheckoutScreen() {
         return;
       }
 
-      // Verify all items have sellerId
-      const missingSellerId = checkoutItems.some((item) => !item.sellerId);
-      if (missingSellerId) {
-        console.error("❌ Some items are missing sellerId:", checkoutItems);
-        Alert.alert(
-          "Error",
-          "Some items are missing seller information. Please remove them from cart and try again.",
-        );
-        setIsProcessing(false);
-        return;
+      // Group items by seller
+      const itemsBySeller = new Map();
+
+      for (const item of checkoutItems) {
+        if (!item.sellerId) {
+          console.error("❌ Item missing sellerId:", item);
+          Alert.alert(
+            "Error",
+            `Item "${item.productName}" is missing seller information. Please remove it from cart and try again.`,
+          );
+          setIsProcessing(false);
+          return;
+        }
+
+        if (!itemsBySeller.has(item.sellerId)) {
+          itemsBySeller.set(item.sellerId, {
+            sellerId: item.sellerId,
+            sellerName: item.sellerName,
+            items: [],
+          });
+        }
+        itemsBySeller.get(item.sellerId).items.push(item);
       }
 
       // First, check if all items have sufficient stock
       for (const item of checkoutItems) {
         const productRef = doc(db, "products", item.productId);
         const productSnap = await getDoc(productRef);
-        
+
         if (productSnap.exists()) {
           const currentStock = productSnap.data().stockQuantity || 0;
           if (currentStock < item.quantity) {
             Alert.alert(
               "Insufficient Stock",
-              `${item.productName} only has ${currentStock} items in stock. Please reduce quantity.`
+              `${item.productName} only has ${currentStock} items in stock. Please reduce quantity.`,
             );
             setIsProcessing(false);
             return;
@@ -236,77 +275,128 @@ export default function CheckoutScreen() {
         }
       }
 
+      console.log(`📦 Processing orders for ${itemsBySeller.size} seller(s)`);
+
+      // Split the shipping fee among sellers based on item count
+      const shippingFeePerSeller = splitShippingFee(itemsBySeller, shippingFee);
       console.log(
-        "📦 Processing order with items:",
-        checkoutItems.map((item) => ({
-          name: item.productName,
-          sellerId: item.sellerId,
-          sellerName: item.sellerName,
-          quantity: item.quantity,
-          price: item.productPrice,
-        })),
+        "💰 Shipping fee split:",
+        Object.fromEntries(shippingFeePerSeller),
       );
 
-      // Prepare order data with customer information
-      const orderData = {
-        items: checkoutItems.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          productPrice: item.productPrice,
-          quantity: item.quantity,
-          sellerId: item.sellerId,
-          sellerName: item.sellerName,
-          imageUrl: item.imageUrl,
-        })),
-        subtotal,
-        shippingFee,
-        total,
-        paymentMethod: selectedPayment,
-        paymentDetails: paymentDetails || null,
-        deliveryOption: {
-          id: selectedDelivery.id,
-          name: selectedDelivery.name,
-          description: selectedDelivery.description,
-          price: selectedDelivery.price,
-        },
-        address: {
-          fullName: selectedAddress.fullName,
-          phone: selectedAddress.phone,
-          street: selectedAddress.street,
-          barangay: selectedAddress.barangay,
-          city: selectedAddress.city,
-          province: selectedAddress.province,
-          zipCode: selectedAddress.zipCode,
-          label: selectedAddress.label,
-        },
-        // Customer information
-        customerName: user.displayName || selectedAddress.fullName || "Customer",
-        customerEmail: user.email || "",
-        userId: user.uid,
-        userEmail: user.email || "",
-      };
+      const createdOrders = [];
+      let orderSuffix = "A";
 
-      console.log("🚀 Sending order with customer info:", {
-        customerName: orderData.customerName,
-        customerEmail: orderData.customerEmail,
-        userId: orderData.userId,
-        deliveryOption: orderData.deliveryOption,
-      });
+      // Create a separate order for each seller
+      for (const [sellerId, sellerData] of itemsBySeller.entries()) {
+        const sellerItems = sellerData.items;
+        const sellerSubtotal = sellerItems.reduce(
+          (sum, item) => sum + item.productPrice * item.quantity,
+          0,
+        );
+        const sellerShippingFee = shippingFeePerSeller.get(sellerId) || 0;
+        const sellerTotal = sellerSubtotal + sellerShippingFee;
 
-      // Create the order
-      const result = await createOrder(orderData);
+        // Generate order number with suffix for multiple sellers
+        let orderNumberForSeller;
+        if (itemsBySeller.size === 1) {
+          // Single seller - no suffix needed
+          orderNumberForSeller = generateOrderNumber();
+        } else {
+          // Multiple sellers - add suffix (A, B, C, etc.)
+          orderNumberForSeller = `${generateOrderNumber()}-${orderSuffix}`;
+          orderSuffix = String.fromCharCode(orderSuffix.charCodeAt(0) + 1);
+        }
 
-      if (result.success) {
-        // Update product stock quantities
-        await updateProductStock(checkoutItems);
-        
-        setOrderNumber(result.orderNumber);
+        const orderData = {
+          items: sellerItems.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            productPrice: item.productPrice,
+            quantity: item.quantity,
+            sellerId: item.sellerId,
+            sellerName: item.sellerName,
+            imageUrl: item.imageUrl,
+          })),
+          subtotal: sellerSubtotal,
+          shippingFee: sellerShippingFee, // Individual shipping fee for this seller
+          total: sellerTotal,
+          paymentMethod: selectedPayment,
+          paymentDetails: paymentDetails || null,
+          deliveryOption: {
+            id: selectedDelivery.id,
+            name: selectedDelivery.name,
+            description: selectedDelivery.description,
+            price: sellerShippingFee, // Store the actual amount this seller gets
+          },
+          address: {
+            fullName: selectedAddress.fullName,
+            phone: selectedAddress.phone,
+            street: selectedAddress.street,
+            barangay: selectedAddress.barangay,
+            city: selectedAddress.city,
+            province: selectedAddress.province,
+            zipCode: selectedAddress.zipCode,
+            label: selectedAddress.label,
+          },
+          customerName:
+            user.displayName || selectedAddress.fullName || "Customer",
+          customerEmail: user.email || "",
+          userId: user.uid,
+          userEmail: user.email || "",
+          sellerId: sellerId,
+          sellerName: sellerData.sellerName,
+          status: "pending",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        };
 
-        // CREATE NOTIFICATION FOR THE CUSTOMER
+        console.log(`🚀 Creating order for seller: ${sellerData.sellerName}`, {
+          orderNumber: orderNumberForSeller,
+          itemsCount: sellerItems.length,
+          sellerSubtotal,
+          sellerShippingFee,
+          sellerTotal,
+        });
+
+        // Create the order
+        const ordersRef = collection(db, "orders");
+        const docRef = await addDoc(ordersRef, {
+          ...orderData,
+          orderNumber: orderNumberForSeller,
+        });
+
+        createdOrders.push({
+          orderId: docRef.id,
+          orderNumber: orderNumberForSeller,
+          sellerName: sellerData.sellerName,
+          shippingFee: sellerShippingFee,
+        });
+
+        // Update product stock for this seller's items
+        for (const item of sellerItems) {
+          const productRef = doc(db, "products", item.productId);
+          const productSnap = await getDoc(productRef);
+
+          if (productSnap.exists()) {
+            const currentStock = productSnap.data().stockQuantity || 0;
+            const newStock = currentStock - item.quantity;
+
+            await updateDoc(productRef, {
+              stockQuantity: newStock,
+              updatedAt: Timestamp.now(),
+            });
+            console.log(
+              `📦 Updated stock for ${item.productName}: ${currentStock} → ${newStock}`,
+            );
+          }
+        }
+
+        // Create notification for the customer about this order
         const notification = getOrderNotification(
-          result.orderNumber,
+          orderNumberForSeller,
           "pending",
-          result.orderId,
+          docRef.id,
         );
         if (notification) {
           await createNotification({
@@ -314,27 +404,51 @@ export default function CheckoutScreen() {
             title: notification.title,
             message: notification.message,
             type: notification.type,
-            orderId: result.orderId,
-            orderNumber: result.orderNumber,
+            orderId: docRef.id,
+            orderNumber: orderNumberForSeller,
             read: false,
             createdAt: Timestamp.now(),
           });
-          console.log("📧 Notification created for customer");
+          console.log(
+            `📧 Notification created for order: ${orderNumberForSeller}`,
+          );
         }
 
-        // Remove selected items from cart after successful order
-        console.log("🗑️ Removing selected items from cart...");
-        await removeSelectedItems();
-
-        // Clear selected items in context
-        setSelectedItems([]);
-
-        // Reload cart to refresh
-        await loadCart();
-
-        console.log("✅ Order placed successfully, items removed from cart, stock updated");
-        setShowOrderSuccess(true);
+        // Create notification for the seller
+        await createNotification({
+          userId: sellerId,
+          title: "New Order Received! 🎉",
+          message: `You have received a new order #${orderNumberForSeller} from ${user.displayName || "Customer"}. Subtotal: ₱${sellerSubtotal.toFixed(2)}, Shipping: ₱${sellerShippingFee.toFixed(2)}, Total: ₱${sellerTotal.toFixed(2)}`,
+          type: "new_order",
+          orderId: docRef.id,
+          orderNumber: orderNumberForSeller,
+          read: false,
+          createdAt: Timestamp.now(),
+        });
+        console.log(`📧 Notification sent to seller: ${sellerData.sellerName}`);
       }
+
+      // Remove selected items from cart after successful orders
+      console.log("🗑️ Removing selected items from cart...");
+      await removeSelectedItems();
+
+      // Clear selected items in context
+      setSelectedItems([]);
+
+      // Reload cart to refresh
+      await loadCart();
+
+      // Set order numbers for success modal
+      if (createdOrders.length === 1) {
+        setOrderNumber(createdOrders[0].orderNumber);
+      } else {
+        const orderNumbers = createdOrders.map((o) => o.orderNumber).join(", ");
+        setOrderNumber(orderNumbers);
+      }
+      setOrderCount(createdOrders.length);
+
+      console.log(`✅ ${createdOrders.length} order(s) placed successfully`);
+      setShowOrderSuccess(true);
     } catch (error: any) {
       console.error("❌ Order error:", error);
       Alert.alert(
@@ -467,24 +581,43 @@ export default function CheckoutScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            checkoutItems.map((item, index) => (
-              <View key={item.id || index} style={styles.orderItem}>
-                <View style={styles.orderItemLeft}>
-                  <Text style={styles.orderItemName}>{item.productName}</Text>
-                  <Text style={styles.orderItemQuantity}>
-                    Qty: {item.quantity}
-                  </Text>
-                  {item.sellerName && (
-                    <Text style={styles.sellerNameText}>
-                      from: {item.sellerName}
+            // Group items by seller for display
+            (() => {
+              const itemsBySellerForDisplay = new Map();
+              for (const item of checkoutItems) {
+                if (!itemsBySellerForDisplay.has(item.sellerId)) {
+                  itemsBySellerForDisplay.set(item.sellerId, {
+                    sellerName: item.sellerName,
+                    items: [],
+                  });
+                }
+                itemsBySellerForDisplay.get(item.sellerId).items.push(item);
+              }
+              return Array.from(itemsBySellerForDisplay.entries()).map(
+                ([sellerId, sellerGroup]) => (
+                  <View key={sellerId} style={styles.sellerGroup}>
+                    <Text style={styles.sellerGroupName}>
+                      {sellerGroup.sellerName}
                     </Text>
-                  )}
-                </View>
-                <Text style={styles.orderItemPrice}>
-                  ₱{item.productPrice * item.quantity}
-                </Text>
-              </View>
-            ))
+                    {sellerGroup.items.map((item: any, index: number) => (
+                      <View key={item.id || index} style={styles.orderItem}>
+                        <View style={styles.orderItemLeft}>
+                          <Text style={styles.orderItemName}>
+                            {item.productName}
+                          </Text>
+                          <Text style={styles.orderItemQuantity}>
+                            Qty: {item.quantity}
+                          </Text>
+                        </View>
+                        <Text style={styles.orderItemPrice}>
+                          ₱{item.productPrice * item.quantity}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ),
+              );
+            })()
           )}
         </View>
 
@@ -529,7 +662,7 @@ export default function CheckoutScreen() {
           ) : null}
         </View>
 
-        {/* Delivery Options Section - NEW */}
+        {/* Delivery Options Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Delivery Options</Text>
           {DELIVERY_OPTIONS.map((option) => (
@@ -537,38 +670,54 @@ export default function CheckoutScreen() {
               key={option.id}
               style={[
                 styles.deliveryOption,
-                selectedDelivery.id === option.id && styles.deliveryOptionSelected,
+                selectedDelivery.id === option.id &&
+                  styles.deliveryOptionSelected,
               ]}
               onPress={() => setSelectedDelivery(option)}
             >
               <View style={styles.deliveryOptionLeft}>
-                <View style={[
-                  styles.deliveryIconContainer,
-                  selectedDelivery.id === option.id && styles.deliveryIconContainerSelected
-                ]}>
-                  <Ionicons 
-                    name={option.icon as any} 
-                    size={22} 
-                    color={selectedDelivery.id === option.id ? "#C35822" : "#8F796F"} 
+                <View
+                  style={[
+                    styles.deliveryIconContainer,
+                    selectedDelivery.id === option.id &&
+                      styles.deliveryIconContainerSelected,
+                  ]}
+                >
+                  <Ionicons
+                    name={option.icon as any}
+                    size={22}
+                    color={
+                      selectedDelivery.id === option.id ? "#C35822" : "#8F796F"
+                    }
                   />
                 </View>
                 <View style={styles.deliveryInfo}>
-                  <Text style={[
-                    styles.deliveryName,
-                    selectedDelivery.id === option.id && styles.deliveryNameSelected
-                  ]}>
+                  <Text
+                    style={[
+                      styles.deliveryName,
+                      selectedDelivery.id === option.id &&
+                        styles.deliveryNameSelected,
+                    ]}
+                  >
                     {option.name}
                   </Text>
-                  <Text style={styles.deliveryDescription}>{option.description}</Text>
+                  <Text style={styles.deliveryDescription}>
+                    {option.description}
+                  </Text>
                 </View>
               </View>
               <View style={styles.deliveryRight}>
                 <Text style={styles.deliveryPrice}>₱{option.price}</Text>
-                <View style={[
-                  styles.radioCircle,
-                  selectedDelivery.id === option.id && styles.radioCircleSelected
-                ]}>
-                  {selectedDelivery.id === option.id && <View style={styles.radioInner} />}
+                <View
+                  style={[
+                    styles.radioCircle,
+                    selectedDelivery.id === option.id &&
+                      styles.radioCircleSelected,
+                  ]}
+                >
+                  {selectedDelivery.id === option.id && (
+                    <View style={styles.radioInner} />
+                  )}
                 </View>
               </View>
             </TouchableOpacity>
@@ -650,7 +799,9 @@ export default function CheckoutScreen() {
               <Text style={styles.placeOrderText}>Processing...</Text>
             </View>
           ) : (
-            <Text style={styles.placeOrderText}>Place Order • ₱{total.toFixed(2)}</Text>
+            <Text style={styles.placeOrderText}>
+              Place Order • ₱{total.toFixed(2)}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
@@ -769,7 +920,9 @@ export default function CheckoutScreen() {
                 }
               }}
             >
-              <Text style={styles.confirmButtonText}>Pay ₱{total.toFixed(2)}</Text>
+              <Text style={styles.confirmButtonText}>
+                Pay ₱{total.toFixed(2)}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -783,12 +936,20 @@ export default function CheckoutScreen() {
               <Ionicons name="checkmark-circle" size={60} color="#4CAF50" />
             </View>
             <Text style={styles.successTitle}>Order Placed Successfully!</Text>
-            <Text style={styles.orderNumber}>Order #{orderNumber}</Text>
+            <Text style={styles.orderNumber}>
+              {orderCount > 1 ? "Orders #" : "Order #"}
+              {orderNumber}
+            </Text>
+            <Text style={styles.orderCountText}>
+              {orderCount > 1
+                ? `${orderCount} orders created`
+                : "1 order created"}
+            </Text>
             <Text style={styles.deliveryInfoText}>
               Delivery: {selectedDelivery.name} • ₱{selectedDelivery.price}
             </Text>
             <Text style={styles.successMessage}>
-              Thank you for shopping with us! Your order has been confirmed.
+              Thank you for shopping with us! Your order(s) have been confirmed.
             </Text>
             <TouchableOpacity
               style={styles.successButton}
@@ -855,6 +1016,18 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#32221B",
     marginBottom: 12,
+  },
+  sellerGroup: {
+    marginBottom: 16,
+  },
+  sellerGroupName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#C35822",
+    marginBottom: 8,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
   },
   emptyCartContainer: { alignItems: "center", paddingVertical: 20 },
   emptyCartText: {
@@ -954,7 +1127,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   changeButtonText: { color: "#C35822", fontSize: 13, fontWeight: "500" },
-  // Delivery Options Styles
   deliveryOption: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1170,6 +1342,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#C35822",
     fontWeight: "600",
+    marginBottom: 4,
+  },
+  orderCountText: {
+    fontSize: 13,
+    color: "#8F796F",
     marginBottom: 8,
   },
   deliveryInfoText: {
