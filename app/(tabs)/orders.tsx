@@ -1,19 +1,22 @@
 // app/(tabs)/orders.tsx
-import { auth, db } from "@/lib/firebase";
+import { auth, db, storage } from "@/lib/firebase";
 import { createNotification, getOrderNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect } from "expo-router";
 import {
   addDoc,
   collection,
   doc,
   getDocs,
+  onSnapshot,
   query,
   Timestamp,
   updateDoc,
   where,
 } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -39,6 +42,9 @@ interface OrderItem {
   sellerId?: string;
   imageUrl?: string;
   hasReviewed?: boolean;
+  hasRefundRequested?: boolean;
+  refundStatus?: "pending" | "approved" | "rejected" | "refunded";
+  refundRequestId?: string;
 }
 
 interface Order {
@@ -72,13 +78,32 @@ interface Order {
   userEmail: string;
 }
 
+interface RefundRequest {
+  id: string;
+  userId: string;
+  userEmail: string;
+  orderId: string;
+  orderNumber: string;
+  productId: string;
+  productName: string;
+  sellerId?: string;
+  sellerName: string;
+  reason: string;
+  otherReason?: string;
+  status: "pending" | "approved" | "rejected" | "refunded";
+  images?: string[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 type OrderStatus =
   | "all"
   | "pending"
   | "confirmed"
   | "shipped"
   | "delivered"
-  | "cancelled";
+  | "cancelled"
+  | "refunded";
 
 const STATUS_TABS: { id: OrderStatus; label: string; icon: string }[] = [
   { id: "all", label: "All", icon: "list-outline" },
@@ -91,9 +116,310 @@ const STATUS_TABS: { id: OrderStatus; label: string; icon: string }[] = [
     icon: "checkmark-done-circle-outline",
   },
   { id: "cancelled", label: "Cancelled", icon: "close-circle-outline" },
+  { id: "refunded", label: "Refunded", icon: "cash-outline" },
 ];
 
-// Separate Review Modal Component to prevent re-renders
+// Refund Modal Component
+const RefundModalComponent = React.memo(
+  ({
+    visible,
+    product,
+    order,
+    onClose,
+    onSubmit,
+  }: {
+    visible: boolean;
+    product: OrderItem | null;
+    order: Order | null;
+    onClose: () => void;
+    onSubmit: (
+      reason: string,
+      otherReason?: string,
+      images?: string[],
+    ) => Promise<void>;
+  }) => {
+    const [selectedReason, setSelectedReason] = useState<string>("");
+    const [otherReason, setOtherReason] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+    const [selectedImages, setSelectedImages] = useState<string[]>([]);
+    const [uploadingImages, setUploadingImages] = useState(false);
+
+    const refundReasons = [
+      {
+        id: "missing_items",
+        label: "Missing Items",
+        description:
+          "Some items from your order were not included in the package",
+      },
+      {
+        id: "damaged_item",
+        label: "Damaged Item",
+        description: "The item arrived damaged, broken, or defective",
+      },
+      {
+        id: "duplicate_order",
+        label: "Duplicate Order",
+        description: "You accidentally placed the same order multiple times",
+      },
+      {
+        id: "wrong_item",
+        label: "Wrong Item Received",
+        description: "You received a different item than what you ordered",
+      },
+      {
+        id: "others",
+        label: "Others",
+        description: "Other reasons not listed above",
+      },
+    ];
+
+    useEffect(() => {
+      if (visible) {
+        setSelectedReason("");
+        setOtherReason("");
+        setSelectedImages([]);
+      }
+    }, [visible]);
+
+    if (!visible || !product) return null;
+
+    const pickImages = async () => {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Needed",
+          "Please grant permission to access your photos",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        base64: false,
+      });
+
+      if (!result.canceled && result.assets) {
+        setUploadingImages(true);
+        try {
+          const uploadedUrls: string[] = [];
+          for (const asset of result.assets) {
+            // Convert image to blob for upload
+            const response = await fetch(asset.uri);
+            const blob = await response.blob();
+            const filename = `refund_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+            const storageRef = ref(storage, `refund_images/${filename}`);
+            await uploadBytes(storageRef, blob);
+            const downloadUrl = await getDownloadURL(storageRef);
+            uploadedUrls.push(downloadUrl);
+          }
+          setSelectedImages([...selectedImages, ...uploadedUrls]);
+        } catch (error) {
+          console.error("Error uploading images:", error);
+          Alert.alert("Error", "Failed to upload images");
+        } finally {
+          setUploadingImages(false);
+        }
+      }
+    };
+
+    const removeImage = (index: number) => {
+      setSelectedImages(selectedImages.filter((_, i) => i !== index));
+    };
+
+    const handleSubmit = async () => {
+      if (!selectedReason) {
+        Alert.alert("Error", "Please select a reason for refund");
+        return;
+      }
+
+      if (selectedReason === "others" && !otherReason.trim()) {
+        Alert.alert("Error", "Please specify your reason");
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await onSubmit(selectedReason, otherReason, selectedImages);
+        onClose();
+      } catch (error) {
+        console.error("Error submitting refund request:", error);
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={visible}
+        onRequestClose={onClose}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.refundModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Request Refund</Text>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <Ionicons name="close" size={24} color="#32221B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.refundProductInfo}>
+                <View style={styles.refundProductImagePlaceholder}>
+                  {product.imageUrl ? (
+                    <Image
+                      source={{ uri: product.imageUrl }}
+                      style={styles.refundProductImage}
+                    />
+                  ) : (
+                    <Ionicons name="image-outline" size={32} color="#CCC" />
+                  )}
+                </View>
+                <View style={styles.refundProductDetails}>
+                  <Text style={styles.refundProductName}>
+                    {product.productName}
+                  </Text>
+                  <Text style={styles.refundProductQuantity}>
+                    Quantity: {product.quantity}
+                  </Text>
+                  <Text style={styles.refundProductSeller}>
+                    Seller: {product.sellerName}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.refundReasonSection}>
+                <Text style={styles.refundReasonLabel}>Reason for Refund</Text>
+                {refundReasons.map((reason) => (
+                  <TouchableOpacity
+                    key={reason.id}
+                    style={[
+                      styles.refundReasonOption,
+                      selectedReason === reason.id &&
+                        styles.refundReasonOptionActive,
+                    ]}
+                    onPress={() => setSelectedReason(reason.id)}
+                  >
+                    <View
+                      style={[
+                        styles.refundRadioButton,
+                        selectedReason === reason.id &&
+                          styles.refundRadioButtonSelected,
+                      ]}
+                    >
+                      {selectedReason === reason.id && (
+                        <View style={styles.refundRadioButtonInner} />
+                      )}
+                    </View>
+                    <View style={styles.refundReasonTextContainer}>
+                      <Text
+                        style={[
+                          styles.refundReasonText,
+                          selectedReason === reason.id &&
+                            styles.refundReasonTextActive,
+                        ]}
+                      >
+                        {reason.label}
+                      </Text>
+                      <Text style={styles.refundReasonDescription}>
+                        {reason.description}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+
+                {selectedReason === "others" && (
+                  <TextInput
+                    style={styles.refundOtherInput}
+                    placeholder="Please specify your reason..."
+                    placeholderTextColor="#8F796F"
+                    value={otherReason}
+                    onChangeText={setOtherReason}
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                )}
+              </View>
+
+              <View style={styles.refundImagesSection}>
+                <Text style={styles.refundImagesLabel}>
+                  Upload Photos (Optional)
+                </Text>
+                <Text style={styles.refundImagesHint}>
+                  Upload photos of the item to help us process your refund
+                  faster
+                </Text>
+
+                <View style={styles.refundImagesContainer}>
+                  {selectedImages.map((uri, index) => (
+                    <View key={index} style={styles.refundImageWrapper}>
+                      <Image source={{ uri }} style={styles.refundImage} />
+                      <TouchableOpacity
+                        style={styles.removeImageButton}
+                        onPress={() => removeImage(index)}
+                      >
+                        <Ionicons
+                          name="close-circle"
+                          size={24}
+                          color="#F44336"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.addImageButton}
+                    onPress={pickImages}
+                    disabled={uploadingImages}
+                  >
+                    {uploadingImages ? (
+                      <ActivityIndicator size="small" color="#C35822" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="camera-outline"
+                          size={24}
+                          color="#C35822"
+                        />
+                        <Text style={styles.addImageText}>Add Photo</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.refundSubmitButton,
+                  (!selectedReason || submitting) &&
+                    styles.refundSubmitButtonDisabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={!selectedReason || submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.refundSubmitButtonText}>
+                    Submit Refund Request
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    );
+  },
+);
+
+RefundModalComponent.displayName = "RefundModalComponent";
+
+// Review Modal Component
 const ReviewModalComponent = React.memo(
   ({
     visible,
@@ -112,7 +438,7 @@ const ReviewModalComponent = React.memo(
     const [comment, setComment] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    React.useEffect(() => {
+    useEffect(() => {
       if (visible) {
         setRating(0);
         setComment("");
@@ -280,6 +606,7 @@ ReviewModalComponent.displayName = "ReviewModalComponent";
 export default function OrdersScreen() {
   const [activeTab, setActiveTab] = useState<OrderStatus>("all");
   const [orders, setOrders] = useState<Order[]>([]);
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -291,11 +618,17 @@ export default function OrdersScreen() {
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<OrderItem | null>(
     null,
   );
   const [selectedOrderForReview, setSelectedOrderForReview] =
     useState<Order | null>(null);
+  const [selectedOrderForRefund, setSelectedOrderForRefund] =
+    useState<Order | null>(null);
+  const [selectedProductForRefund, setSelectedProductForRefund] =
+    useState<OrderItem | null>(null);
+  let refundUnsubscribe: (() => void) | null = null;
 
   const checkIfReviewed = async (
     userId: string,
@@ -316,6 +649,65 @@ export default function OrdersScreen() {
       console.error("Error checking review status:", error);
       return false;
     }
+  };
+
+  const getRefundStatusForProduct = (
+    orderNumber: string,
+    productId: string,
+  ): { hasRequested: boolean; status?: string; requestId?: string } => {
+    const refundRequest = refundRequests.find(
+      (r) => r.orderNumber === orderNumber && r.productId === productId,
+    );
+    if (refundRequest) {
+      return {
+        hasRequested: true,
+        status: refundRequest.status,
+        requestId: refundRequest.id,
+      };
+    }
+    return { hasRequested: false };
+  };
+
+  const listenToRefundRequests = () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const refundsRef = collection(db, "refund_requests");
+    const q = query(refundsRef, where("userId", "==", user.uid));
+
+    refundUnsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const refundsList: RefundRequest[] = [];
+        snapshot.forEach((doc) => {
+          refundsList.push({ id: doc.id, ...doc.data() } as RefundRequest);
+        });
+        setRefundRequests(refundsList);
+
+        // Update order items with refund status
+        setOrders((prevOrders) => {
+          const updatedOrders = prevOrders.map((order) => {
+            const updatedItems = order.items.map((item) => {
+              const refundInfo = getRefundStatusForProduct(
+                order.orderNumber,
+                item.productId,
+              );
+              return {
+                ...item,
+                hasRefundRequested: refundInfo.hasRequested,
+                refundStatus: refundInfo.status as any,
+                refundRequestId: refundInfo.requestId,
+              };
+            });
+            return { ...order, items: updatedItems };
+          });
+          return updatedOrders;
+        });
+      },
+      (error) => {
+        console.error("Error listening to refund requests:", error);
+      },
+    );
   };
 
   const loadOrders = async () => {
@@ -340,20 +732,30 @@ export default function OrdersScreen() {
         const data = docSnapshot.data();
         const order = { id: docSnapshot.id, ...data } as Order;
 
-        const itemsWithReviewStatus = await Promise.all(
+        const itemsWithStatus = await Promise.all(
           order.items.map(async (item) => {
             const hasReviewed = await checkIfReviewed(
               user.uid,
               item.productId,
               order.id,
             );
-            return { ...item, hasReviewed };
+            const refundInfo = getRefundStatusForProduct(
+              order.orderNumber,
+              item.productId,
+            );
+            return {
+              ...item,
+              hasReviewed,
+              hasRefundRequested: refundInfo.hasRequested,
+              refundStatus: refundInfo.status,
+              refundRequestId: refundInfo.requestId,
+            };
           }),
         );
 
         ordersList.push({
           ...order,
-          items: itemsWithReviewStatus,
+          items: itemsWithStatus,
         });
       }
 
@@ -378,11 +780,30 @@ export default function OrdersScreen() {
   const filterOrders = (status: OrderStatus, ordersList: Order[]) => {
     if (status === "all") {
       setFilteredOrders(ordersList);
+    } else if (status === "refunded") {
+      const refundedOrderNumbers = new Set(
+        refundRequests
+          .filter((r) => r.status === "approved" || r.status === "refunded")
+          .map((r) => r.orderNumber),
+      );
+      const filtered = ordersList.filter((o) =>
+        refundedOrderNumbers.has(o.orderNumber),
+      );
+      setFilteredOrders(filtered);
     } else {
       const filtered = ordersList.filter((o) => o.status === status);
       setFilteredOrders(filtered);
     }
   };
+
+  useEffect(() => {
+    listenToRefundRequests();
+    return () => {
+      if (refundUnsubscribe) {
+        refundUnsubscribe();
+      }
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -392,7 +813,19 @@ export default function OrdersScreen() {
 
   const handleTabChange = (tabId: OrderStatus) => {
     setActiveTab(tabId);
-    filterOrders(tabId, orders);
+    if (tabId === "refunded") {
+      const refundedOrderNumbers = new Set(
+        refundRequests
+          .filter((r) => r.status === "approved" || r.status === "refunded")
+          .map((r) => r.orderNumber),
+      );
+      const filtered = orders.filter((o) =>
+        refundedOrderNumbers.has(o.orderNumber),
+      );
+      setFilteredOrders(filtered);
+    } else {
+      filterOrders(tabId, orders);
+    }
   };
 
   const onRefresh = () => {
@@ -412,6 +845,8 @@ export default function OrdersScreen() {
         return "#9C27B0";
       case "cancelled":
         return "#F44336";
+      case "refunded":
+        return "#8F796F";
       default:
         return "#8F796F";
     }
@@ -429,6 +864,8 @@ export default function OrdersScreen() {
         return "Delivered";
       case "cancelled":
         return "Cancelled";
+      case "refunded":
+        return "Refunded";
       default:
         return status;
     }
@@ -446,6 +883,8 @@ export default function OrdersScreen() {
         return "Order delivered. Thank you for shopping!";
       case "cancelled":
         return "Order cancelled";
+      case "refunded":
+        return "Refund has been processed";
       default:
         return "";
     }
@@ -493,7 +932,10 @@ export default function OrdersScreen() {
       }
 
       await loadOrders();
-      Alert.alert("Success", `Order ${orderToCancel.orderNumber} has been cancelled`);
+      Alert.alert(
+        "Success",
+        `Order ${orderToCancel.orderNumber} has been cancelled`,
+      );
     } catch (error: any) {
       console.error("❌ Cancel failed:", error);
       Alert.alert("Error", error.message);
@@ -505,12 +947,28 @@ export default function OrdersScreen() {
 
   const openReviewModal = (order: Order, product: OrderItem) => {
     if (product.hasReviewed) {
-      Alert.alert("Already Reviewed", "You have already reviewed this product.");
+      Alert.alert(
+        "Already Reviewed",
+        "You have already reviewed this product.",
+      );
       return;
     }
     setSelectedOrderForReview(order);
     setSelectedProduct(product);
     setShowReviewModal(true);
+  };
+
+  const openRefundModal = (order: Order, product: OrderItem) => {
+    if (product.hasRefundRequested) {
+      Alert.alert(
+        "Refund Requested",
+        `Your refund request is ${product.refundStatus === "pending" ? "pending review" : product.refundStatus === "approved" ? "approved" : product.refundStatus === "refunded" ? "completed" : "processed"}.`,
+      );
+      return;
+    }
+    setSelectedOrderForRefund(order);
+    setSelectedProductForRefund(product);
+    setShowRefundModal(true);
   };
 
   const submitReview = async (rating: number, comment: string) => {
@@ -563,6 +1021,71 @@ export default function OrdersScreen() {
     }
   };
 
+  const submitRefundRequest = async (
+    reason: string,
+    otherReason?: string,
+    images?: string[],
+  ) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert("Error", "You must be logged in");
+        return;
+      }
+
+      const alreadyRequested = refundRequests.some(
+        (r) =>
+          r.orderId === selectedOrderForRefund?.id &&
+          r.productId === selectedProductForRefund?.productId,
+      );
+
+      if (alreadyRequested) {
+        Alert.alert(
+          "Error",
+          "You have already requested a refund for this item.",
+        );
+        throw new Error("Already requested");
+      }
+
+      const refundData = {
+        userId: user.uid,
+        userEmail: user.email,
+        orderId: selectedOrderForRefund?.id,
+        orderNumber: selectedOrderForRefund?.orderNumber,
+        productId: selectedProductForRefund?.productId,
+        productName: selectedProductForRefund?.productName,
+        sellerId: selectedProductForRefund?.sellerId,
+        sellerName: selectedProductForRefund?.sellerName,
+        reason: reason,
+        otherReason: reason === "others" ? otherReason : null,
+        images: images || [],
+        status: "pending",
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      };
+
+      const refundsRef = collection(db, "refund_requests");
+      await addDoc(refundsRef, refundData);
+
+      Alert.alert(
+        "Success",
+        "Refund request submitted successfully! The seller will review your request.",
+      );
+      setSelectedProductForRefund(null);
+      setSelectedOrderForRefund(null);
+      await loadOrders();
+    } catch (error: any) {
+      console.error("Error submitting refund request:", error);
+      if (error.message !== "Already requested") {
+        Alert.alert(
+          "Error",
+          "Failed to submit refund request. Please try again.",
+        );
+      }
+      throw error;
+    }
+  };
+
   const formatDate = (timestamp: Timestamp) => {
     if (!timestamp) return "N/A";
     const date = timestamp.toDate();
@@ -583,11 +1106,49 @@ export default function OrdersScreen() {
     setSelectedOrder(null);
   };
 
+  const getRefundButtonText = (item: OrderItem) => {
+    if (!item.hasRefundRequested) return "Request Refund";
+    switch (item.refundStatus) {
+      case "pending":
+        return "Refund Pending";
+      case "approved":
+        return "Refund Approved";
+      case "refunded":
+        return "Refunded";
+      default:
+        return "Refund Requested";
+    }
+  };
+
+  const getRefundButtonStyle = (item: OrderItem) => {
+    if (!item.hasRefundRequested) return styles.refundButtonVertical;
+    if (item.refundStatus === "approved" || item.refundStatus === "refunded") {
+      return [styles.refundButtonVertical, styles.refundedButtonVertical];
+    }
+    return [styles.refundButtonVertical, { backgroundColor: "#FF9800" }];
+  };
+
+  const getRefundButtonTextStyle = (item: OrderItem) => {
+    if (!item.hasRefundRequested) return styles.refundButtonTextVertical;
+    if (item.refundStatus === "approved" || item.refundStatus === "refunded") {
+      return [
+        styles.refundButtonTextVertical,
+        styles.refundedButtonTextVertical,
+      ];
+    }
+    return [styles.refundButtonTextVertical, { color: "#FFF" }];
+  };
+
   const renderOrderCard = ({ item }: { item: Order }) => {
     const isCancelling = cancellingOrderId === item.id;
     const mainProduct = item.items?.[0];
     const otherItemsCount = item.items ? item.items.length - 1 : 0;
-    const allProductsReviewed = item.items?.every((i) => i.hasReviewed === true);
+    const allProductsReviewed = item.items?.every(
+      (i) => i.hasReviewed === true,
+    );
+    const hasAnyRefundApproved = item.items?.some(
+      (i) => i.refundStatus === "approved" || i.refundStatus === "refunded",
+    );
 
     if (!mainProduct) {
       return (
@@ -622,7 +1183,9 @@ export default function OrdersScreen() {
                 { color: getStatusColor(item.status) },
               ]}
             >
-              {getStatusLabel(item.status)}
+              {hasAnyRefundApproved && item.status !== "refunded"
+                ? "Refund Approved"
+                : getStatusLabel(item.status)}
             </Text>
           </View>
         </View>
@@ -654,57 +1217,106 @@ export default function OrdersScreen() {
                 style={styles.trackButton}
                 onPress={(e) => {
                   e.stopPropagation();
-                  Alert.alert("Track Order", `Tracking info for ${item.orderNumber}`);
+                  Alert.alert(
+                    "Track Order",
+                    `Tracking info for ${item.orderNumber}`,
+                  );
                 }}
               >
                 <Text style={styles.trackButtonText}>Track</Text>
               </TouchableOpacity>
             )}
             {item.status === "delivered" && (
-              <TouchableOpacity
-                style={[
-                  styles.reviewButton,
-                  allProductsReviewed && styles.reviewedButton,
-                ]}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  if (allProductsReviewed) {
-                    Alert.alert("Already Reviewed", "All items in this order have been reviewed.");
-                    return;
-                  }
-                  if (item.items.length === 1) {
-                    openReviewModal(item, item.items[0]);
-                  } else {
-                    const unreviewedProducts = item.items.filter((p) => !p.hasReviewed);
-                    if (unreviewedProducts.length === 0) {
-                      Alert.alert("Already Reviewed", "All items have been reviewed.");
+              <View style={styles.deliveredButtonsColumn}>
+                <TouchableOpacity
+                  style={[
+                    styles.reviewButtonVertical,
+                    allProductsReviewed && styles.reviewedButtonVertical,
+                  ]}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    if (allProductsReviewed) {
+                      Alert.alert(
+                        "Already Reviewed",
+                        "All items in this order have been reviewed.",
+                      );
                       return;
                     }
-                    Alert.alert(
-                      "Select Product to Review",
-                      "Which product would you like to review?",
-                      unreviewedProducts.map((product) => ({
-                        text: `${product.productName} x${product.quantity}`,
-                        onPress: () => openReviewModal(item, product),
-                      })),
-                    );
-                  }
-                }}
-              >
-                <Ionicons
-                  name={allProductsReviewed ? "checkmark-circle" : "star-outline"}
-                  size={14}
-                  color={allProductsReviewed ? "#4CAF50" : "#32221B"}
-                />
-                <Text
-                  style={[
-                    styles.reviewButtonText,
-                    allProductsReviewed && styles.reviewedButtonText,
-                  ]}
+                    if (item.items.length === 1) {
+                      openReviewModal(item, item.items[0]);
+                    } else {
+                      const unreviewedProducts = item.items.filter(
+                        (p) => !p.hasReviewed,
+                      );
+                      if (unreviewedProducts.length === 0) {
+                        Alert.alert(
+                          "Already Reviewed",
+                          "All items have been reviewed.",
+                        );
+                        return;
+                      }
+                      Alert.alert(
+                        "Select Product to Review",
+                        "Which product would you like to review?",
+                        unreviewedProducts.map((product) => ({
+                          text: `${product.productName} x${product.quantity}`,
+                          onPress: () => openReviewModal(item, product),
+                        })),
+                      );
+                    }
+                  }}
                 >
-                  {allProductsReviewed ? "Reviewed" : "Review"}
-                </Text>
-              </TouchableOpacity>
+                  <Ionicons
+                    name={
+                      allProductsReviewed ? "checkmark-circle" : "star-outline"
+                    }
+                    size={16}
+                    color={allProductsReviewed ? "#4CAF50" : "#32221B"}
+                  />
+                  <Text
+                    style={[
+                      styles.reviewButtonTextVertical,
+                      allProductsReviewed && styles.reviewedButtonTextVertical,
+                    ]}
+                  >
+                    {allProductsReviewed ? "Reviewed" : "Review Product"}
+                  </Text>
+                </TouchableOpacity>
+
+                {item.items.map((product, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={getRefundButtonStyle(product)}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      openRefundModal(item, product);
+                    }}
+                  >
+                    <Ionicons
+                      name={
+                        product.hasRefundRequested
+                          ? product.refundStatus === "approved" ||
+                            product.refundStatus === "refunded"
+                            ? "checkmark-circle"
+                            : "time-outline"
+                          : "cash-outline"
+                      }
+                      size={16}
+                      color={
+                        product.hasRefundRequested
+                          ? product.refundStatus === "approved" ||
+                            product.refundStatus === "refunded"
+                            ? "#4CAF50"
+                            : "#FFF"
+                          : "#FFF"
+                      }
+                    />
+                    <Text style={getRefundButtonTextStyle(product)}>
+                      {getRefundButtonText(product)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             )}
           </View>
         </View>
@@ -729,7 +1341,9 @@ export default function OrdersScreen() {
               { color: getStatusColor(item.status) },
             ]}
           >
-            {getStatusMessage(item.status)}
+            {hasAnyRefundApproved && item.status !== "refunded"
+              ? "Your refund request has been approved"
+              : getStatusMessage(item.status)}
           </Text>
         </View>
       </TouchableOpacity>
@@ -770,7 +1384,9 @@ export default function OrdersScreen() {
                 style={styles.confirmationYesButton}
                 onPress={executeCancel}
               >
-                <Text style={styles.confirmationYesButtonText}>Yes, Cancel</Text>
+                <Text style={styles.confirmationYesButtonText}>
+                  Yes, Cancel
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -795,7 +1411,10 @@ export default function OrdersScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Order Details</Text>
-              <TouchableOpacity onPress={closeOrderModal} style={styles.closeButton}>
+              <TouchableOpacity
+                onPress={closeOrderModal}
+                style={styles.closeButton}
+              >
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
@@ -803,33 +1422,44 @@ export default function OrdersScreen() {
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Order #</Text>
-                <Text style={styles.detailValue}>{selectedOrder.orderNumber}</Text>
+                <Text style={styles.detailValue}>
+                  {selectedOrder.orderNumber}
+                </Text>
               </View>
 
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Order Date</Text>
-                <Text style={styles.detailValue}>{formatDate(selectedOrder.createdAt)}</Text>
+                <Text style={styles.detailValue}>
+                  {formatDate(selectedOrder.createdAt)}
+                </Text>
               </View>
 
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Payment Method</Text>
-                <Text style={styles.detailValue}>{selectedOrder.paymentMethod}</Text>
+                <Text style={styles.detailValue}>
+                  {selectedOrder.paymentMethod}
+                </Text>
               </View>
 
-              {/* Delivery Option Section */}
               {selectedOrder.deliveryOption && (
                 <>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Delivery Option</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.deliveryOption.name}</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedOrder.deliveryOption.name}
+                    </Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Delivery Fee</Text>
-                    <Text style={styles.detailValue}>₱{selectedOrder.deliveryOption.price}</Text>
+                    <Text style={styles.detailValue}>
+                      ₱{selectedOrder.deliveryOption.price}
+                    </Text>
                   </View>
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Estimated Delivery</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.deliveryOption.description}</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedOrder.deliveryOption.description}
+                    </Text>
                   </View>
                 </>
               )}
@@ -840,7 +1470,8 @@ export default function OrdersScreen() {
                   style={[
                     styles.statusBadge,
                     {
-                      backgroundColor: getStatusColor(selectedOrder.status) + "20",
+                      backgroundColor:
+                        getStatusColor(selectedOrder.status) + "20",
                       alignSelf: "flex-start",
                     },
                   ]}
@@ -890,43 +1521,107 @@ export default function OrdersScreen() {
                     <Text style={styles.orderSummaryName} numberOfLines={2}>
                       {item.productName}
                     </Text>
-                    <Text style={styles.orderSummaryQuantity}>Qty: {item.quantity}</Text>
-                    <Text style={styles.orderSummarySeller}>Seller: {item.sellerName}</Text>
+                    <Text style={styles.orderSummaryQuantity}>
+                      Qty: {item.quantity}
+                    </Text>
+                    <Text style={styles.orderSummarySeller}>
+                      Seller: {item.sellerName}
+                    </Text>
+                    {item.hasRefundRequested && (
+                      <Text style={styles.refundStatusBadgeText}>
+                        Refund:{" "}
+                        {item.refundStatus === "pending"
+                          ? "Pending"
+                          : item.refundStatus === "approved"
+                            ? "Approved"
+                            : item.refundStatus === "refunded"
+                              ? "Completed"
+                              : "Requested"}
+                      </Text>
+                    )}
                   </View>
                   <View style={styles.orderSummaryRight}>
                     <Text style={styles.orderSummaryPrice}>
                       ₱{(item.productPrice * item.quantity).toFixed(2)}
                     </Text>
-                    {selectedOrder.status === "delivered" && (
-                      <TouchableOpacity
-                        style={[
-                          styles.reviewButtonSmall,
-                          item.hasReviewed === true && styles.reviewedButtonSmall,
-                        ]}
-                        onPress={() => {
-                          if (item.hasReviewed === true) {
-                            Alert.alert("Already Reviewed", "You have already reviewed this product.");
-                            return;
-                          }
-                          closeOrderModal();
-                          openReviewModal(selectedOrder, item);
-                        }}
-                      >
-                        <Ionicons
-                          name={item.hasReviewed === true ? "checkmark-circle" : "star-outline"}
-                          size={14}
-                          color={item.hasReviewed === true ? "#4CAF50" : "#FFF"}
-                        />
-                        <Text
-                          style={[
-                            styles.reviewButtonSmallText,
-                            item.hasReviewed === true && styles.reviewedButtonSmallText,
-                          ]}
-                        >
-                          {item.hasReviewed === true ? "Reviewed" : "Review"}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
+                    <View style={styles.orderSummaryButtonsColumn}>
+                      {selectedOrder.status === "delivered" && (
+                        <>
+                          <TouchableOpacity
+                            style={[
+                              styles.reviewButtonSmall,
+                              item.hasReviewed === true &&
+                                styles.reviewedButtonSmall,
+                            ]}
+                            onPress={() => {
+                              if (item.hasReviewed === true) {
+                                Alert.alert(
+                                  "Already Reviewed",
+                                  "You have already reviewed this product.",
+                                );
+                                return;
+                              }
+                              closeOrderModal();
+                              openReviewModal(selectedOrder, item);
+                            }}
+                          >
+                            <Ionicons
+                              name={
+                                item.hasReviewed === true
+                                  ? "checkmark-circle"
+                                  : "star-outline"
+                              }
+                              size={14}
+                              color={
+                                item.hasReviewed === true ? "#4CAF50" : "#FFF"
+                              }
+                            />
+                            <Text
+                              style={[
+                                styles.reviewButtonSmallText,
+                                item.hasReviewed === true &&
+                                  styles.reviewedButtonSmallText,
+                              ]}
+                            >
+                              {item.hasReviewed === true
+                                ? "Reviewed"
+                                : "Review"}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={getRefundButtonStyle(item)}
+                            onPress={() => {
+                              closeOrderModal();
+                              openRefundModal(selectedOrder, item);
+                            }}
+                          >
+                            <Ionicons
+                              name={
+                                item.hasRefundRequested
+                                  ? item.refundStatus === "approved" ||
+                                    item.refundStatus === "refunded"
+                                    ? "checkmark-circle"
+                                    : "time-outline"
+                                  : "cash-outline"
+                              }
+                              size={14}
+                              color={
+                                item.hasRefundRequested
+                                  ? item.refundStatus === "approved" ||
+                                    item.refundStatus === "refunded"
+                                    ? "#4CAF50"
+                                    : "#FFF"
+                                  : "#FFF"
+                              }
+                            />
+                            <Text style={getRefundButtonTextStyle(item)}>
+                              {getRefundButtonText(item)}
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
                   </View>
                 </View>
               ))}
@@ -935,21 +1630,29 @@ export default function OrdersScreen() {
 
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Subtotal</Text>
-                <Text style={styles.detailValue}>₱{selectedOrder.subtotal.toFixed(2)}</Text>
+                <Text style={styles.detailValue}>
+                  ₱{selectedOrder.subtotal.toFixed(2)}
+                </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Shipping Fee</Text>
-                <Text style={styles.detailValue}>₱{selectedOrder.shippingFee.toFixed(2)}</Text>
+                <Text style={styles.detailValue}>
+                  ₱{selectedOrder.shippingFee.toFixed(2)}
+                </Text>
               </View>
               {selectedOrder.deliveryOption && (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Delivery Option</Text>
-                  <Text style={styles.detailValue}>{selectedOrder.deliveryOption.name}</Text>
+                  <Text style={styles.detailValue}>
+                    {selectedOrder.deliveryOption.name}
+                  </Text>
                 </View>
               )}
               <View style={[styles.detailRow, styles.totalRow]}>
                 <Text style={styles.totalLabelModal}>Total</Text>
-                <Text style={styles.totalAmountModal}>₱{selectedOrder.total.toFixed(2)}</Text>
+                <Text style={styles.totalAmountModal}>
+                  ₱{selectedOrder.total.toFixed(2)}
+                </Text>
               </View>
 
               <View style={styles.divider} />
@@ -957,14 +1660,22 @@ export default function OrdersScreen() {
               {selectedOrder.address && (
                 <View style={styles.addressSection}>
                   <Text style={styles.addressTitle}>Shipping Address</Text>
-                  <Text style={styles.addressName}>{selectedOrder.address.fullName}</Text>
-                  <Text style={styles.addressPhone}>{selectedOrder.address.phone}</Text>
+                  <Text style={styles.addressName}>
+                    {selectedOrder.address.fullName}
+                  </Text>
+                  <Text style={styles.addressPhone}>
+                    {selectedOrder.address.phone}
+                  </Text>
                   <Text style={styles.addressText}>
-                    {selectedOrder.address.street}, {selectedOrder.address.barangay},{" "}
-                    {selectedOrder.address.city}, {selectedOrder.address.province}{" "}
+                    {selectedOrder.address.street},{" "}
+                    {selectedOrder.address.barangay},{" "}
+                    {selectedOrder.address.city},{" "}
+                    {selectedOrder.address.province}{" "}
                     {selectedOrder.address.zipCode}
                   </Text>
-                  <Text style={styles.addressLabel}>Label: {selectedOrder.address.label}</Text>
+                  <Text style={styles.addressLabel}>
+                    Label: {selectedOrder.address.label}
+                  </Text>
                 </View>
               )}
             </ScrollView>
@@ -992,7 +1703,10 @@ export default function OrdersScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Orders</Text>
@@ -1009,7 +1723,10 @@ export default function OrdersScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Orders</Text>
@@ -1017,8 +1734,13 @@ export default function OrdersScreen() {
         </View>
         <View style={styles.notLoggedInContainer}>
           <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
-          <Text style={styles.notLoggedInText}>Please log in to view your orders</Text>
-          <TouchableOpacity style={styles.loginButton} onPress={() => router.push("/auth/login")}>
+          <Text style={styles.notLoggedInText}>
+            Please log in to view your orders
+          </Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push("/auth/login")}
+          >
             <Text style={styles.loginButtonText}>Log In</Text>
           </TouchableOpacity>
         </View>
@@ -1029,7 +1751,10 @@ export default function OrdersScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Orders</Text>
@@ -1043,11 +1768,26 @@ export default function OrdersScreen() {
           contentContainerStyle={styles.tabsScrollContent}
         >
           {STATUS_TABS.map((tab) => {
-            const count = orders.filter((o) => o.status === tab.id).length;
+            let count = orders.filter((o) => o.status === tab.id).length;
+            if (tab.id === "refunded") {
+              const refundedOrderNumbers = new Set(
+                refundRequests
+                  .filter(
+                    (r) => r.status === "approved" || r.status === "refunded",
+                  )
+                  .map((r) => r.orderNumber),
+              );
+              count = orders.filter((o) =>
+                refundedOrderNumbers.has(o.orderNumber),
+              ).length;
+            }
             return (
               <TouchableOpacity
                 key={tab.id}
-                style={[styles.tabChip, activeTab === tab.id && styles.tabChipActive]}
+                style={[
+                  styles.tabChip,
+                  activeTab === tab.id && styles.tabChipActive,
+                ]}
                 onPress={() => handleTabChange(tab.id)}
               >
                 <Ionicons
@@ -1055,12 +1795,27 @@ export default function OrdersScreen() {
                   size={16}
                   color={activeTab === tab.id ? "#FFF" : "#8F796F"}
                 />
-                <Text style={[styles.tabChipText, activeTab === tab.id && styles.tabChipTextActive]}>
+                <Text
+                  style={[
+                    styles.tabChipText,
+                    activeTab === tab.id && styles.tabChipTextActive,
+                  ]}
+                >
                   {tab.label}
                 </Text>
                 {count > 0 && (
-                  <View style={[styles.tabBadge, activeTab === tab.id && styles.tabBadgeActive]}>
-                    <Text style={[styles.tabBadgeText, activeTab === tab.id && styles.tabBadgeTextActive]}>
+                  <View
+                    style={[
+                      styles.tabBadge,
+                      activeTab === tab.id && styles.tabBadgeActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.tabBadgeText,
+                        activeTab === tab.id && styles.tabBadgeTextActive,
+                      ]}
+                    >
                       {count}
                     </Text>
                   </View>
@@ -1078,16 +1833,28 @@ export default function OrdersScreen() {
         contentContainerStyle={styles.ordersList}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#C35822"]} tintColor="#C35822" />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="receipt-outline" size={60} color="#E0DAD1" />
             <Text style={styles.emptyTitle}>No orders yet</Text>
             <Text style={styles.emptyText}>
-              {activeTab === "all" ? "Your orders will appear here" : `No ${activeTab} orders found`}
+              {activeTab === "all"
+                ? "Your orders will appear here"
+                : activeTab === "refunded"
+                  ? "No approved refunds found"
+                  : `No ${activeTab} orders found`}
             </Text>
-            <TouchableOpacity style={styles.shopButton} onPress={() => router.push("/(tabs)/browse")}>
+            <TouchableOpacity
+              style={styles.shopButton}
+              onPress={() => router.push("/(tabs)/browse")}
+            >
               <Text style={styles.shopButtonText}>Start Shopping</Text>
             </TouchableOpacity>
           </View>
@@ -1102,6 +1869,13 @@ export default function OrdersScreen() {
         order={selectedOrderForReview}
         onClose={() => setShowReviewModal(false)}
         onSubmit={submitReview}
+      />
+      <RefundModalComponent
+        visible={showRefundModal}
+        product={selectedProductForRefund}
+        order={selectedOrderForRefund}
+        onClose={() => setShowRefundModal(false)}
+        onSubmit={submitRefundRequest}
       />
     </SafeAreaView>
   );
@@ -1120,115 +1894,729 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
   },
-  backButton: { width: 40, height: 40, borderRadius: 20, justifyContent: "center", alignItems: "center" },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   headerTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
-  orderCount: { fontSize: 12, color: "#8F796F", backgroundColor: "#F5F5F5", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
+  orderCount: {
+    fontSize: 12,
+    color: "#8F796F",
+    backgroundColor: "#F5F5F5",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  notLoggedInContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20 },
-  notLoggedInText: { fontSize: 16, color: "#8F796F", textAlign: "center", marginTop: 12, marginBottom: 20 },
-  loginButton: { backgroundColor: "#C35822", paddingHorizontal: 30, paddingVertical: 12, borderRadius: 25 },
+  notLoggedInContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  notLoggedInText: {
+    fontSize: 16,
+    color: "#8F796F",
+    textAlign: "center",
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  loginButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
   loginButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   tabsWrapper: { marginVertical: 12, paddingHorizontal: 16 },
   tabsScrollContent: { flexDirection: "row", gap: 8, paddingRight: 16 },
-  tabChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#FFF", borderRadius: 24, borderWidth: 1, borderColor: "#E8E8E8", gap: 6 },
+  tabChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "#FFF",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+    gap: 6,
+  },
   tabChipActive: { backgroundColor: "#C35822", borderColor: "#C35822" },
   tabChipText: { fontSize: 13, color: "#8F796F", fontWeight: "500" },
   tabChipTextActive: { color: "#FFF" },
-  tabBadge: { backgroundColor: "#F0F0F0", borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, minWidth: 20, alignItems: "center" },
+  tabBadge: {
+    backgroundColor: "#F0F0F0",
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: "center",
+  },
   tabBadgeActive: { backgroundColor: "rgba(255,255,255,0.3)" },
   tabBadgeText: { fontSize: 11, color: "#8F796F", fontWeight: "600" },
   tabBadgeTextActive: { color: "#FFF" },
   ordersList: { padding: 16, paddingBottom: 80 },
-  orderCard: { backgroundColor: "#FFF", borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  orderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 },
+  orderCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  orderHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 8,
+  },
   orderNumber: { fontSize: 14, fontWeight: "600", color: "#32221B" },
   orderDate: { fontSize: 11, color: "#8F796F", marginTop: 2 },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   statusText: { fontSize: 12, fontWeight: "500" },
   productName: { fontSize: 14, color: "#8F796F", marginBottom: 12 },
-  orderFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  orderFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
   totalContainer: { flexDirection: "row", alignItems: "baseline", gap: 4 },
   totalLabel: { fontSize: 13, color: "#8F796F" },
   totalAmount: { fontSize: 16, fontWeight: "bold", color: "#C35822" },
-  cancelButton: { backgroundColor: "#FFF", borderWidth: 1, borderColor: "#F44336", paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
+  cancelButton: {
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#F44336",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
   cancelButtonText: { color: "#F44336", fontSize: 12, fontWeight: "600" },
-  trackButton: { backgroundColor: "#2196F3", paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
+  trackButton: {
+    backgroundColor: "#2196F3",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
   trackButtonText: { color: "#FFF", fontSize: 12, fontWeight: "600" },
-  reviewButton: { backgroundColor: "#FFD700", paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, flexDirection: "row", alignItems: "center", gap: 4 },
+  reviewButton: {
+    backgroundColor: "#FFD700",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   reviewButtonText: { color: "#32221B", fontSize: 12, fontWeight: "600" },
-  reviewedButton: { backgroundColor: "#E8F5E9", borderWidth: 1, borderColor: "#4CAF50" },
+  reviewedButton: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
   reviewedButtonText: { color: "#4CAF50" },
-  statusMessageContainer: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  statusMessageContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
   statusMessageText: { fontSize: 12, fontWeight: "500", flex: 1 },
   buttonRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  emptyContainer: { alignItems: "center", justifyContent: "center", paddingVertical: 60 },
-  emptyTitle: { fontSize: 18, fontWeight: "600", color: "#32221B", marginTop: 12, marginBottom: 8 },
-  emptyText: { fontSize: 14, color: "#8F796F", textAlign: "center", marginBottom: 20 },
-  shopButton: { backgroundColor: "#C35822", paddingHorizontal: 24, paddingVertical: 12, borderRadius: 25 },
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#32221B",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  shopButton: {
+    backgroundColor: "#C35822",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+  },
   shopButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   errorText: { fontSize: 12, color: "#FF3B30", marginTop: 8 },
-  confirmationOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
-  confirmationModal: { backgroundColor: "#FFF", borderRadius: 20, padding: 24, width: "80%", alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
+  confirmationOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  confirmationModal: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "80%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
   confirmationIconContainer: { marginBottom: 16 },
-  confirmationTitle: { fontSize: 20, fontWeight: "bold", color: "#32221B", marginBottom: 8 },
-  confirmationMessage: { fontSize: 14, color: "#8F796F", textAlign: "center", marginBottom: 24, lineHeight: 20 },
-  confirmationButtons: { flexDirection: "row", justifyContent: "space-between", gap: 12, width: "100%" },
-  confirmationNoButton: { flex: 1, backgroundColor: "#F5F5F5", paddingVertical: 12, borderRadius: 25, alignItems: "center", borderWidth: 1, borderColor: "#E0DAD1" },
-  confirmationNoButtonText: { color: "#8F796F", fontSize: 16, fontWeight: "600" },
-  confirmationYesButton: { flex: 1, backgroundColor: "#F44336", paddingVertical: 12, borderRadius: 25, alignItems: "center" },
+  confirmationTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  confirmationMessage: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  confirmationButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+    width: "100%",
+  },
+  confirmationNoButton: {
+    flex: 1,
+    backgroundColor: "#F5F5F5",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  confirmationNoButtonText: {
+    color: "#8F796F",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  confirmationYesButton: {
+    flex: 1,
+    backgroundColor: "#F44336",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+  },
   confirmationYesButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
-  modalContent: { backgroundColor: "#FFF", borderRadius: 20, padding: 20, width: "90%", maxHeight: "85%" },
-  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#E0DAD1" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    width: "90%",
+    maxHeight: "85%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E0DAD1",
+  },
   modalTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
   closeButton: { padding: 4 },
-  detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
   detailLabel: { fontSize: 14, color: "#8F796F" },
   detailValue: { fontSize: 14, fontWeight: "500", color: "#32221B" },
   divider: { height: 1, backgroundColor: "#F0F0F0", marginVertical: 12 },
-  orderSummaryTitle: { fontSize: 16, fontWeight: "600", color: "#32221B", marginBottom: 12 },
-  orderSummaryItemWithReview: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#F0F0F0" },
+  orderSummaryTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
+  orderSummaryItemWithReview: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
   orderSummaryLeft: { flex: 1, marginRight: 12 },
-  orderSummaryName: { fontSize: 14, fontWeight: "500", color: "#32221B", marginBottom: 2 },
+  orderSummaryName: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#32221B",
+    marginBottom: 2,
+  },
   orderSummaryQuantity: { fontSize: 12, color: "#8F796F", marginTop: 2 },
   orderSummarySeller: { fontSize: 11, color: "#C35822", marginTop: 2 },
   orderSummaryRight: { alignItems: "flex-end", gap: 8 },
   orderSummaryPrice: { fontSize: 14, fontWeight: "600", color: "#C35822" },
-  reviewButtonSmall: { flexDirection: "row", alignItems: "center", backgroundColor: "#FFD700", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, gap: 4 },
+  reviewButtonSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFD700",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    gap: 4,
+  },
   reviewButtonSmallText: { fontSize: 11, color: "#32221B", fontWeight: "600" },
-  reviewedButtonSmall: { backgroundColor: "#E8F5E9", borderWidth: 1, borderColor: "#4CAF50" },
+  reviewedButtonSmall: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
   reviewedButtonSmallText: { color: "#4CAF50" },
-  totalRow: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  totalRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
   totalLabelModal: { fontSize: 16, fontWeight: "600", color: "#32221B" },
   totalAmountModal: { fontSize: 18, fontWeight: "bold", color: "#C35822" },
-  addressSection: { marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
-  addressTitle: { fontSize: 14, fontWeight: "600", color: "#32221B", marginBottom: 8 },
-  addressName: { fontSize: 14, fontWeight: "500", color: "#32221B", marginBottom: 2 },
+  addressSection: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  addressTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  addressName: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#32221B",
+    marginBottom: 2,
+  },
   addressPhone: { fontSize: 12, color: "#8F796F", marginBottom: 4 },
   addressText: { fontSize: 12, color: "#666", lineHeight: 16, marginBottom: 4 },
   addressLabel: { fontSize: 11, color: "#C35822", fontWeight: "500" },
-  modalActions: { marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
-  cancelButtonModal: { backgroundColor: "#F44336", paddingVertical: 12, borderRadius: 25, alignItems: "center" },
+  modalActions: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  cancelButtonModal: {
+    backgroundColor: "#F44336",
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+  },
   cancelButtonTextModal: { color: "#FFF", fontSize: 14, fontWeight: "600" },
-  modalStatusMessage: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, marginBottom: 4, padding: 10, backgroundColor: "#F5F5F5", borderRadius: 8 },
+  modalStatusMessage: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 10,
+    backgroundColor: "#F5F5F5",
+    borderRadius: 8,
+  },
   modalStatusMessageText: { fontSize: 13, fontWeight: "500", flex: 1 },
-  reviewModalContent: { backgroundColor: "#FFF", borderRadius: 20, padding: 20, width: "90%", maxHeight: "85%" },
-  reviewProductInfo: { flexDirection: "row", marginBottom: 20, padding: 12, backgroundColor: "#F9F9F9", borderRadius: 12 },
-  reviewProductImagePlaceholder: { width: 60, height: 60, backgroundColor: "#F0F0F0", borderRadius: 8, justifyContent: "center", alignItems: "center", marginRight: 12, borderWidth: 1, borderColor: "#E0DAD1" },
+  reviewModalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    width: "90%",
+    maxHeight: "85%",
+  },
+  reviewProductInfo: {
+    flexDirection: "row",
+    marginBottom: 20,
+    padding: 12,
+    backgroundColor: "#F9F9F9",
+    borderRadius: 12,
+  },
+  reviewProductImagePlaceholder: {
+    width: 60,
+    height: 60,
+    backgroundColor: "#F0F0F0",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
   reviewProductImage: { width: 60, height: 60, borderRadius: 8 },
   reviewProductDetails: { flex: 1, justifyContent: "center" },
-  reviewProductName: { fontSize: 15, fontWeight: "600", color: "#32221B", marginBottom: 4 },
+  reviewProductName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 4,
+  },
   reviewProductQuantity: { fontSize: 12, color: "#8F796F", marginBottom: 2 },
   reviewProductSeller: { fontSize: 11, color: "#C35822" },
   reviewRatingSection: { marginBottom: 20, alignItems: "center" },
-  reviewRatingLabel: { fontSize: 16, fontWeight: "600", color: "#32221B", marginBottom: 12 },
+  reviewRatingLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
   reviewStarsContainer: { flexDirection: "row", gap: 12, marginBottom: 8 },
   reviewRatingHint: { fontSize: 12, color: "#8F796F", marginTop: 8 },
   reviewCommentSection: { marginBottom: 20 },
-  reviewCommentLabel: { fontSize: 16, fontWeight: "600", color: "#32221B", marginBottom: 12 },
-  reviewCommentInput: { borderWidth: 1, borderColor: "#E0DAD1", borderRadius: 12, padding: 12, fontSize: 14, color: "#32221B", backgroundColor: "#FFF", minHeight: 100 },
+  reviewCommentLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
+  reviewCommentInput: {
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: "#32221B",
+    backgroundColor: "#FFF",
+    minHeight: 100,
+  },
   reviewCommentHint: { fontSize: 11, color: "#8F796F", marginTop: 6 },
-  reviewSubmitButton: { backgroundColor: "#C35822", paddingVertical: 14, borderRadius: 25, alignItems: "center", marginTop: 8, marginBottom: 20 },
+  reviewSubmitButton: {
+    backgroundColor: "#C35822",
+    paddingVertical: 14,
+    borderRadius: 25,
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 20,
+  },
   reviewSubmitButtonDisabled: { backgroundColor: "#E0DAD1" },
   reviewSubmitButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
+
+  // New vertical button styles
+  deliveredButtonsColumn: {
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  reviewButtonVertical: {
+    backgroundColor: "#FFD700",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 130,
+    justifyContent: "center",
+  },
+  reviewButtonTextVertical: {
+    color: "#32221B",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  reviewedButtonVertical: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
+  reviewedButtonTextVertical: {
+    color: "#4CAF50",
+  },
+  refundButtonVertical: {
+    backgroundColor: "#8F796F",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 130,
+    justifyContent: "center",
+  },
+  refundButtonTextVertical: {
+    color: "#FFF",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  refundedButtonVertical: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
+  refundedButtonTextVertical: {
+    color: "#4CAF50",
+  },
+  refundStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  refundStatusText: {
+    fontSize: 12,
+    color: "#8F796F",
+    fontWeight: "500",
+  },
+  refundStatusBadgeSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  refundStatusTextSmall: {
+    fontSize: 10,
+    color: "#8F796F",
+    fontWeight: "500",
+  },
+  orderSummaryButtonsColumn: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
+
+  // Refund Modal Styles
+  refundModalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    width: "90%",
+    maxHeight: "85%",
+  },
+  refundProductInfo: {
+    flexDirection: "row",
+    marginBottom: 20,
+    padding: 12,
+    backgroundColor: "#F9F9F9",
+    borderRadius: 12,
+  },
+  refundProductImagePlaceholder: {
+    width: 60,
+    height: 60,
+    backgroundColor: "#F0F0F0",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  refundProductImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  refundProductDetails: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  refundProductName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 4,
+  },
+  refundProductQuantity: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginBottom: 2,
+  },
+  refundProductSeller: {
+    fontSize: 11,
+    color: "#C35822",
+  },
+  refundReasonSection: {
+    marginBottom: 20,
+  },
+  refundReasonLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
+  refundReasonOption: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  refundReasonOptionActive: {
+    backgroundColor: "#FFF8F0",
+  },
+  refundRadioButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#C35822",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    marginTop: 2,
+  },
+  refundRadioButtonSelected: {
+    borderColor: "#C35822",
+  },
+  refundRadioButtonInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#C35822",
+  },
+  refundReasonTextContainer: {
+    flex: 1,
+  },
+  refundReasonText: {
+    fontSize: 14,
+    color: "#32221B",
+    fontWeight: "500",
+    marginBottom: 2,
+  },
+  refundReasonTextActive: {
+    fontWeight: "600",
+  },
+  refundReasonDescription: {
+    fontSize: 12,
+    color: "#8F796F",
+    lineHeight: 16,
+  },
+  refundOtherInput: {
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: "#32221B",
+    backgroundColor: "#FFF",
+    marginTop: 12,
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  refundImagesSection: {
+    marginBottom: 20,
+  },
+  refundImagesLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 4,
+  },
+  refundImagesHint: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginBottom: 12,
+  },
+  refundImagesContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  refundImageWrapper: {
+    position: "relative",
+    width: 80,
+    height: 80,
+  },
+  refundImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+  },
+  removeImageButton: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+  },
+  addImageButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#C35822",
+    borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFF8F0",
+    gap: 4,
+  },
+  addImageText: {
+    fontSize: 10,
+    color: "#C35822",
+    fontWeight: "500",
+  },
+  refundSubmitButton: {
+    backgroundColor: "#C35822",
+    paddingVertical: 14,
+    borderRadius: 25,
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  refundSubmitButtonDisabled: {
+    backgroundColor: "#E0DAD1",
+  },
+  refundSubmitButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  refundButtonSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#8F796F",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    gap: 4,
+  },
+  refundButtonSmallText: {
+    fontSize: 11,
+    color: "#FFF",
+    fontWeight: "600",
+  },
+  refundedButtonSmall: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
+  refundedButtonSmallText: {
+    color: "#4CAF50",
+  },
 });
