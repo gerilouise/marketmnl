@@ -5,7 +5,7 @@ import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { deleteDoc, doc } from "firebase/firestore";
-import React, { useCallback, useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,7 +19,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-
 export default function CartScreen() {
   const { cartItems, loading, loadCart, updateQuantity, clearCart } =
     useFirebaseCart();
@@ -29,7 +28,7 @@ export default function CartScreen() {
   const [selectAll, setSelectAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
-  
+
   // Use ref to prevent unnecessary updates
   const isUpdatingFromEffect = useRef(false);
 
@@ -37,7 +36,7 @@ export default function CartScreen() {
   useEffect(() => {
     // Don't run if we're in the middle of a toggleSelectAll action
     if (isUpdatingFromEffect.current) return;
-    
+
     if (cartItems.length > 0) {
       const allSelected = selectedItemIds.length === cartItems.length;
       setSelectAll(allSelected);
@@ -83,7 +82,7 @@ export default function CartScreen() {
   const toggleSelectAll = () => {
     // Prevent the useEffect from interfering
     isUpdatingFromEffect.current = true;
-    
+
     if (selectAll) {
       // Uncheck all
       setSelectedItemIds([]);
@@ -94,7 +93,7 @@ export default function CartScreen() {
       setSelectedItemIds(allIds);
       setSelectAll(true);
     }
-    
+
     // Allow useEffect to run again after a short delay
     setTimeout(() => {
       isUpdatingFromEffect.current = false;
@@ -118,23 +117,26 @@ export default function CartScreen() {
   };
 
   const directDelete = async (itemId: string, productName: string) => {
-    console.log("=== DELETING ITEM ===");
-    console.log("Item ID:", itemId);
+    console.log("=== DIRECT DELETE TEST (CART) ===");
+    console.log("Item ID to delete:", itemId);
     console.log("Product Name:", productName);
 
     try {
+      // Using the exact same pattern as addresses.tsx
       const itemRef = doc(db, "carts", itemId);
       await deleteDoc(itemRef);
-      console.log("✅ DELETE SUCCESSFUL!");
-      
-      // Remove from selected items if it was selected
-      setSelectedItemIds(prev => prev.filter(id => id !== itemId));
-      
-      await loadCart(); // Refresh the cart
+      console.log("✅ DIRECT DELETE SUCCESSFUL!");
+
+      // Refresh the cart list using your hook
+      await loadCart();
+
+      // Sync selected items state
+      setSelectedItemIds((prev) => prev.filter((id) => id !== itemId));
+
       Alert.alert("Success", `"${productName}" removed from cart`);
       return true;
     } catch (error: any) {
-      console.error("❌ Delete failed:", error);
+      console.error("❌ Direct delete failed:", error);
       Alert.alert("Error", error.message);
       return false;
     }
@@ -235,13 +237,19 @@ export default function CartScreen() {
         <View style={styles.rightContainer}>
           <TouchableOpacity
             style={styles.testDeleteButton}
-            onPress={(e) => {
-              e.stopPropagation();
-              handleRemoveItem(item.id, item.productName);
+            onPress={async (e) => {
+              e.stopPropagation(); // Prevents navigating to product detail
+              setDeletingItemId(item.id);
+              await directDelete(item.id, item.productName);
+              setDeletingItemId(null);
             }}
             disabled={isDeleting}
           >
-            <Ionicons name="trash" size={18} color="#FFF" />
+            {isDeleting ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="trash" size={18} color="#FFF" />
+            )}
           </TouchableOpacity>
 
           <View style={styles.quantityContainer}>
@@ -317,7 +325,8 @@ export default function CartScreen() {
         <View>
           <Text style={styles.headerTitle}>Shopping Cart</Text>
           <Text style={styles.itemCount}>
-            {cartItems.length} {cartItems.length === 1 ? 'item' : 'items'} in your cart
+            {cartItems.length} {cartItems.length === 1 ? "item" : "items"} in
+            your cart
           </Text>
         </View>
 
@@ -387,7 +396,9 @@ export default function CartScreen() {
             </View>
             <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.summaryLabel}>Estimated Total</Text>
-              <Text style={styles.estimatedTotalValue}>₱{estimatedTotal.toFixed(2)}</Text>
+              <Text style={styles.estimatedTotalValue}>
+                ₱{estimatedTotal.toFixed(2)}
+              </Text>
             </View>
           </View>
 
@@ -400,7 +411,10 @@ export default function CartScreen() {
             disabled={selectedItemIds.length === 0}
           >
             <Text style={styles.checkoutButtonText}>
-              Checkout {itemCount > 0 ? `(${itemCount} ${itemCount === 1 ? 'item' : 'items'})` : ""}
+              Checkout{" "}
+              {itemCount > 0
+                ? `(${itemCount} ${itemCount === 1 ? "item" : "items"})`
+                : ""}
             </Text>
           </TouchableOpacity>
         </View>

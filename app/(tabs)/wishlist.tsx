@@ -9,10 +9,10 @@ import {
   getDoc,
   getDocs,
   query,
+  setDoc,
   Timestamp,
   updateDoc,
   where,
-  setDoc,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
@@ -188,36 +188,34 @@ export default function WishlistScreen() {
   };
 
   // Remove from wishlist
-  const handleRemoveFromWishlist = async (productId: string, productName: string) => {
-    Alert.alert(
-      "Remove from Wishlist",
-      `Remove "${productName}" from your wishlist?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: async () => {
-            setDeletingItemId(productId);
-            try {
-              const user = auth.currentUser;
-              if (user) {
-                const itemId = `${user.uid}_${productId}`;
-                const itemRef = doc(db, "wishlists", itemId);
-                await deleteDoc(itemRef);
-                await loadWishlist();
-                Alert.alert("Success", `"${productName}" removed from wishlist`);
-              }
-            } catch (error) {
-              console.error("Error removing from wishlist:", error);
-              Alert.alert("Error", "Failed to remove item");
-            } finally {
-              setDeletingItemId(null);
-            }
-          },
-        },
-      ],
-    );
+  const handleRemoveFromWishlist = async (
+    productId: string,
+    productName: string,
+  ) => {
+    console.log("=== DIRECT DELETE TEST (WISHLIST) ===");
+    const user = auth.currentUser;
+    if (!user) return;
+
+    try {
+      setDeletingItemId(productId); // Trigger loading state for this specific ID
+
+      // Define the document ID used in your wishlists collection
+      const itemId = `${user.uid}_${productId}`;
+      const itemRef = doc(db, "wishlists", itemId);
+
+      await deleteDoc(itemRef);
+      console.log("✅ WISHLIST DELETE SUCCESSFUL!");
+
+      // Refresh the local list
+      await loadWishlist();
+
+      Alert.alert("Success", `"${productName}" removed from wishlist`);
+    } catch (error: any) {
+      console.error("❌ Wishlist delete failed:", error);
+      Alert.alert("Error", error.message);
+    } finally {
+      setDeletingItemId(null); // Stop loading state
+    }
   };
 
   // Add all to cart - Direct, no confirmation
@@ -241,17 +239,17 @@ export default function WishlistScreen() {
 
     for (let i = 0; i < wishlistItems.length; i++) {
       const item = wishlistItems[i];
-      
+
       try {
         // Get product stock
         const productRef = doc(db, "products", item.productId);
         const productSnap = await getDoc(productRef);
-        
+
         if (!productSnap.exists()) {
           failedCount++;
           continue;
         }
-        
+
         const stockQuantity = productSnap.data().stockQuantity || 0;
 
         if (stockQuantity <= 0) {
@@ -267,7 +265,7 @@ export default function WishlistScreen() {
         if (cartDocSnap.exists()) {
           const currentQuantity = cartDocSnap.data().quantity || 1;
           const newQuantity = currentQuantity + 1;
-          
+
           if (newQuantity <= stockQuantity) {
             await updateDoc(cartDocRef, {
               quantity: newQuantity,
@@ -303,7 +301,7 @@ export default function WishlistScreen() {
     if (outOfStockCount > 0) message += ` ${outOfStockCount} out of stock.`;
     if (failedCount > 0) message += ` ${failedCount} failed.`;
     Alert.alert("Done", message);
-    
+
     setAddingAll(false);
   };
 
@@ -370,6 +368,7 @@ export default function WishlistScreen() {
             style={styles.deleteButton}
             onPress={(e) => {
               e.stopPropagation();
+              // Directly call the function without the Alert confirmation
               handleRemoveFromWishlist(item.productId, item.productName);
             }}
             disabled={isDeleting || isAddingToCart}
@@ -450,14 +449,19 @@ export default function WishlistScreen() {
           wishlistItems.length > 0 ? (
             <View style={styles.footerContainer}>
               <TouchableOpacity
-                style={[styles.addAllButton, addingAll && styles.addAllButtonDisabled]}
+                style={[
+                  styles.addAllButton,
+                  addingAll && styles.addAllButtonDisabled,
+                ]}
                 onPress={handleAddAllToCart}
                 disabled={addingAll}
               >
                 {addingAll ? (
                   <>
                     <ActivityIndicator size="small" color="#FFF" />
-                    <Text style={styles.addAllButtonText}>Adding to Cart...</Text>
+                    <Text style={styles.addAllButtonText}>
+                      Adding to Cart...
+                    </Text>
                   </>
                 ) : (
                   <>
