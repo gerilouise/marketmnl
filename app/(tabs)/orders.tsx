@@ -26,6 +26,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -206,7 +207,6 @@ const RefundModalComponent = React.memo(
         try {
           const uploadedUrls: string[] = [];
           for (const asset of result.assets) {
-            // Convert image to blob for upload
             const response = await fetch(asset.uri);
             const blob = await response.blob();
             const filename = `refund_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
@@ -419,7 +419,7 @@ const RefundModalComponent = React.memo(
 
 RefundModalComponent.displayName = "RefundModalComponent";
 
-// Review Modal Component
+// Review Modal Component - UPDATED with anonymous toggle
 const ReviewModalComponent = React.memo(
   ({
     visible,
@@ -432,16 +432,18 @@ const ReviewModalComponent = React.memo(
     product: OrderItem | null;
     order: Order | null;
     onClose: () => void;
-    onSubmit: (rating: number, comment: string) => Promise<void>;
+    onSubmit: (rating: number, comment: string, isAnonymous: boolean) => Promise<void>;
   }) => {
     const [rating, setRating] = useState(0);
     const [comment, setComment] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [isAnonymous, setIsAnonymous] = useState(false);
 
     useEffect(() => {
       if (visible) {
         setRating(0);
         setComment("");
+        setIsAnonymous(false);
       }
     }, [visible]);
 
@@ -485,7 +487,7 @@ const ReviewModalComponent = React.memo(
 
       setSubmitting(true);
       try {
-        await onSubmit(rating, comment.trim());
+        await onSubmit(rating, comment.trim(), isAnonymous);
         onClose();
       } catch (error) {
         console.error("Error submitting review:", error);
@@ -549,6 +551,36 @@ const ReviewModalComponent = React.memo(
                   {rating === 4 && "Very Good"}
                   {rating === 5 && "Excellent!"}
                 </Text>
+              </View>
+
+              {/* Anonymous Toggle Section */}
+              <View style={styles.reviewAnonymousSection}>
+                <Text style={styles.reviewAnonymousLabel}>Display Name Preference</Text>
+                <View style={styles.reviewToggleContainer}>
+                  <View style={styles.reviewToggleLeft}>
+                    <Ionicons name="person-outline" size={22} color="#C35822" />
+                    <View>
+                      <Text style={styles.reviewToggleTitle}>Show my name</Text>
+                      <Text style={styles.reviewToggleSubtitle}>
+                        Your name will be visible to others
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={!isAnonymous}
+                    onValueChange={(value) => setIsAnonymous(!value)}
+                    trackColor={{ false: "#E0DAD1", true: "#C35822" }}
+                    thumbColor="#FFF"
+                  />
+                </View>
+                {isAnonymous && (
+                  <View style={styles.reviewAnonymousInfo}>
+                    <Ionicons name="eye-off-outline" size={16} color="#8F796F" />
+                    <Text style={styles.reviewAnonymousInfoText}>
+                      Your review will be posted as "Anonymous"
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <View style={styles.reviewCommentSection}>
@@ -684,7 +716,6 @@ export default function OrdersScreen() {
         });
         setRefundRequests(refundsList);
 
-        // Update order items with refund status
         setOrders((prevOrders) => {
           const updatedOrders = prevOrders.map((order) => {
             const updatedItems = order.items.map((item) => {
@@ -971,7 +1002,7 @@ export default function OrdersScreen() {
     setShowRefundModal(true);
   };
 
-  const submitReview = async (rating: number, comment: string) => {
+  const submitReview = async (rating: number, comment: string, isAnonymous: boolean) => {
     try {
       const user = auth.currentUser;
       if (!user) {
@@ -990,6 +1021,18 @@ export default function OrdersScreen() {
         throw new Error("Already reviewed");
       }
 
+      // Generate user name based on preference
+      let userName = "";
+      let userInitials = "";
+      
+      if (!isAnonymous) {
+        userName = user.displayName || user.email?.split("@")[0] || "Customer";
+        userInitials = userName.substring(0, 2).toUpperCase();
+      } else {
+        userName = "Anonymous";
+        userInitials = "AN";
+      }
+
       const reviewData = {
         userId: user.uid,
         userEmail: user.email,
@@ -1001,6 +1044,9 @@ export default function OrdersScreen() {
         sellerName: selectedProduct?.sellerName,
         rating: rating,
         comment: comment,
+        userName: userName,
+        userInitials: userInitials,
+        isAnonymous: isAnonymous,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       };
@@ -2249,6 +2295,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   modalStatusMessageText: { fontSize: 13, fontWeight: "500", flex: 1 },
+
+  // Review Modal Styles
   reviewModalContent: {
     backgroundColor: "#FFF",
     borderRadius: 20,
@@ -2293,6 +2341,56 @@ const styles = StyleSheet.create({
   },
   reviewStarsContainer: { flexDirection: "row", gap: 12, marginBottom: 8 },
   reviewRatingHint: { fontSize: 12, color: "#8F796F", marginTop: 8 },
+  reviewAnonymousSection: {
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E0DAD1",
+  },
+  reviewAnonymousLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#32221B",
+    marginBottom: 12,
+  },
+  reviewToggleContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+  reviewToggleLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  reviewToggleTitle: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#32221B",
+  },
+  reviewToggleSubtitle: {
+    fontSize: 12,
+    color: "#8F796F",
+    marginTop: 2,
+  },
+  reviewAnonymousInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  reviewAnonymousInfoText: {
+    fontSize: 12,
+    color: "#8F796F",
+    flex: 1,
+  },
   reviewCommentSection: { marginBottom: 20 },
   reviewCommentLabel: {
     fontSize: 16,
@@ -2376,33 +2474,11 @@ const styles = StyleSheet.create({
   refundedButtonTextVertical: {
     color: "#4CAF50",
   },
-  refundStatusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F5F5F5",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  refundStatusText: {
-    fontSize: 12,
-    color: "#8F796F",
-    fontWeight: "500",
-  },
-  refundStatusBadgeSmall: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F5F5F5",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  refundStatusTextSmall: {
+  refundStatusBadgeText: {
     fontSize: 10,
-    color: "#8F796F",
+    color: "#FF9800",
     fontWeight: "500",
+    marginTop: 2,
   },
   orderSummaryButtonsColumn: {
     alignItems: "flex-end",
@@ -2435,33 +2511,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E0DAD1",
   },
-  refundProductImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-  },
-  refundProductDetails: {
-    flex: 1,
-    justifyContent: "center",
-  },
+  refundProductImage: { width: 60, height: 60, borderRadius: 8 },
+  refundProductDetails: { flex: 1, justifyContent: "center" },
   refundProductName: {
     fontSize: 15,
     fontWeight: "600",
     color: "#32221B",
     marginBottom: 4,
   },
-  refundProductQuantity: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginBottom: 2,
-  },
-  refundProductSeller: {
-    fontSize: 11,
-    color: "#C35822",
-  },
-  refundReasonSection: {
-    marginBottom: 20,
-  },
+  refundProductQuantity: { fontSize: 12, color: "#8F796F", marginBottom: 2 },
+  refundProductSeller: { fontSize: 11, color: "#C35822" },
+  refundReasonSection: { marginBottom: 20 },
   refundReasonLabel: {
     fontSize: 16,
     fontWeight: "600",
@@ -2476,9 +2536,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 8,
   },
-  refundReasonOptionActive: {
-    backgroundColor: "#FFF8F0",
-  },
+  refundReasonOptionActive: { backgroundColor: "#FFF8F0" },
   refundRadioButton: {
     width: 20,
     height: 20,
@@ -2490,32 +2548,22 @@ const styles = StyleSheet.create({
     marginRight: 12,
     marginTop: 2,
   },
-  refundRadioButtonSelected: {
-    borderColor: "#C35822",
-  },
+  refundRadioButtonSelected: { borderColor: "#C35822" },
   refundRadioButtonInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: "#C35822",
   },
-  refundReasonTextContainer: {
-    flex: 1,
-  },
+  refundReasonTextContainer: { flex: 1 },
   refundReasonText: {
     fontSize: 14,
     color: "#32221B",
     fontWeight: "500",
     marginBottom: 2,
   },
-  refundReasonTextActive: {
-    fontWeight: "600",
-  },
-  refundReasonDescription: {
-    fontSize: 12,
-    color: "#8F796F",
-    lineHeight: 16,
-  },
+  refundReasonTextActive: { fontWeight: "600" },
+  refundReasonDescription: { fontSize: 12, color: "#8F796F", lineHeight: 16 },
   refundOtherInput: {
     borderWidth: 1,
     borderColor: "#E0DAD1",
@@ -2528,20 +2576,14 @@ const styles = StyleSheet.create({
     minHeight: 80,
     textAlignVertical: "top",
   },
-  refundImagesSection: {
-    marginBottom: 20,
-  },
+  refundImagesSection: { marginBottom: 20 },
   refundImagesLabel: {
     fontSize: 16,
     fontWeight: "600",
     color: "#32221B",
     marginBottom: 4,
   },
-  refundImagesHint: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginBottom: 12,
-  },
+  refundImagesHint: { fontSize: 12, color: "#8F796F", marginBottom: 12 },
   refundImagesContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2552,11 +2594,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
   },
-  refundImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-  },
+  refundImage: { width: 80, height: 80, borderRadius: 8 },
   removeImageButton: {
     position: "absolute",
     top: -8,
@@ -2576,11 +2614,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF8F0",
     gap: 4,
   },
-  addImageText: {
-    fontSize: 10,
-    color: "#C35822",
-    fontWeight: "500",
-  },
+  addImageText: { fontSize: 10, color: "#C35822", fontWeight: "500" },
   refundSubmitButton: {
     backgroundColor: "#C35822",
     paddingVertical: 14,
@@ -2589,34 +2623,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 20,
   },
-  refundSubmitButtonDisabled: {
-    backgroundColor: "#E0DAD1",
-  },
-  refundSubmitButtonText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  refundButtonSmall: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#8F796F",
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 16,
-    gap: 4,
-  },
-  refundButtonSmallText: {
-    fontSize: 11,
-    color: "#FFF",
-    fontWeight: "600",
-  },
-  refundedButtonSmall: {
-    backgroundColor: "#E8F5E9",
-    borderWidth: 1,
-    borderColor: "#4CAF50",
-  },
-  refundedButtonSmallText: {
-    color: "#4CAF50",
-  },
+  refundSubmitButtonDisabled: { backgroundColor: "#E0DAD1" },
+  refundSubmitButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
 });

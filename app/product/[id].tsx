@@ -51,6 +51,7 @@ interface ProductReview {
   date: string;
   comment: string;
   createdAt: any;
+  isAnonymous?: boolean;
 }
 
 interface Product {
@@ -58,6 +59,7 @@ interface Product {
   name: string;
   description: string;
   price: number;
+  categories: string[];
   category: string;
   stockQuantity: number;
   imageUrl: string | null;
@@ -181,13 +183,12 @@ export default function ProductDetailsScreen() {
       const loadedReviews: ProductReview[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
+        const isAnonymous = data.isAnonymous || false;
+        
         loadedReviews.push({
           id: doc.id,
-          userName: data.userName || "Anonymous",
-          userInitials:
-            data.userInitials ||
-            data.userName?.substring(0, 2).toUpperCase() ||
-            "??",
+          userName: isAnonymous ? "Anonymous" : (data.userName || "Anonymous"),
+          userInitials: isAnonymous ? "AN" : (data.userInitials || "??"),
           userId: data.userId,
           rating: data.rating,
           date:
@@ -198,6 +199,7 @@ export default function ProductDetailsScreen() {
             }) || new Date().toLocaleDateString(),
           comment: data.comment,
           createdAt: data.createdAt,
+          isAnonymous: isAnonymous,
         });
       });
 
@@ -337,7 +339,6 @@ export default function ProductDetailsScreen() {
     }
 
     try {
-      // Create a beautiful share message
       const productUrl = Platform.select({
         ios: `marketmnl://product/${product.id}`,
         android: `marketmnl://product/${product.id}`,
@@ -363,7 +364,6 @@ export default function ProductDetailsScreen() {
       }
     } catch (error: any) {
       console.error("Error sharing:", error);
-      // Don't show alert for user cancellation
       if (error.message !== "User canceled share dialog") {
         Alert.alert("Share Failed", "Unable to share at this time. Please try again.");
       }
@@ -486,9 +486,12 @@ export default function ProductDetailsScreen() {
         <View style={styles.contentContainer}>
           <View style={styles.brandRow}>
             <Text style={styles.brand}>{storeName || "MarketMNL"}</Text>
-            <View style={styles.categoryTag}>
-              <Text style={styles.categoryText}>{product.category}</Text>
-            </View>
+            {/* Show first category as badge */}
+            {product.categories && product.categories.length > 0 && (
+              <View style={styles.categoryTag}>
+                <Text style={styles.categoryText}>{product.categories[0]}</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.namePriceRow}>
@@ -685,7 +688,7 @@ export default function ProductDetailsScreen() {
             </View>
           )}
 
-          {/* Reviews Section - View Only */}
+          {/* Reviews Section - Updated with anonymous support */}
           <View style={styles.reviewsSection}>
             <View style={styles.reviewsHeader}>
               <View style={styles.reviewsTitleContainer}>
@@ -712,9 +715,17 @@ export default function ProductDetailsScreen() {
                         </Text>
                       </View>
                       <View>
-                        <Text style={styles.reviewerName}>
-                          {review.userName}
-                        </Text>
+                        <View style={styles.reviewerNameRow}>
+                          <Text style={styles.reviewerName}>
+                            {review.userName}
+                          </Text>
+                          {review.isAnonymous && (
+                            <View style={styles.anonymousBadge}>
+                              <Ionicons name="eye-off-outline" size={10} color="#8F796F" />
+                              <Text style={styles.anonymousBadgeText}>Anonymous</Text>
+                            </View>
+                          )}
+                        </View>
                         <Text style={styles.reviewDate}>{review.date}</Text>
                       </View>
                     </View>
@@ -1178,6 +1189,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    flex: 1,
   },
   reviewerAvatar: {
     width: 40,
@@ -1192,15 +1204,34 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#32221B",
   },
+  reviewerNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
   reviewerName: {
     fontSize: 14,
     fontWeight: "600",
     color: "#32221B",
-    marginBottom: 2,
+  },
+  anonymousBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    gap: 3,
+  },
+  anonymousBadgeText: {
+    fontSize: 9,
+    color: "#8F796F",
   },
   reviewDate: {
     fontSize: 11,
     color: "#8F796F",
+    marginTop: 2,
   },
   starsContainer: {
     flexDirection: "row",
@@ -1210,6 +1241,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#666",
     lineHeight: 20,
+    marginTop: 8,
   },
   loadingReviewsContainer: {
     padding: 20,

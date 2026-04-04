@@ -1,14 +1,12 @@
 // app/(tabs)/edit-profile.tsx
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,101 +30,19 @@ export default function EditProfileScreen() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
-  const [age, setAge] = useState("");
-  const [birthdate, setBirthdate] = useState("");
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [newImageUri, setNewImageUri] = useState<string | null>(null);
-  const [tempDate, setTempDate] = useState<Date>(new Date());
 
   useEffect(() => {
     if (profile) {
       setFirstName(profile.firstName || "");
       setLastName(profile.lastName || "");
       setPhone(profile.phone || "");
-      setAge(profile.age?.toString() || "");
-      setBirthdate(profile.birthdate || "");
       setProfileImage(profile.photoURL || null);
-      if (profile.birthdate) {
-        setTempDate(new Date(profile.birthdate));
-      }
     }
   }, [profile]);
-
-  // Function to calculate age from birthdate
-  const calculateAge = (birthDateString: string) => {
-    if (!birthDateString) return "";
-
-    const birthDate = new Date(birthDateString);
-    const today = new Date();
-
-    let calculatedAge = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-
-    if (
-      monthDiff < 0 ||
-      (monthDiff === 0 && today.getDate() < birthDate.getDate())
-    ) {
-      calculatedAge--;
-    }
-
-    return calculatedAge.toString();
-  };
-
-  // Handle date selection
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === "android") {
-      setShowDatePicker(false);
-      // Exit if user tapped 'Cancel'
-      if (event.type === "dismissed") return;
-    }
-
-    if (selectedDate) {
-      // Format date as YYYY-MM-DD for storage
-      const year = selectedDate.getFullYear();
-      const month = String(selectedDate.getMonth() + 1).padStart(2, "0");
-      const day = String(selectedDate.getDate()).padStart(2, "0");
-      const formattedDate = `${year}-${month}-${day}`;
-
-      setBirthdate(formattedDate);
-      setTempDate(selectedDate);
-
-      // Calculate and set age
-      const calculatedAge = calculateAge(formattedDate);
-      setAge(calculatedAge);
-    }
-
-    // For iOS, we need to handle the modal differently
-    if (Platform.OS === "ios") {
-      // Keep the picker open until user confirms
-      // We'll handle this with a separate confirm button
-    }
-  };
-
-  // For iOS: Confirm date selection
-  const onConfirmDate = () => {
-    setShowDatePicker(false);
-  };
-
-  // For iOS: Cancel date selection
-  const onCancelDate = () => {
-    setShowDatePicker(false);
-    // Revert to original date
-    if (birthdate) {
-      setTempDate(new Date(birthdate));
-    }
-  };
-
-  // Handle manual birthdate input
-  const handleManualBirthdateChange = (text: string) => {
-    setBirthdate(text);
-    if (text && text.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      const calculatedAge = calculateAge(text);
-      setAge(calculatedAge);
-    }
-  };
 
   const handleSave = async () => {
     if (!firstName) {
@@ -154,8 +70,6 @@ export default function EditProfileScreen() {
         firstName,
         lastName,
         phone: phone || null,
-        age: age ? parseInt(age) : null,
-        birthdate: birthdate || null,
         photoURL: finalPhotoURL,
       };
 
@@ -243,12 +157,6 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.debugContainer}>
-        <Text style={styles.debugText}>
-          {profile?.email ? `Logged in as: ${profile.email}` : "Not logged in"}
-        </Text>
-      </View>
-
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Profile Picture Section */}
         <View style={styles.profileImageSection}>
@@ -329,80 +237,8 @@ export default function EditProfileScreen() {
               editable={!saving}
             />
           </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Birthdate</Text>
-            <TouchableOpacity
-              style={styles.dateInput}
-              onPress={() => setShowDatePicker(true)}
-              disabled={saving}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={birthdate ? styles.dateText : styles.placeholderText}
-              >
-                {birthdate
-                  ? new Date(birthdate).toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })
-                  : "Select birthdate"}
-              </Text>
-              <Ionicons name="calendar-outline" size={20} color="#8F796F" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Age</Text>
-            <TextInput
-              style={[styles.input, styles.disabledInput]}
-              value={age}
-              placeholder="Auto-calculated from birthdate"
-              keyboardType="numeric"
-              editable={false}
-            />
-          </View>
         </View>
       </ScrollView>
-
-      {/* Date Picker Logic */}
-      {showDatePicker &&
-        (Platform.OS === "ios" ? (
-          // iOS requires a container/modal to look good as it's an inline component
-          <View style={styles.pickerContainer}>
-            <View style={styles.pickerModal}>
-              <View style={styles.pickerHeader}>
-                <TouchableOpacity onPress={onCancelDate}>
-                  <Text style={styles.pickerCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <Text style={styles.pickerTitle}>Select Birthdate</Text>
-                <TouchableOpacity onPress={onConfirmDate}>
-                  <Text style={styles.pickerDoneText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker
-                value={tempDate}
-                mode="date"
-                display="spinner"
-                onChange={onDateChange}
-                maximumDate={new Date()}
-                minimumDate={new Date(1900, 0, 1)}
-                style={styles.iosPicker}
-              />
-            </View>
-          </View>
-        ) : (
-          // Android triggers a native dialog, so we render it without a wrapper
-          <DateTimePicker
-            value={tempDate}
-            mode="date"
-            display="default"
-            onChange={onDateChange}
-            maximumDate={new Date()}
-            minimumDate={new Date(1900, 0, 1)}
-          />
-        ))}
     </SafeAreaView>
   );
 }
@@ -458,18 +294,6 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 14,
     fontWeight: "600",
-  },
-  debugContainer: {
-    backgroundColor: "#FFF3E0",
-    padding: 8,
-    marginHorizontal: 20,
-    marginTop: 10,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  debugText: {
-    color: "#C35822",
-    fontSize: 12,
   },
   scrollContainer: {
     padding: 20,
@@ -563,82 +387,5 @@ const styles = StyleSheet.create({
     color: "#32221B",
     borderWidth: 1,
     borderColor: "#E0DAD1",
-  },
-  disabledInput: {
-    backgroundColor: "#E9E4E0",
-    color: "#8F796F",
-  },
-  dateInput: {
-    backgroundColor: "#F5F0EB",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: "#32221B",
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  dateText: {
-    color: "#32221B",
-    fontSize: 15,
-  },
-  placeholderText: {
-    color: "#8F796F",
-    fontSize: 15,
-  },
-  // Date Picker Modal Styles
-  pickerContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1000,
-  },
-  pickerModal: {
-    backgroundColor: "#FFF",
-    borderRadius: 20,
-    width: "90%",
-    overflow: "hidden",
-    ...Platform.select({
-      ios: {
-        paddingBottom: 20,
-      },
-      android: {
-        paddingBottom: 10,
-      },
-    }),
-  },
-  pickerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0DAD1",
-  },
-  pickerCancelText: {
-    fontSize: 16,
-    color: "#8F796F",
-    fontWeight: "500",
-  },
-  pickerTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  pickerDoneText: {
-    fontSize: 16,
-    color: "#C35822",
-    fontWeight: "600",
-  },
-  iosPicker: {
-    height: 200,
   },
 });

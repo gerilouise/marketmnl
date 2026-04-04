@@ -317,7 +317,7 @@ export default function SellerProductsManageScreen() {
 
       const productData = {
         name: name.trim(),
-        description: description.trim() || `${name} - Authentic Filipino delicacy`,
+        description: description.trim() || `${name}`,
         price: parseFloat(price),
         categories: selectedCategories, // Store as array for multiple categories
         category: selectedCategories[0] || "Bottled", // Keep single category for backward compatibility
