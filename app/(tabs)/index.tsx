@@ -2,7 +2,7 @@
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { db } from "@/lib/firebase";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
   collection,
@@ -12,6 +12,8 @@ import {
   query,
   where,
   Timestamp,
+  doc,
+  getDoc,
 } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -30,6 +32,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
+
+// Categories with professional icons
+const categories = [
+  { id: "1", name: "Specials", icon: "star", iconSet: "ionicons" },
+  { id: "2", name: "Spicy", icon: "flame", iconSet: "ionicons" },
+  { id: "3", name: "Seafood", icon: "fish", iconSet: "ionicons" },
+  { id: "4", name: "Meat", icon: "restaurant", iconSet: "ionicons" },
+];
 
 export default function HomeScreen() {
   const [showChat, setShowChat] = useState(false);
@@ -69,6 +79,22 @@ export default function HomeScreen() {
     }
   };
 
+  // Get seller store name from seller ID
+  const getSellerStoreName = async (sellerId: string) => {
+    try {
+      const sellerRef = doc(db, "sellers", sellerId);
+      const sellerSnap = await getDoc(sellerRef);
+      if (sellerSnap.exists()) {
+        const sellerData = sellerSnap.data();
+        return sellerData.storeName || sellerData.sellerName || "MarketMNL";
+      }
+      return "MarketMNL";
+    } catch (error) {
+      console.error("Error getting seller name:", error);
+      return "MarketMNL";
+    }
+  };
+
   // Fetch profile when screen loads
   useEffect(() => {
     const loadProfile = async () => {
@@ -95,15 +121,19 @@ export default function HomeScreen() {
       const allProductsSnapshot = await getDocs(allProductsQuery);
       const productsList: any[] = [];
       
-      allProductsSnapshot.forEach((doc) => {
+      for (const doc of allProductsSnapshot.docs) {
         const data = doc.data();
+        // Get seller store name for each product
+        const sellerStoreName = await getSellerStoreName(data.sellerId);
+        
         productsList.push({ 
           id: doc.id, 
           ...data,
           rating: data.rating || 4.5,
-          sellerName: data.sellerName || "MarketMNL"
+          sellerName: sellerStoreName,
+          sellerStoreName: sellerStoreName
         });
-      });
+      }
       
       console.log(`Fetched ${productsList.length} products`);
       
@@ -140,14 +170,6 @@ export default function HomeScreen() {
       fetchProducts();
     }, [])
   );
-
-  // Categories data
-  const categories = [
-    { id: "1", name: "Specials", icon: "🎉" },
-    { id: "2", name: "Spicy", icon: "🌶️" },
-    { id: "3", name: "Seafood", icon: "🦐" },
-    { id: "4", name: "Meat", icon: "🥩" },
-  ];
 
   const toggleWishlist = (productId: string) => {
     setWishlist((prev) => ({
@@ -203,7 +225,7 @@ export default function HomeScreen() {
       onPress={() => navigateToCategory(item.name)}
     >
       <View style={styles.categoryIcon}>
-        <Text style={styles.categoryIconText}>{item.icon}</Text>
+        <Ionicons name={item.icon} size={28} color="#C35822" />
       </View>
       <Text style={styles.categoryName}>{item.name}</Text>
     </TouchableOpacity>
@@ -271,7 +293,7 @@ export default function HomeScreen() {
           {item.name}
         </Text>
         <Text style={styles.newArrivalSeller} numberOfLines={1}>
-          {item.sellerName || "MarketMNL"}
+          {item.sellerStoreName || item.sellerName || "MarketMNL"}
         </Text>
         <View style={styles.newArrivalRating}>
           <Ionicons name="star" size={12} color="#FFD700" />
@@ -418,7 +440,7 @@ export default function HomeScreen() {
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.featuredList}
-              snapToInterval={172} // Width of product card + margin
+              snapToInterval={172}
               decelerationRate="fast"
               snapToAlignment="start"
             />
@@ -604,21 +626,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   categoryIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: "#FFF",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
-    elevation: 3,
-  },
-  categoryIconText: {
-    fontSize: 30,
+    elevation: 2,
   },
   categoryName: {
     fontSize: 12,

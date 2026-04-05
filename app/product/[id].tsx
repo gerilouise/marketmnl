@@ -1,4 +1,4 @@
-// app/product/[id].tsx
+// app/product/[id].tsx - Categories removed
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
@@ -482,16 +482,10 @@ export default function ProductDetailsScreen() {
           </View>
         </View>
 
-        {/* Product Info */}
+        {/* Product Info - Category badges removed */}
         <View style={styles.contentContainer}>
           <View style={styles.brandRow}>
             <Text style={styles.brand}>{storeName || "MarketMNL"}</Text>
-            {/* Show first category as badge */}
-            {product.categories && product.categories.length > 0 && (
-              <View style={styles.categoryTag}>
-                <Text style={styles.categoryText}>{product.categories[0]}</Text>
-              </View>
-            )}
           </View>
 
           <View style={styles.namePriceRow}>
@@ -688,7 +682,7 @@ export default function ProductDetailsScreen() {
             </View>
           )}
 
-          {/* Reviews Section - Updated with anonymous support */}
+          {/* Reviews Section */}
           <View style={styles.reviewsSection}>
             <View style={styles.reviewsHeader}>
               <View style={styles.reviewsTitleContainer}>
@@ -902,7 +896,6 @@ const styles = StyleSheet.create({
   },
   brandRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 8,
   },
@@ -910,17 +903,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#8F796F",
     letterSpacing: 1,
-  },
-  categoryTag: {
-    backgroundColor: "#E0DAD1",
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  categoryText: {
-    fontSize: 12,
-    color: "#32221B",
-    fontWeight: "500",
   },
   namePriceRow: {
     flexDirection: "row",

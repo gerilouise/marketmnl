@@ -317,10 +317,10 @@ export default function SellerProductsManageScreen() {
 
       const productData = {
         name: name.trim(),
-        description: description.trim() || `${name}`,
+        description: description.trim() || "", // Removed auto-generated description
         price: parseFloat(price),
-        categories: selectedCategories, // Store as array for multiple categories
-        category: selectedCategories[0] || "Bottled", // Keep single category for backward compatibility
+        categories: selectedCategories,
+        category: selectedCategories[0] || "Bottled",
         stockQuantity: parseInt(stock),
         netWeight: weight.trim(),
         calories: calories ? parseFloat(calories) : null,

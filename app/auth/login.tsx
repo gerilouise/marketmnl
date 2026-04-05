@@ -190,20 +190,7 @@ export default function LoginScreen() {
                 disabled={loading}
               >
                 <Ionicons name="logo-google" size={24} color="#DB4437" />
-                <Text style={styles.socialButtonText}>Google</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.socialButton}
-                onPress={() =>
-                  Alert.alert(
-                    "Coming Soon",
-                    "Facebook login will be available soon!",
-                  )
-                }
-              >
-                <Ionicons name="logo-facebook" size={24} color="#4267B2" />
-                <Text style={styles.socialButtonText}>Facebook</Text>
+                <Text style={styles.socialButtonText}>Continue with Google</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -378,7 +365,7 @@ const styles = StyleSheet.create({
   },
   socialContainer: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     gap: 12,
   },
   socialButton: {

@@ -1,4 +1,4 @@
-// app/(seller)/products.tsx - With product details view on click
+// app/(seller)/products.tsx
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
@@ -72,7 +72,20 @@ export default function SellerProductsScreen() {
       const productsList: any[] = [];
 
       querySnapshot.forEach((doc) => {
-        productsList.push({ id: doc.id, ...doc.data() });
+        const data = doc.data();
+        // Ensure categories is an array
+        let categoriesArray = [];
+        if (data.categories && Array.isArray(data.categories)) {
+          categoriesArray = data.categories;
+        } else if (data.category) {
+          categoriesArray = [data.category];
+        }
+        
+        productsList.push({ 
+          id: doc.id, 
+          ...data,
+          categories: categoriesArray
+        });
       });
 
       // Sort manually in JavaScript
@@ -85,12 +98,12 @@ export default function SellerProductsScreen() {
 
       setProducts(productsList);
 
-      // Apply filter
+      // Apply filter - FIXED to check categories array
       if (selectedCategory === "All") {
         setFilteredProducts(productsList);
       } else {
         const filtered = productsList.filter(
-          (product) => product.category === selectedCategory,
+          (product) => product.categories && product.categories.includes(selectedCategory)
         );
         setFilteredProducts(filtered);
       }
@@ -102,14 +115,14 @@ export default function SellerProductsScreen() {
     }
   };
 
-  // Handle category change
+  // Handle category change - FIXED
   const handleCategoryChange = (category: string) => {
     setSelectedCategory(category);
     if (category === "All") {
       setFilteredProducts(products);
     } else {
       const filtered = products.filter(
-        (product) => product.category === category,
+        (product) => product.categories && product.categories.includes(category)
       );
       setFilteredProducts(filtered);
     }
@@ -150,7 +163,7 @@ export default function SellerProductsScreen() {
         setFilteredProducts(updatedProducts);
       } else {
         const filtered = updatedProducts.filter(
-          (product) => product.category === selectedCategory,
+          (product) => product.categories && product.categories.includes(selectedCategory)
         );
         setFilteredProducts(filtered);
       }
@@ -213,6 +226,10 @@ export default function SellerProductsScreen() {
 
   const renderProductItem = ({ item }: { item: any }) => {
     const isDeleting = deletingProductId === item.id;
+    // Get display category (first one)
+    const displayCategory = item.categories && item.categories.length > 0 
+      ? item.categories[0] 
+      : item.category || "Uncategorized";
     
     return (
       <TouchableOpacity 
@@ -247,7 +264,7 @@ export default function SellerProductsScreen() {
           </View>
 
           <View style={styles.categoryTag}>
-            <Text style={styles.categoryTagText}>{item.category}</Text>
+            <Text style={styles.categoryTagText}>{displayCategory}</Text>
           </View>
         </View>
 
@@ -255,7 +272,6 @@ export default function SellerProductsScreen() {
           <TouchableOpacity
             style={[styles.editButton, isDeleting && styles.disabledButton]}
             onPress={() => {
-              // Stop propagation so it doesn't trigger the parent onPress
               handleEditProduct(item.id);
             }}
             disabled={isDeleting}
@@ -269,7 +285,6 @@ export default function SellerProductsScreen() {
               isDeleting && styles.disabledButton
             ]}
             onPress={() => {
-              // Stop propagation so it doesn't trigger the parent onPress
               showDeleteConfirmation(item.id, item.name);
             }}
             disabled={isDeleting}
@@ -290,7 +305,7 @@ export default function SellerProductsScreen() {
     if (!selectedProduct) return null;
 
     // Get all categories as an array
-    const categoriesList = selectedProduct.categories || [selectedProduct.category].filter(Boolean);
+    const categoriesList = selectedProduct.categories || (selectedProduct.category ? [selectedProduct.category] : []);
 
     return (
       <Modal
@@ -329,7 +344,7 @@ export default function SellerProductsScreen() {
                 <Text style={styles.modalStock}>Stock: {selectedProduct.stockQuantity || 0}</Text>
               </View>
 
-              {/* Categories */}
+              {/* Categories - Show all categories */}
               {categoriesList.length > 0 && (
                 <View style={styles.modalCategories}>
                   {categoriesList.map((cat: string, index: number) => (
