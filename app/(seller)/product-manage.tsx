@@ -1,4 +1,4 @@
-// app/(seller)/product-manage.tsx
+// app/(seller)/product-manage.tsx - FULLY CORRECTED
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -52,7 +52,7 @@ export default function SellerProductsManageScreen() {
   const [calories, setCalories] = useState("");
   const [origin, setOrigin] = useState("");
   const [culturalBackground, setCulturalBackground] = useState("");
-  const [storage, setStorage] = useState("");
+  const [storageInstructions, setStorageInstructions] = useState("");
   const [shelfLife, setShelfLife] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -112,13 +112,12 @@ export default function SellerProductsManageScreen() {
 
   const toggleCategory = (category: string) => {
     if (selectedCategories.includes(category)) {
-      setSelectedCategories(selectedCategories.filter(c => c !== category));
+      setSelectedCategories(selectedCategories.filter((c) => c !== category));
     } else {
       setSelectedCategories([...selectedCategories, category]);
     }
   };
 
-  // Recipe functions
   const addRecipe = () => {
     setRecipes([
       ...recipes,
@@ -158,7 +157,7 @@ export default function SellerProductsManageScreen() {
     setCalories("");
     setOrigin("");
     setCulturalBackground("");
-    setStorage("");
+    setStorageInstructions("");
     setShelfLife("");
     setImage(null);
     setOriginalImage(null);
@@ -191,7 +190,6 @@ export default function SellerProductsManageScreen() {
         setName(product.name || "");
         setDescription(product.description || "");
         setPrice(product.price?.toString() || "");
-        // Handle categories (can be string or array)
         if (product.categories && Array.isArray(product.categories)) {
           setSelectedCategories(product.categories);
         } else if (product.category) {
@@ -204,7 +202,7 @@ export default function SellerProductsManageScreen() {
         setCalories(product.calories?.toString() || "");
         setOrigin(product.origin || "");
         setCulturalBackground(product.culturalBackground || "");
-        setStorage(product.storage || "");
+        setStorageInstructions(product.storage || "");
         setShelfLife(product.shelfLife || "");
         setImage(product.imageUrl || null);
         setOriginalImage(product.imageUrl || null);
@@ -268,46 +266,93 @@ export default function SellerProductsManageScreen() {
     }
   };
 
+  // FIXED: CORRECT handleSubmit function - walang duplicate
   const handleSubmit = async () => {
+    // DEBUG LOGS - I-print lahat ng values
+    console.log("========== SUBMIT DEBUG ==========");
+    console.log("name:", name, "| empty?", !name);
+    console.log("price:", price, "| empty?", !price);
+    console.log("stock:", stock, "| empty?", !stock);
+    console.log("weight:", weight, "| empty?", !weight);
+    console.log(
+      "storageInstructions:",
+      storageInstructions,
+      "| empty?",
+      !storageInstructions,
+    );
+    console.log("shelfLife:", shelfLife, "| empty?", !shelfLife);
+    console.log(
+      "selectedCategories:",
+      selectedCategories,
+      "| length:",
+      selectedCategories.length,
+    );
+    console.log("image:", image ? "YES" : "NO");
+    console.log("user:", auth.currentUser?.uid);
+    console.log("==================================");
+
     // Validate required fields
-    if (!name || !price || !stock || !weight || !storage || !shelfLife) {
+    if (
+      !name ||
+      !price ||
+      !stock ||
+      !weight ||
+      !storageInstructions ||
+      !shelfLife
+    ) {
+      console.log("FAILED: Missing required fields");
       Alert.alert("Error", "Please fill in all required fields (*)");
       return;
     }
 
     if (selectedCategories.length === 0) {
+      console.log("FAILED: No categories selected");
       Alert.alert("Error", "Please select at least one category");
       return;
     }
 
     if (isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+      console.log("FAILED: Invalid price");
       Alert.alert("Error", "Please enter a valid price");
       return;
     }
 
     if (isNaN(parseInt(stock)) || parseInt(stock) < 0) {
+      console.log("FAILED: Invalid stock");
       Alert.alert("Error", "Please enter a valid stock quantity");
       return;
     }
 
+    console.log("All validations passed! Proceeding to save...");
     setSubmitting(true);
 
     try {
       const user = auth.currentUser;
       if (!user) {
+        console.log("FAILED: No user logged in");
         Alert.alert("Error", "You must be logged in");
         router.push("/auth/login");
         return;
       }
 
+      console.log("User found:", user.uid);
+
       let imageUrl = null;
       if (image) {
+        console.log("Uploading image...");
         const uploadedUrl = await uploadImage(image);
         if (uploadedUrl) {
           imageUrl = uploadedUrl;
+          console.log("Image uploaded successfully:", imageUrl);
+        } else {
+          console.log("Image upload failed");
+          Alert.alert("Error", "Failed to upload image. Please try again.");
+          setSubmitting(false);
+          return;
         }
       } else if (originalImage) {
         imageUrl = originalImage;
+        console.log("Using original image:", imageUrl);
       }
 
       const now = Timestamp.now();
@@ -317,7 +362,7 @@ export default function SellerProductsManageScreen() {
 
       const productData = {
         name: name.trim(),
-        description: description.trim() || "", // Removed auto-generated description
+        description: description.trim() || "",
         price: parseFloat(price),
         categories: selectedCategories,
         category: selectedCategories[0] || "Bottled",
@@ -327,7 +372,7 @@ export default function SellerProductsManageScreen() {
         imageUrl: imageUrl,
         origin: origin.trim() || null,
         culturalBackground: culturalBackground.trim() || null,
-        storage: storage.trim(),
+        storage: storageInstructions.trim(),
         shelfLife: shelfLife.trim(),
         recipes: validRecipes.length > 0 ? validRecipes : null,
         sellerId: user.uid,
@@ -336,9 +381,10 @@ export default function SellerProductsManageScreen() {
         updatedAt: now,
       };
 
-      console.log("Saving product with categories:", productData.categories);
+      console.log("Saving product data:", JSON.stringify(productData, null, 2));
 
       if (isEditing) {
+        console.log("Updating existing product...");
         const productRef = doc(db, "products", productId as string);
         await updateDoc(productRef, {
           ...productData,
@@ -346,8 +392,10 @@ export default function SellerProductsManageScreen() {
         });
         Alert.alert("Success", "Product updated successfully!");
       } else {
+        console.log("Creating new product...");
         const productsRef = collection(db, "products");
-        await addDoc(productsRef, productData);
+        const docRef = await addDoc(productsRef, productData);
+        console.log("Product created with ID:", docRef.id);
         Alert.alert("Success", "Product added successfully!");
       }
 
@@ -559,7 +607,8 @@ export default function SellerProductsManageScreen() {
                   key={cat}
                   style={[
                     styles.categoryChip,
-                    selectedCategories.includes(cat) && styles.categoryChipActive,
+                    selectedCategories.includes(cat) &&
+                      styles.categoryChipActive,
                   ]}
                   onPress={() => toggleCategory(cat)}
                   disabled={submitting}
@@ -567,13 +616,19 @@ export default function SellerProductsManageScreen() {
                   <Text
                     style={[
                       styles.categoryChipText,
-                      selectedCategories.includes(cat) && styles.categoryChipTextActive,
+                      selectedCategories.includes(cat) &&
+                        styles.categoryChipTextActive,
                     ]}
                   >
                     {cat}
                   </Text>
                   {selectedCategories.includes(cat) && (
-                    <Ionicons name="checkmark" size={14} color="#FFF" style={styles.categoryCheck} />
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color="#FFF"
+                      style={styles.categoryCheck}
+                    />
                   )}
                 </TouchableOpacity>
               ))}
@@ -732,8 +787,8 @@ export default function SellerProductsManageScreen() {
                 style={styles.input}
                 placeholder="e.g., Keep refrigerated after opening"
                 placeholderTextColor="#8F796F"
-                value={storage}
-                onChangeText={setStorage}
+                value={storageInstructions}
+                onChangeText={setStorageInstructions}
                 editable={!submitting}
               />
             </View>

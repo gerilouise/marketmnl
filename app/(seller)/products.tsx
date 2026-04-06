@@ -16,13 +16,13 @@ import {
   Alert,
   FlatList,
   Image,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -42,10 +42,15 @@ export default function SellerProductsScreen() {
   const [products, setProducts] = useState<any[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(
+    null,
+  );
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [productToDelete, setProductToDelete] = useState<{ id: string; name: string } | null>(null);
-  
+  const [productToDelete, setProductToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
   // View Product Modal
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
@@ -63,10 +68,7 @@ export default function SellerProductsScreen() {
       }
 
       const productsRef = collection(db, "products");
-      const q = query(
-        productsRef,
-        where("sellerId", "==", user.uid)
-      );
+      const q = query(productsRef, where("sellerId", "==", user.uid));
 
       const querySnapshot = await getDocs(q);
       const productsList: any[] = [];
@@ -80,11 +82,11 @@ export default function SellerProductsScreen() {
         } else if (data.category) {
           categoriesArray = [data.category];
         }
-        
-        productsList.push({ 
-          id: doc.id, 
+
+        productsList.push({
+          id: doc.id,
           ...data,
-          categories: categoriesArray
+          categories: categoriesArray,
         });
       });
 
@@ -103,7 +105,8 @@ export default function SellerProductsScreen() {
         setFilteredProducts(productsList);
       } else {
         const filtered = productsList.filter(
-          (product) => product.categories && product.categories.includes(selectedCategory)
+          (product) =>
+            product.categories && product.categories.includes(selectedCategory),
         );
         setFilteredProducts(filtered);
       }
@@ -122,7 +125,8 @@ export default function SellerProductsScreen() {
       setFilteredProducts(products);
     } else {
       const filtered = products.filter(
-        (product) => product.categories && product.categories.includes(category)
+        (product) =>
+          product.categories && product.categories.includes(category),
       );
       setFilteredProducts(filtered);
     }
@@ -137,11 +141,11 @@ export default function SellerProductsScreen() {
   // Perform the actual delete
   const confirmDelete = async () => {
     if (!productToDelete) return;
-    
+
     const { id: productId, name: productName } = productToDelete;
     setDeleteModalVisible(false);
     setDeletingProductId(productId);
-    
+
     try {
       const user = auth.currentUser;
       if (!user) {
@@ -155,15 +159,16 @@ export default function SellerProductsScreen() {
       await deleteDoc(productRef);
 
       // Remove from local state
-      const updatedProducts = products.filter(p => p.id !== productId);
+      const updatedProducts = products.filter((p) => p.id !== productId);
       setProducts(updatedProducts);
-      
+
       // Update filtered products based on current category
       if (selectedCategory === "All") {
         setFilteredProducts(updatedProducts);
       } else {
         const filtered = updatedProducts.filter(
-          (product) => product.categories && product.categories.includes(selectedCategory)
+          (product) =>
+            product.categories && product.categories.includes(selectedCategory),
         );
         setFilteredProducts(filtered);
       }
@@ -227,12 +232,13 @@ export default function SellerProductsScreen() {
   const renderProductItem = ({ item }: { item: any }) => {
     const isDeleting = deletingProductId === item.id;
     // Get display category (first one)
-    const displayCategory = item.categories && item.categories.length > 0 
-      ? item.categories[0] 
-      : item.category || "Uncategorized";
-    
+    const displayCategory =
+      item.categories && item.categories.length > 0
+        ? item.categories[0]
+        : item.category || "Uncategorized";
+
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.productCard}
         onPress={() => viewProductDetails(item)}
         activeOpacity={0.7}
@@ -240,7 +246,10 @@ export default function SellerProductsScreen() {
       >
         <View style={styles.productImagePlaceholder}>
           {item.imageUrl ? (
-            <Image source={{ uri: item.imageUrl }} style={styles.productImage} />
+            <Image
+              source={{ uri: item.imageUrl }}
+              style={styles.productImage}
+            />
           ) : (
             <Ionicons name="image-outline" size={40} color="#CCC" />
           )}
@@ -280,10 +289,7 @@ export default function SellerProductsScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.deleteButton,
-              isDeleting && styles.disabledButton
-            ]}
+            style={[styles.deleteButton, isDeleting && styles.disabledButton]}
             onPress={() => {
               showDeleteConfirmation(item.id, item.name);
             }}
@@ -305,7 +311,9 @@ export default function SellerProductsScreen() {
     if (!selectedProduct) return null;
 
     // Get all categories as an array
-    const categoriesList = selectedProduct.categories || (selectedProduct.category ? [selectedProduct.category] : []);
+    const categoriesList =
+      selectedProduct.categories ||
+      (selectedProduct.category ? [selectedProduct.category] : []);
 
     return (
       <Modal
@@ -318,7 +326,10 @@ export default function SellerProductsScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Product Details</Text>
-              <TouchableOpacity onPress={closeViewModal} style={styles.closeButton}>
+              <TouchableOpacity
+                onPress={closeViewModal}
+                style={styles.closeButton}
+              >
                 <Ionicons name="close" size={24} color="#32221B" />
               </TouchableOpacity>
             </View>
@@ -327,7 +338,10 @@ export default function SellerProductsScreen() {
               {/* Product Image */}
               <View style={styles.modalImageContainer}>
                 {selectedProduct.imageUrl ? (
-                  <Image source={{ uri: selectedProduct.imageUrl }} style={styles.modalImage} />
+                  <Image
+                    source={{ uri: selectedProduct.imageUrl }}
+                    style={styles.modalImage}
+                  />
                 ) : (
                   <View style={styles.modalImagePlaceholder}>
                     <Ionicons name="image-outline" size={60} color="#CCC" />
@@ -336,12 +350,18 @@ export default function SellerProductsScreen() {
               </View>
 
               {/* Product Name */}
-              <Text style={styles.modalProductName}>{selectedProduct.name}</Text>
+              <Text style={styles.modalProductName}>
+                {selectedProduct.name}
+              </Text>
 
               {/* Price and Stock */}
               <View style={styles.modalPriceStockRow}>
-                <Text style={styles.modalPrice}>₱{selectedProduct.price?.toFixed(2)}</Text>
-                <Text style={styles.modalStock}>Stock: {selectedProduct.stockQuantity || 0}</Text>
+                <Text style={styles.modalPrice}>
+                  ₱{selectedProduct.price?.toFixed(2)}
+                </Text>
+                <Text style={styles.modalStock}>
+                  Stock: {selectedProduct.stockQuantity || 0}
+                </Text>
               </View>
 
               {/* Categories - Show all categories */}
@@ -368,59 +388,80 @@ export default function SellerProductsScreen() {
               {/* Product Details */}
               <View style={styles.modalSection}>
                 <Text style={styles.modalSectionTitle}>Product Details</Text>
-                
+
                 <View style={styles.modalDetailRow}>
                   <Text style={styles.modalDetailLabel}>Net Weight:</Text>
-                  <Text style={styles.modalDetailValue}>{selectedProduct.netWeight || "N/A"}</Text>
+                  <Text style={styles.modalDetailValue}>
+                    {selectedProduct.netWeight || "N/A"}
+                  </Text>
                 </View>
-                
+
                 {selectedProduct.calories && (
                   <View style={styles.modalDetailRow}>
                     <Text style={styles.modalDetailLabel}>Calories:</Text>
-                    <Text style={styles.modalDetailValue}>{selectedProduct.calories} kcal</Text>
+                    <Text style={styles.modalDetailValue}>
+                      {selectedProduct.calories} kcal
+                    </Text>
                   </View>
                 )}
-                
+
                 {selectedProduct.origin && (
                   <View style={styles.modalDetailRow}>
                     <Text style={styles.modalDetailLabel}>Origin:</Text>
-                    <Text style={styles.modalDetailValue}>{selectedProduct.origin}</Text>
+                    <Text style={styles.modalDetailValue}>
+                      {selectedProduct.origin}
+                    </Text>
                   </View>
                 )}
-                
+
                 {selectedProduct.culturalBackground && (
                   <View style={styles.modalDetailRow}>
-                    <Text style={styles.modalDetailLabel}>Cultural Background:</Text>
-                    <Text style={styles.modalDetailValue}>{selectedProduct.culturalBackground}</Text>
+                    <Text style={styles.modalDetailLabel}>
+                      Cultural Background:
+                    </Text>
+                    <Text style={styles.modalDetailValue}>
+                      {selectedProduct.culturalBackground}
+                    </Text>
                   </View>
                 )}
-                
+
                 <View style={styles.modalDetailRow}>
                   <Text style={styles.modalDetailLabel}>Storage:</Text>
-                  <Text style={styles.modalDetailValue}>{selectedProduct.storage || "N/A"}</Text>
+                  <Text style={styles.modalDetailValue}>
+                    {selectedProduct.storage || "N/A"}
+                  </Text>
                 </View>
-                
+
                 <View style={styles.modalDetailRow}>
                   <Text style={styles.modalDetailLabel}>Shelf Life:</Text>
-                  <Text style={styles.modalDetailValue}>{selectedProduct.shelfLife || "N/A"}</Text>
+                  <Text style={styles.modalDetailValue}>
+                    {selectedProduct.shelfLife || "N/A"}
+                  </Text>
                 </View>
               </View>
 
               {/* Recipes */}
-              {selectedProduct.recipes && selectedProduct.recipes.length > 0 && (
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>Recipes</Text>
-                  {selectedProduct.recipes.map((recipe: any, index: number) => (
-                    <View key={index} style={styles.modalRecipeItem}>
-                      <Text style={styles.modalRecipeName}>{recipe.name}</Text>
-                      <Text style={styles.modalRecipeDesc}>{recipe.description}</Text>
-                      <Text style={styles.modalRecipeMeta}>
-                        {recipe.prepTime} • {recipe.difficulty}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
+              {selectedProduct.recipes &&
+                selectedProduct.recipes.length > 0 && (
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Recipes</Text>
+                    {selectedProduct.recipes.map(
+                      (recipe: any, index: number) => (
+                        <View key={index} style={styles.modalRecipeItem}>
+                          <Text style={styles.modalRecipeName}>
+                            {recipe.name}
+                          </Text>
+                          <Text style={styles.modalRecipeDesc}>
+                            {recipe.description}
+                          </Text>
+                          <Text style={styles.modalRecipeMeta}>
+                            {recipe.prepTime} • {recipe.difficulty}
+                          </Text>
+                        </View>
+                      ),
+                    )}
+                  </View>
+                )}
             </ScrollView>
 
             <View style={styles.modalFooter}>
@@ -434,7 +475,7 @@ export default function SellerProductsScreen() {
                 <Ionicons name="create-outline" size={18} color="#FFF" />
                 <Text style={styles.editProductButtonText}>Edit Product</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={styles.closeModalButton}
                 onPress={closeViewModal}
@@ -557,8 +598,10 @@ export default function SellerProductsScreen() {
             <Text style={styles.modalMessage}>
               Are you sure you want to delete "{productToDelete?.name}"?
             </Text>
-            <Text style={styles.modalWarning}>This action cannot be undone.</Text>
-            
+            <Text style={styles.modalWarning}>
+              This action cannot be undone.
+            </Text>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelModalButton]}

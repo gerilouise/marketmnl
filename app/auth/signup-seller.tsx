@@ -1,4 +1,3 @@
-// app/auth/signup-seller.tsx
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -8,6 +7,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -29,6 +29,8 @@ export default function SignupSellerScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeSellerAgreement, setAgreeSellerAgreement] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState("");
 
   const { loading, signUp } = useFirebaseAuth();
 
@@ -82,7 +84,8 @@ export default function SignupSellerScreen() {
     const success = await signUp(email, password, userData);
 
     if (success) {
-      router.replace("/auth/login");
+      setRegisteredEmail(email);
+      setShowVerificationModal(true);
     }
   };
 
@@ -136,7 +139,6 @@ export default function SignupSellerScreen() {
           </View>
 
           <View style={styles.formContainer}>
-            {/* Centered Create Account Text */}
             <View style={styles.formHeader}>
               <Text style={styles.formTitle}>Create Account</Text>
             </View>
@@ -305,10 +307,7 @@ export default function SignupSellerScreen() {
               disabled={loading}
             >
               <View
-                style={[
-                  styles.checkbox,
-                  agreeTerms && styles.checkboxChecked,
-                ]}
+                style={[styles.checkbox, agreeTerms && styles.checkboxChecked]}
               >
                 {agreeTerms && (
                   <Ionicons name="checkmark" size={16} color="#FFF" />
@@ -387,6 +386,43 @@ export default function SignupSellerScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* VERIFICATION POPUP MODAL */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showVerificationModal}
+        onRequestClose={() => setShowVerificationModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIcon}>
+              <Ionicons name="mail-outline" size={60} color="#C35822" />
+            </View>
+            <Text style={styles.modalTitle}>Verify Your Email</Text>
+            <Text style={styles.modalMessage}>
+              A verification link has been sent to:
+            </Text>
+            <Text style={styles.modalEmail}>{registeredEmail}</Text>
+            <Text style={styles.modalInstruction}>
+              Please check your email and click the verification link to
+              activate your seller account.
+            </Text>
+            <Text style={styles.modalNote}>
+              If you don't see it, check your spam folder.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowVerificationModal(false);
+                router.replace("/auth/login");
+              }}
+            >
+              <Text style={styles.modalButtonText}>Go to Login</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -581,6 +617,73 @@ const styles = StyleSheet.create({
   loginLink: {
     color: "#C35822",
     fontSize: 14,
+    fontWeight: "600",
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 24,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalIcon: {
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+  },
+  modalEmail: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#C35822",
+    marginTop: 8,
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalInstruction: {
+    fontSize: 14,
+    color: "#32221B",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalNote: {
+    fontSize: 12,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  modalButton: {
+    backgroundColor: "#C35822",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    width: "100%",
+    alignItems: "center",
+  },
+  modalButtonText: {
+    color: "#FFF",
+    fontSize: 16,
     fontWeight: "600",
   },
 });
