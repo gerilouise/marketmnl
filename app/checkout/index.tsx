@@ -245,111 +245,37 @@ export default function CheckoutScreen() {
       return;
     }
 
-    if (selectedPayment === "Cash on Delivery") {
-      processOrder();
-    } else {
-      handlePayMongoPayment();
-    }
-  };
-
-  // Handle PayMongo payment
-  const handlePayMongoPayment = async () => {
-    if (!selectedAddress) {
-      Alert.alert("No Address", "Please add a shipping address first");
-      router.push("/checkout/select-address");
-      return;
-    }
-
-    if (checkoutItems.length === 0) {
-      Alert.alert("No Items", "No items selected for checkout");
-      router.push("/(tabs)/cart");
-      return;
-    }
-
-    setIsPayMongoProcessing(true);
-
+    // Check stock before proceeding to payment
+    setIsCheckingStock(true);
     try {
-      let paymentMethodTypes: string[] = [];
-      switch (selectedPayment) {
-        case "GCash":
-          paymentMethodTypes = ["gcash"];
-          break;
-        case "Maya":
-          paymentMethodTypes = ["maya"];
-          break;
-        case "Credit Card":
-          paymentMethodTypes = ["card"];
-          break;
-        default:
-          paymentMethodTypes = ["gcash", "maya", "card"];
+      const stockCheck = await checkAllItemsStock(checkoutItems);
+      
+      if (!stockCheck.allAvailable) {
+        // Show custom stock warning modal
+        setStockWarningItems(stockCheck.insufficientItems);
+        setShowStockWarning(true);
+        setIsCheckingStock(false);
+        return;
       }
-
-      const checkoutItemsList = checkoutItems.map((item) => ({
-        name: item.productName,
-        price: item.productPrice,
-        quantity: item.quantity,
-        id: item.productId,
-      }));
-
-      const user = auth.currentUser;
-
-      const session = await createCheckoutSession({
-        amount: total,
-        description: `Order from MarketMNL`,
-        paymentMethodTypes: paymentMethodTypes,
-        successUrl: "marketmnl://payment-success",
-        failedUrl: "marketmnl://payment-failed",
-        metadata: {
-          userId: user?.uid || "",
-          itemsCount: checkoutItems.length,
-          customerName: selectedAddress.fullName,
-          customerEmail: user?.email || "",
-        },
-        items: checkoutItemsList,
-      });
-
-      const checkoutUrl = session.attributes.checkout_url;
-      console.log("🔗 CHECKOUT URL:", checkoutUrl);
-
-      // For web testing - open in new tab and detect return
-      if (Platform.OS === "web") {
-        // Open PayMongo checkout in a new tab
-        const newWindow = window.open(checkoutUrl, "_blank");
-
-        // Set up a timer to check if the user has returned
-        // This is a workaround for web since we can't directly detect payment completion
-        Alert.alert(
-          "PayMongo Checkout",
-          "Complete your payment in the new tab.\n\nAfter payment is successful, click 'Payment Completed' to confirm your order.",
-          [
-            {
-              text: "Payment Completed",
-              onPress: () => {
-                processOrder({
-                  paymentMethod: selectedPayment,
-                  paymongo: true,
-                });
-              },
-            },
-            {
-              text: "Cancel",
-              style: "cancel",
-            },
-          ],
-        );
-      } else {
-        // For mobile - use WebView
-        setCheckoutUrl(checkoutUrl);
-        setShowPayMongoWebView(true);
+      
+      // Stock is sufficient, proceed with payment
+      if (selectedPayment === "Cash on Delivery") {
+        await processOrder();
+      } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
+        setIsCheckingStock(false);
+        setShowPaymentModal(true);
+      } else if (selectedPayment === "Credit Card") {
+        setIsCheckingStock(false);
+        setShowCreditCardModal(true);
       }
-    } catch (error: any) {
-      console.error("PayMongo error:", error);
+    } catch (error) {
+      console.error("Stock check error:", error);
       Alert.alert(
-        "Payment Error",
-        error.message || "Failed to initialize payment",
+        "❌ Error",
+        "Failed to check stock availability. Please try again.",
+        [{ text: "OK" }]
       );
-    } finally {
-      setIsPayMongoProcessing(false);
+      setIsCheckingStock(false);
     }
   };
 
