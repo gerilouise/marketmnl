@@ -371,9 +371,7 @@ export default function HomeScreen() {
                   )}
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => router.push("/chatbot?from=home")}
-              >
+              <TouchableOpacity onPress={navigateToChat}>
                 <Ionicons
                   name="chatbubble-ellipses-outline"
                   size={24}
