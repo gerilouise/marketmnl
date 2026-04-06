@@ -1,8 +1,8 @@
 // app/(tabs)/add-address.tsx
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
-import React, { useCallback, useState } from "react";
+import { router } from "expo-router";
+import React, { useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -75,7 +75,7 @@ export default function AddAddressScreen() {
     if (success) {
       // Refresh addresses before navigating back
       await fetchAddresses();
-      // Use replace to go back and force refresh
+      // Go back to addresses screen
       router.replace("/(tabs)/addresses");
     }
 
