@@ -1,10 +1,17 @@
 // app/(tabs)/addresses.tsx
 import { AddressData, useFirebaseProfile } from "@/hooks/useFirebaseProfile";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { deleteDoc, doc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,41 +29,81 @@ export default function AddressesScreen() {
   const [deletingAddressId, setDeletingAddressId] = useState<string | null>(
     null,
   );
+  const [localAddresses, setLocalAddresses] = useState<AddressData[]>([]);
 
-  // Debug: Log all addresses in state
+  // Set up real-time listener for addresses
   useEffect(() => {
-    console.log("=== ADDRESSES IN STATE ===");
-    addresses.forEach((addr) => {
-      console.log(`ID: ${addr.id}`);
-      console.log(`Name: ${addr.fullName}`);
-      console.log(`---`);
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const addressesRef = collection(db, "addresses");
+    const q = query(addressesRef, where("userId", "==", user.uid));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const addressesList: AddressData[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        addressesList.push({
+          id: doc.id,
+          fullName: data.fullName || "",
+          phone: data.phone || "",
+          street: data.street || "",
+          barangay: data.barangay || "",
+          city: data.city || "",
+          province: data.province || "",
+          zipCode: data.zipCode || "",
+          label: data.label || "Home",
+          isDefault: data.isDefault || false,
+        } as AddressData);
+      });
+      // Sort: default first, then by creation date
+      addressesList.sort((a, b) => {
+        if (a.isDefault) return -1;
+        if (b.isDefault) return 1;
+        return 0;
+      });
+      setLocalAddresses(addressesList);
     });
-  }, [addresses]);
 
-  // ========== DIRECT DELETE TEST FUNCTION (gaya sa cart) ==========
-  const directDeleteTest = async (addressId: string, addressName: string) => {
-    console.log("=== DIRECT DELETE TEST ===");
-    console.log("Address ID to delete:", addressId);
-    console.log("Address Name:", addressName);
+    return () => unsubscribe();
+  }, []);
 
-    try {
-      const addressRef = doc(db, "addresses", addressId);
-      await deleteDoc(addressRef);
-      console.log("✅ DIRECT DELETE SUCCESSFUL!");
-
-      await fetchAddresses(); // Refresh the addresses list
-      Alert.alert("Success", `"${addressName}" removed from addresses`);
-      return true;
-    } catch (error: any) {
-      console.error("❌ Direct delete failed:", error);
-      Alert.alert("Error", error.message);
-      return false;
-    }
-  };
-  // ==================================================================
+  // Also fetch on focus to ensure sync
+  useFocusEffect(
+    useCallback(() => {
+      fetchAddresses();
+    }, [])
+  );
 
   const handleSetDefault = async (id: string) => {
     await setDefaultAddress(id);
+  };
+
+  const handleDelete = async (addressId: string, addressName: string) => {
+    Alert.alert(
+      "Delete Address",
+      `Are you sure you want to delete "${addressName}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingAddressId(addressId);
+            try {
+              const addressRef = doc(db, "addresses", addressId);
+              await deleteDoc(addressRef);
+              Alert.alert("Success", "Address deleted successfully");
+            } catch (error: any) {
+              console.error("Delete failed:", error);
+              Alert.alert("Error", error.message);
+            } finally {
+              setDeletingAddressId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const renderAddress = ({ item }: { item: AddressData }) => {
@@ -81,14 +128,9 @@ export default function AddressesScreen() {
               <Ionicons name="create-outline" size={20} color="#8F796F" />
             </TouchableOpacity>
 
-            {/* TEST BUTTON - gaya ng sa cart.tsx */}
             <TouchableOpacity
-              style={styles.testDeleteButton}
-              onPress={async () => {
-                setDeletingAddressId(item.id);
-                await directDeleteTest(item.id, item.fullName);
-                setDeletingAddressId(null);
-              }}
+              style={styles.deleteButton}
+              onPress={() => handleDelete(item.id, item.fullName)}
               disabled={isDeleting}
             >
               {isDeleting ? (
@@ -120,7 +162,10 @@ export default function AddressesScreen() {
     );
   };
 
-  if (loading) {
+  // Use localAddresses from real-time listener instead of addresses from hook
+  const displayAddresses = localAddresses.length > 0 ? localAddresses : addresses;
+
+  if (loading && displayAddresses.length === 0) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#C35822" />
@@ -144,7 +189,7 @@ export default function AddressesScreen() {
       </View>
 
       <FlatList
-        data={addresses}
+        data={displayAddresses}
         renderItem={renderAddress}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
@@ -238,7 +283,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 16,
   },
-  testDeleteButton: {
+  deleteButton: {
     backgroundColor: "#db0606",
     width: 32,
     height: 32,

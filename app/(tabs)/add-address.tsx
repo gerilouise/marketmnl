@@ -1,8 +1,8 @@
 // app/(tabs)/add-address.tsx
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddAddressScreen() {
-  const { addAddress, loading } = useFirebaseProfile();
+  const { addAddress, loading, fetchAddresses } = useFirebaseProfile();
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -73,7 +73,10 @@ export default function AddAddressScreen() {
     const success = await addAddress(addressData);
 
     if (success) {
-      router.replace("/(tabs)/addresses"); // Go back to addresses screen
+      // Refresh addresses before navigating back
+      await fetchAddresses();
+      // Use replace to go back and force refresh
+      router.replace("/(tabs)/addresses");
     }
 
     setSaving(false);
