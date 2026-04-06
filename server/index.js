@@ -87,5 +87,5 @@ app.get("/api/health", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 PayMongo server running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`📍 Access from phone: http://192.168.1.4:${PORT}`);
 });
