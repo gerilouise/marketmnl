@@ -18,7 +18,6 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,8 +26,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import PayMongoWebView from "../components/PayMongoWebView";
-import { createCheckoutSession } from "../services/paymongo";
 
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
@@ -67,42 +64,19 @@ const generateOrderNumber = (): string => {
   return `${prefix}-${timestamp}-${random}`;
 };
 
-// Helper function to split shipping fee based on item count
-const splitShippingFee = (
+// Helper function - Each seller gets FULL shipping fee (not split)
+const calculateShippingPerSeller = (
   itemsBySeller: Map<
     string,
     { sellerId: string; sellerName: string; items: any[] }
   >,
-  totalShippingFee: number,
+  baseShippingFee: number,
 ): Map<string, number> => {
-  // Calculate total number of items across all sellers
-  let totalItems = 0;
-  for (const [, sellerData] of itemsBySeller) {
-    totalItems += sellerData.items.length;
-  }
-
-  // Calculate shipping fee per seller based on their item count percentage
   const shippingFeePerSeller = new Map();
-  for (const [sellerId, sellerData] of itemsBySeller) {
-    const itemCount = sellerData.items.length;
-    const percentage = itemCount / totalItems;
-    const sellerShippingFee =
-      Math.round(percentage * totalShippingFee * 100) / 100; // Round to 2 decimals
-    shippingFeePerSeller.set(sellerId, sellerShippingFee);
-  }
 
-  // Adjust for rounding differences (add remaining cents to the first seller)
-  let totalAllocated = 0;
-  for (const fee of shippingFeePerSeller.values()) {
-    totalAllocated += fee;
-  }
-  const difference = totalShippingFee - totalAllocated;
-  if (Math.abs(difference) > 0) {
-    const firstSellerId = itemsBySeller.keys().next().value;
-    shippingFeePerSeller.set(
-      firstSellerId,
-      shippingFeePerSeller.get(firstSellerId) + difference,
-    );
+  // Each seller gets the FULL shipping fee
+  for (const [sellerId] of itemsBySeller) {
+    shippingFeePerSeller.set(sellerId, baseShippingFee);
   }
 
   return shippingFeePerSeller;
@@ -136,11 +110,6 @@ export default function CheckoutScreen() {
   const [cardName, setCardName] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [cvv, setCvv] = useState("");
-
-  // PayMongo states
-  const [showPayMongoWebView, setShowPayMongoWebView] = useState(false);
-  const [checkoutUrl, setCheckoutUrl] = useState("");
-  const [isPayMongoProcessing, setIsPayMongoProcessing] = useState(false);
 
   useEffect(() => {
     loadAddresses();
@@ -200,9 +169,14 @@ export default function CheckoutScreen() {
     );
   };
 
+  // Get unique sellers count
+  const uniqueSellers = new Set(checkoutItems.map((item) => item.sellerId))
+    .size;
+
   const subtotal = calculateSubtotal();
-  const shippingFee = selectedDelivery.price;
-  const total = subtotal + shippingFee;
+  const shippingFeePerSeller = selectedDelivery.price;
+  const totalShippingFee = shippingFeePerSeller * uniqueSellers;
+  const total = subtotal + totalShippingFee;
 
   const handlePaymentSelection = () => {
     if (!selectedAddress) {
@@ -219,108 +193,10 @@ export default function CheckoutScreen() {
 
     if (selectedPayment === "Cash on Delivery") {
       processOrder();
-    } else {
-      handlePayMongoPayment();
-    }
-  };
-
-  // Handle PayMongo payment
-  const handlePayMongoPayment = async () => {
-    if (!selectedAddress) {
-      Alert.alert("No Address", "Please add a shipping address first");
-      router.push("/checkout/select-address");
-      return;
-    }
-
-    if (checkoutItems.length === 0) {
-      Alert.alert("No Items", "No items selected for checkout");
-      router.push("/(tabs)/cart");
-      return;
-    }
-
-    setIsPayMongoProcessing(true);
-
-    try {
-      let paymentMethodTypes: string[] = [];
-      switch (selectedPayment) {
-        case "GCash":
-          paymentMethodTypes = ["gcash"];
-          break;
-        case "Maya":
-          paymentMethodTypes = ["maya"];
-          break;
-        case "Credit Card":
-          paymentMethodTypes = ["card"];
-          break;
-        default:
-          paymentMethodTypes = ["gcash", "maya", "card"];
-      }
-
-      const checkoutItemsList = checkoutItems.map((item) => ({
-        name: item.productName,
-        price: item.productPrice,
-        quantity: item.quantity,
-        id: item.productId,
-      }));
-
-      const user = auth.currentUser;
-
-      const session = await createCheckoutSession({
-        amount: total,
-        description: `Order from MarketMNL`,
-        paymentMethodTypes: paymentMethodTypes,
-        successUrl: "marketmnl://payment-success",
-        failedUrl: "marketmnl://payment-failed",
-        metadata: {
-          userId: user?.uid || "",
-          itemsCount: checkoutItems.length,
-          customerName: selectedAddress.fullName,
-          customerEmail: user?.email || "",
-        },
-        items: checkoutItemsList,
-      });
-
-      const checkoutUrl = session.attributes.checkout_url;
-      console.log("🔗 CHECKOUT URL:", checkoutUrl);
-
-      // For web testing - open in new tab and detect return
-      if (Platform.OS === "web") {
-        // Open PayMongo checkout in a new tab
-        window.open(checkoutUrl, "_blank");
-
-        // For testing purposes, show a button to simulate payment completion
-        Alert.alert(
-          "PayMongo Checkout",
-          "After completing payment in the new tab, click 'Payment Completed' to place your order.",
-          [
-            {
-              text: "Payment Completed",
-              onPress: () => {
-                processOrder({
-                  paymentMethod: selectedPayment,
-                  paymongo: true,
-                });
-              },
-            },
-            {
-              text: "Cancel",
-              style: "cancel",
-            },
-          ],
-        );
-      } else {
-        // For mobile - use WebView
-        setCheckoutUrl(checkoutUrl);
-        setShowPayMongoWebView(true);
-      }
-    } catch (error: any) {
-      console.error("PayMongo error:", error);
-      Alert.alert(
-        "Payment Error",
-        error.message || "Failed to initialize payment",
-      );
-    } finally {
-      setIsPayMongoProcessing(false);
+    } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
+      setShowPaymentModal(true);
+    } else if (selectedPayment === "Credit Card") {
+      setShowCreditCardModal(true);
     }
   };
 
@@ -383,11 +259,14 @@ export default function CheckoutScreen() {
 
       console.log(`📦 Processing orders for ${itemsBySeller.size} seller(s)`);
 
-      // Split the shipping fee among sellers based on item count
-      const shippingFeePerSeller = splitShippingFee(itemsBySeller, shippingFee);
+      // Each seller gets the FULL shipping fee (not split)
+      const shippingFeePerSellerMap = calculateShippingPerSeller(
+        itemsBySeller,
+        shippingFeePerSeller,
+      );
       console.log(
-        "💰 Shipping fee split:",
-        Object.fromEntries(shippingFeePerSeller),
+        "💰 Shipping fee per seller (full amount each):",
+        Object.fromEntries(shippingFeePerSellerMap),
       );
 
       const createdOrders = [];
@@ -400,7 +279,8 @@ export default function CheckoutScreen() {
           (sum, item) => sum + item.productPrice * item.quantity,
           0,
         );
-        const sellerShippingFee = shippingFeePerSeller.get(sellerId) || 0;
+        const sellerShippingFee =
+          shippingFeePerSellerMap.get(sellerId) || shippingFeePerSeller;
         const sellerTotal = sellerSubtotal + sellerShippingFee;
 
         // Generate order number with suffix for multiple sellers
@@ -687,6 +567,7 @@ export default function CheckoutScreen() {
               </TouchableOpacity>
             </View>
           ) : (
+            // Group items by seller for display
             (() => {
               const itemsBySellerForDisplay = new Map();
               for (const item of checkoutItems) {
@@ -719,6 +600,28 @@ export default function CheckoutScreen() {
                         </Text>
                       </View>
                     ))}
+                    {/* Show shipping fee for this seller */}
+                    <View style={styles.sellerShippingRow}>
+                      <Text style={styles.sellerShippingLabel}>
+                        Shipping Fee
+                      </Text>
+                      <Text style={styles.sellerShippingValue}>
+                        ₱{shippingFeePerSeller}
+                      </Text>
+                    </View>
+                    <View style={styles.sellerTotalRow}>
+                      <Text style={styles.sellerTotalLabel}>Seller Total</Text>
+                      <Text style={styles.sellerTotalValue}>
+                        ₱
+                        {(
+                          sellerGroup.items.reduce(
+                            (sum, item) =>
+                              sum + item.productPrice * item.quantity,
+                            0,
+                          ) + shippingFeePerSeller
+                        ).toFixed(2)}
+                      </Text>
+                    </View>
                   </View>
                 ),
               );
@@ -867,12 +770,11 @@ export default function CheckoutScreen() {
               <Text style={styles.priceValue}>₱{subtotal.toFixed(2)}</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Shipping Fee</Text>
-              <Text style={styles.priceValue}>₱{shippingFee.toFixed(2)}</Text>
-            </View>
-            <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Delivery Option</Text>
-              <Text style={styles.priceValue}>{selectedDelivery.name}</Text>
+              <Text style={styles.priceLabel}>Shipping Fee (per seller)</Text>
+              <Text style={styles.priceValue}>
+                ₱{shippingFeePerSeller} x {uniqueSellers} seller
+                {uniqueSellers > 1 ? "s" : ""}
+              </Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.totalRow}>
@@ -1033,22 +935,6 @@ export default function CheckoutScreen() {
         </View>
       </Modal>
 
-      {/* PayMongo WebView Modal */}
-      <PayMongoWebView
-        visible={showPayMongoWebView}
-        checkoutUrl={checkoutUrl}
-        onClose={() => {
-          setShowPayMongoWebView(false);
-          setCheckoutUrl("");
-        }}
-        onSuccess={() => {
-          processOrder({ paymentMethod: selectedPayment, paymongo: true });
-        }}
-        onFailure={(error) => {
-          Alert.alert("Payment Failed", error);
-        }}
-      />
-
       {/* Success Modal */}
       <Modal visible={showOrderSuccess} animationType="fade" transparent>
         <View style={styles.successOverlay}>
@@ -1067,7 +953,8 @@ export default function CheckoutScreen() {
                 : "1 order created"}
             </Text>
             <Text style={styles.deliveryInfoText}>
-              Delivery: {selectedDelivery.name} • ₱{selectedDelivery.price}
+              Delivery: {selectedDelivery.name} • ₱{shippingFeePerSeller} per
+              seller
             </Text>
             <Text style={styles.successMessage}>
               Thank you for shopping with us! Your order(s) have been confirmed.
@@ -1140,6 +1027,9 @@ const styles = StyleSheet.create({
   },
   sellerGroup: {
     marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E0DAD1",
+    paddingBottom: 12,
   },
   sellerGroupName: {
     fontSize: 14,
@@ -1149,6 +1039,42 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
+  },
+  sellerShippingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+    paddingTop: 8,
+  },
+  sellerShippingLabel: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  sellerShippingValue: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#C35822",
+  },
+  sellerTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    marginTop: 4,
+  },
+  sellerTotalLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  sellerTotalValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#C35822",
   },
   emptyCartContainer: { alignItems: "center", paddingVertical: 20 },
   emptyCartText: {

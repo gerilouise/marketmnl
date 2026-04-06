@@ -17,6 +17,7 @@ import {
   Alert,
   Image,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -43,8 +44,13 @@ export default function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<string>("");
-  const { profile, addresses, loading, fetchProfile, fetchAddresses } =
-    useFirebaseProfile();
+  const [refreshing, setRefreshing] = useState(false);
+  const [profileData, setProfileData] = useState<any>(null);
+  const {
+    addresses,
+    loading: profileLoading,
+    fetchAddresses,
+  } = useFirebaseProfile();
 
   // Check if user is logged in (not guest)
   const isLoggedIn = () => {
@@ -73,9 +79,66 @@ export default function ProfileScreen() {
     router.push("/auth/signup-customer");
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (isLoggedIn()) {
+      await fetchAddresses();
+    }
+    setRefreshing(false);
+  };
+
   useEffect(() => {
-    loadData();
+    if (isLoggedIn()) {
+      fetchAddresses();
+    }
   }, []);
+
+  // Set up real-time listener for profile changes
+  useFocusEffect(
+    useCallback(() => {
+      const user = auth.currentUser;
+      if (!user || user.isAnonymous) {
+        setProfileData(null);
+        return;
+      }
+
+      // Listen to profile changes in real-time
+      const profileRef = doc(db, "profiles", user.uid);
+      const unsubscribe = onSnapshot(profileRef, (doc) => {
+        if (doc.exists()) {
+          const data = doc.data();
+          console.log("🔄 Profile updated in real-time:", data);
+          setProfileData({
+            id: doc.id,
+            fullName: data.fullName || "",
+            firstName: data.firstName || "",
+            lastName: data.lastName || "",
+            email: data.email || user.email || "",
+            phone: data.phone || "",
+            photoURL: data.photoURL || null,
+            userType: data.userType || "buyer",
+          });
+        } else {
+          // Create profile if it doesn't exist
+          const newProfile = {
+            fullName: user.displayName || "",
+            firstName: (user.displayName || "").split(" ")[0] || "",
+            lastName:
+              (user.displayName || "").split(" ").slice(1).join(" ") || "",
+            email: user.email || "",
+            phone: "",
+            photoURL: null,
+            userType: "buyer",
+            createdAt: new Date(),
+          };
+          setDoc(profileRef, newProfile);
+          setProfileData({ id: user.uid, ...newProfile });
+        }
+      });
+
+      return () => unsubscribe();
+    }, []),
+  );
 
   // Set up real-time listener for reviews count
   useFocusEffect(
@@ -163,13 +226,6 @@ export default function ProfileScreen() {
     }, []),
   );
 
-  const loadData = async () => {
-    if (isLoggedIn()) {
-      await fetchProfile();
-      await fetchAddresses();
-    }
-  };
-
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -177,6 +233,7 @@ export default function ProfileScreen() {
 
     try {
       await auth.signOut();
+      setProfileData(null);
       setFollowedShops([]);
       setWishlistCount(0);
       setReviewsCount(0);
@@ -343,7 +400,9 @@ export default function ProfileScreen() {
     </Modal>
   );
 
-  if (loading && isLoggedIn()) {
+  const loading = profileLoading && !profileData && isLoggedIn();
+
+  if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#C35822" />
@@ -351,13 +410,23 @@ export default function ProfileScreen() {
     );
   }
 
-  const defaultAddress = addresses?.find((addr) => addr.isDefault);
   const user = auth.currentUser;
   const loggedIn = isLoggedIn();
+  const profile = profileData;
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Profile</Text>
