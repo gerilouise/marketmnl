@@ -1,17 +1,17 @@
 // app/chat.tsx
 import { auth } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -25,6 +25,9 @@ interface Message {
 }
 
 export default function ChatScreen() {
+  const params = useLocalSearchParams();
+  const from = (params.from as string) || "home"; // Get where we came from
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -37,6 +40,17 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
 
   const currentUser = auth.currentUser;
+
+  // Handle back button based on where we came from
+  const handleBack = () => {
+    if (from === "profile") {
+      router.push("/(tabs)/profile");
+    } else if (from === "settings") {
+      router.push("/(tabs)/settings");
+    } else {
+      router.back(); // Default behavior for home or unknown
+    }
+  };
 
   // Initialize chat with greeting
   const initializeChat = () => {
@@ -357,7 +371,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={handleBack} // Updated to use handleBack instead of router.back()
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={24} color="#32221B" />

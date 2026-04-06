@@ -411,17 +411,6 @@ export default function BrowseScreen() {
     }
   };
 
-  const handleAddToCart = (product: any) => {
-    const user = auth.currentUser;
-    if (!user) {
-      showLoginPrompt("cart", product);
-      return;
-    }
-
-    // Navigate to product detail page where cart functionality exists
-    router.push(`/product/${product.id}`);
-  };
-
   const handleShopPress = (shopId: string) => {
     const user = auth.currentUser;
     if (!user) {
@@ -511,16 +500,6 @@ export default function BrowseScreen() {
             </View>
           )}
         </View>
-        <TouchableOpacity
-          style={styles.addToCartButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleAddToCart(item);
-          }}
-        >
-          <Ionicons name="cart-outline" size={14} color="#FFF" />
-          <Text style={styles.addToCartText}>Add to Cart</Text>
-        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
@@ -775,7 +754,7 @@ export default function BrowseScreen() {
         </View>
       ) : viewMode === "products" ? (
         <FlatList
-          key="products-list" // Add this key
+          key="products-list"
           data={filteredProducts}
           renderItem={renderProductItem}
           keyExtractor={(item) => item.id}
@@ -792,7 +771,7 @@ export default function BrowseScreen() {
         />
       ) : (
         <FlatList
-          key="shops-list" // Add this key
+          key="shops-list"
           data={filteredShops}
           renderItem={renderShopItem}
           keyExtractor={(item) => item.id}
@@ -974,17 +953,6 @@ const styles = StyleSheet.create({
   ratingText: { fontSize: 11, color: "#666" },
   reviewCountText: { fontSize: 10, color: "#8F796F", marginLeft: 2 },
   ratingTextNoReview: { fontSize: 11, color: "#8F796F" },
-  addToCartButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#C35822",
-    borderRadius: 20,
-    paddingVertical: 6,
-    gap: 4,
-    marginTop: 4,
-  },
-  addToCartText: { color: "#FFF", fontSize: 11, fontWeight: "600" },
   shopList: { paddingBottom: 100 },
   shopCard: {
     flexDirection: "row",

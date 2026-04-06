@@ -3,7 +3,6 @@ import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -14,7 +13,7 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
-  where,
+  where
 } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
@@ -28,9 +27,8 @@ import {
   Share,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -93,6 +91,19 @@ export default function ProductDetailsScreen() {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const fadeAnim = useState(new Animated.Value(0))[0];
 
+  // Guest login modal states
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    type: "wishlist" | "cart";
+  } | null>(null);
+  const [isGuest, setIsGuest] = useState(true);
+
+  // Check if user is logged in
+  useEffect(() => {
+    const user = auth.currentUser;
+    setIsGuest(!user);
+  }, []);
+
   // Load product data from Firebase
   useEffect(() => {
     loadProduct();
@@ -122,6 +133,27 @@ export default function ProductDetailsScreen() {
     ]).start(() => {
       setShowSuccessPopup(false);
     });
+  };
+
+  // Show login modal for guest users
+  const showLoginPrompt = (type: "wishlist" | "cart") => {
+    setPendingAction({ type });
+    setShowLoginModal(true);
+  };
+
+  const closeLoginModal = () => {
+    setShowLoginModal(false);
+    setPendingAction(null);
+  };
+
+  const handleLogin = () => {
+    setShowLoginModal(false);
+    router.push("/auth/login");
+  };
+
+  const handleSignUp = () => {
+    setShowLoginModal(false);
+    router.push("/auth/signup-customer");
   };
 
   const loadProduct = async () => {
@@ -184,11 +216,11 @@ export default function ProductDetailsScreen() {
       querySnapshot.forEach((doc) => {
         const data = doc.data();
         const isAnonymous = data.isAnonymous || false;
-        
+
         loadedReviews.push({
           id: doc.id,
-          userName: isAnonymous ? "Anonymous" : (data.userName || "Anonymous"),
-          userInitials: isAnonymous ? "AN" : (data.userInitials || "??"),
+          userName: isAnonymous ? "Anonymous" : data.userName || "Anonymous",
+          userInitials: isAnonymous ? "AN" : data.userInitials || "??",
           userId: data.userId,
           rating: data.rating,
           date:
@@ -244,10 +276,7 @@ export default function ProductDetailsScreen() {
   const handleAddToCart = async () => {
     const user = auth.currentUser;
     if (!user) {
-      Alert.alert("Login Required", "Please log in to add items to cart", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") },
-      ]);
+      showLoginPrompt("cart");
       return;
     }
 
@@ -294,10 +323,7 @@ export default function ProductDetailsScreen() {
   const handleToggleWishlist = async () => {
     const user = auth.currentUser;
     if (!user) {
-      Alert.alert("Login Required", "Please log in to add items to wishlist", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Login", onPress: () => router.push("/auth/login") },
-      ]);
+      showLoginPrompt("wishlist");
       return;
     }
 
@@ -345,7 +371,8 @@ export default function ProductDetailsScreen() {
         default: `https://marketmnl.com/product/${product.id}`,
       });
 
-      const shareMessage = `✨ *${product.name}* ✨\n\n` +
+      const shareMessage =
+        `✨ *${product.name}* ✨\n\n` +
         `🏪 Store: ${storeName}\n` +
         `💰 Price: ₱${product.price.toLocaleString()}\n\n` +
         `📝 ${product.description?.substring(0, 150)}${product.description?.length > 150 ? "..." : ""}\n\n` +
@@ -365,7 +392,10 @@ export default function ProductDetailsScreen() {
     } catch (error: any) {
       console.error("Error sharing:", error);
       if (error.message !== "User canceled share dialog") {
-        Alert.alert("Share Failed", "Unable to share at this time. Please try again.");
+        Alert.alert(
+          "Share Failed",
+          "Unable to share at this time. Please try again.",
+        );
       }
     }
   };
@@ -375,6 +405,11 @@ export default function ProductDetailsScreen() {
   };
 
   const navigateToStore = () => {
+    const user = auth.currentUser;
+    if (!user) {
+      showLoginPrompt("cart");
+      return;
+    }
     if (product?.sellerId) {
       router.push(`/store/${product.sellerId}`);
     }
@@ -404,6 +439,58 @@ export default function ProductDetailsScreen() {
   };
 
   const displayedReviews = showAllReviews ? reviews : reviews.slice(0, 3);
+
+  // Login Required Modal Component
+  const LoginRequiredModal = () => (
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={showLoginModal}
+      onRequestClose={closeLoginModal}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.loginModalContent}>
+          <View style={styles.loginModalIcon}>
+            <Ionicons name="log-in-outline" size={60} color="#C35822" />
+          </View>
+          <Text style={styles.loginModalTitle}>Login Required</Text>
+          <Text style={styles.loginModalMessage}>
+            {pendingAction?.type === "wishlist"
+              ? "Please log in to add items to your wishlist"
+              : pendingAction?.type === "cart"
+                ? "Please log in to add items to your cart"
+                : "Please log in to continue"}
+          </Text>
+          <Text style={styles.loginModalSubMessage}>
+            Create an account to enjoy personalized shopping, save your
+            favorites, and track your orders!
+          </Text>
+
+          <View style={styles.loginModalButtons}>
+            <TouchableOpacity
+              style={[styles.loginModalButton, styles.loginButtonModal]}
+              onPress={handleLogin}
+            >
+              <Text style={styles.loginButtonModalText}>Log In</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.loginModalButton, styles.signupButtonModal]}
+              onPress={handleSignUp}
+            >
+              <Text style={styles.signupButtonModalText}>Sign Up</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={styles.loginModalClose}
+            onPress={closeLoginModal}
+          >
+            <Text style={styles.loginModalCloseText}>Maybe Later</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   if (loading) {
     return (
@@ -715,8 +802,14 @@ export default function ProductDetailsScreen() {
                           </Text>
                           {review.isAnonymous && (
                             <View style={styles.anonymousBadge}>
-                              <Ionicons name="eye-off-outline" size={10} color="#8F796F" />
-                              <Text style={styles.anonymousBadgeText}>Anonymous</Text>
+                              <Ionicons
+                                name="eye-off-outline"
+                                size={10}
+                                color="#8F796F"
+                              />
+                              <Text style={styles.anonymousBadgeText}>
+                                Anonymous
+                              </Text>
                             </View>
                           )}
                         </View>
@@ -806,6 +899,9 @@ export default function ProductDetailsScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Login Required Modal */}
+      <LoginRequiredModal />
     </SafeAreaView>
   );
 }
@@ -1345,5 +1441,91 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#32221B",
     fontWeight: "500",
+  },
+  // Login Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loginModalContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 24,
+    padding: 24,
+    width: "85%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  loginModalIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#FEF5ED",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  loginModalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#32221B",
+    marginBottom: 8,
+  },
+  loginModalMessage: {
+    fontSize: 16,
+    color: "#32221B",
+    textAlign: "center",
+    marginBottom: 8,
+    fontWeight: "500",
+  },
+  loginModalSubMessage: {
+    fontSize: 13,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 18,
+  },
+  loginModalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+    marginBottom: 16,
+  },
+  loginModalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: "center",
+  },
+  loginButtonModal: {
+    backgroundColor: "#C35822",
+  },
+  loginButtonModalText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  signupButtonModal: {
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#C35822",
+  },
+  signupButtonModalText: {
+    color: "#C35822",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  loginModalClose: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  loginModalCloseText: {
+    color: "#8F796F",
+    fontSize: 14,
   },
 });

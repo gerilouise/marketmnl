@@ -66,10 +66,22 @@ export default function RootLayout() {
             options={{ headerShown: false }}
           />
           <Stack.Screen name="legal" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)/chat-list" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)/chat-detail" options={{ headerShown: false }} />
-          <Stack.Screen name="(seller)/chat-list" options={{ headerShown: false }} />
-          <Stack.Screen name="(seller)/chat-detail" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="(tabs)/chat-list"
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="(tabs)/chat-detail"
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="(seller)/chat-list"
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="(seller)/chat-detail"
+            options={{ headerShown: false }}
+          />
         </Stack>
       </ChatProvider>
     </CartProvider>

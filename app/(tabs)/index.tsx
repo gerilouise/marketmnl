@@ -2,32 +2,31 @@
 import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { db } from "@/lib/firebase";
-import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
   query,
   where,
-  Timestamp,
-  doc,
-  getDoc,
 } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   Image,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  RefreshControl,
-  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -111,39 +110,38 @@ export default function HomeScreen() {
     try {
       setLoading(true);
       const productsRef = collection(db, "products");
-      
+
       // Get all products ordered by createdAt
       const allProductsQuery = query(
         productsRef,
         orderBy("createdAt", "desc"),
-        limit(20)
+        limit(20),
       );
       const allProductsSnapshot = await getDocs(allProductsQuery);
       const productsList: any[] = [];
-      
+
       for (const doc of allProductsSnapshot.docs) {
         const data = doc.data();
         // Get seller store name for each product
         const sellerStoreName = await getSellerStoreName(data.sellerId);
-        
-        productsList.push({ 
-          id: doc.id, 
+
+        productsList.push({
+          id: doc.id,
           ...data,
           rating: data.rating || 4.5,
           sellerName: sellerStoreName,
-          sellerStoreName: sellerStoreName
+          sellerStoreName: sellerStoreName,
         });
       }
-      
+
       console.log(`Fetched ${productsList.length} products`);
-      
+
       // Separate products into featured and new arrivals
       setFeaturedProducts(productsList.slice(0, 4));
       setNewArrivals(productsList.slice(4, 7));
-      
+
       console.log(`Featured: ${productsList.slice(0, 4).length} products`);
       console.log(`New Arrivals: ${productsList.slice(4, 7).length} products`);
-      
     } catch (error) {
       console.error("Error fetching products:", error);
       Alert.alert("Error", "Failed to load products");
@@ -168,7 +166,7 @@ export default function HomeScreen() {
     useCallback(() => {
       loadUnreadNotifications();
       fetchProducts();
-    }, [])
+    }, []),
   );
 
   const toggleWishlist = (productId: string) => {
@@ -264,7 +262,9 @@ export default function HomeScreen() {
       </Text>
       <View style={styles.productRating}>
         <Ionicons name="star" size={12} color="#FFD700" />
-        <Text style={styles.ratingText}>{item.rating?.toFixed(1) || "4.5"}</Text>
+        <Text style={styles.ratingText}>
+          {item.rating?.toFixed(1) || "4.5"}
+        </Text>
       </View>
       <Text style={styles.productPrice}>₱{item.price?.toLocaleString()}</Text>
     </TouchableOpacity>
@@ -297,9 +297,13 @@ export default function HomeScreen() {
         </Text>
         <View style={styles.newArrivalRating}>
           <Ionicons name="star" size={12} color="#FFD700" />
-          <Text style={styles.ratingText}>{item.rating?.toFixed(1) || "4.5"}</Text>
+          <Text style={styles.ratingText}>
+            {item.rating?.toFixed(1) || "4.5"}
+          </Text>
         </View>
-        <Text style={styles.newArrivalPrice}>₱{item.price?.toLocaleString()}</Text>
+        <Text style={styles.newArrivalPrice}>
+          ₱{item.price?.toLocaleString()}
+        </Text>
       </View>
       <TouchableOpacity
         style={styles.addButton}
@@ -326,7 +330,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -367,8 +371,14 @@ export default function HomeScreen() {
                   )}
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity onPress={navigateToChat}>
-                <Ionicons name="chatbubble-outline" size={24} color="#32221B" />
+              <TouchableOpacity
+                onPress={() => router.push("/chatbot?from=home")}
+              >
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={24}
+                  color="#32221B"
+                />
               </TouchableOpacity>
             </View>
           </View>
@@ -489,7 +499,11 @@ export default function HomeScreen() {
         activeOpacity={0.8}
       >
         <View style={styles.chatButtonInner}>
-          <MaterialCommunityIcons name="robot-outline" size={30} color="white" />
+          <MaterialCommunityIcons
+            name="robot-outline"
+            size={30}
+            color="white"
+          />
         </View>
       </TouchableOpacity>
     </SafeAreaView>

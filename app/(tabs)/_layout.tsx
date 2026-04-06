@@ -68,90 +68,95 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 👇 HIDE ORDERS TAB FROM NAVBAR 👇 */}
+      {/* 👇 HIDE THESE TABS FROM NAVBAR 👇 */}
       <Tabs.Screen
         name="orders"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
-      {/* 👇 HIDE CHAT TAB FROM NAVBAR 👇 */}
       <Tabs.Screen
         name="chatbot"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
-      {/* 👇 EXPLICITLY HIDE THESE SCREENS 👇 */}
       <Tabs.Screen
         name="edit-profile"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="addresses"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="add-address"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="edit-address"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="chat-list"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="chat-detail"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="following"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="notifications"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="order-tracking"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
         }}
       />
 
       <Tabs.Screen
         name="my-reviews"
         options={{
-          href: null, // Hide from tab bar
+          href: null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
