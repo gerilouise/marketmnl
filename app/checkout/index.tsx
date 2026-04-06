@@ -18,7 +18,6 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,8 +26,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import PayMongoWebView from "../components/PayMongoWebView";
-import { createCheckoutSession } from "../services/paymongo";
 
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
@@ -67,45 +64,61 @@ const generateOrderNumber = (): string => {
   return `${prefix}-${timestamp}-${random}`;
 };
 
-// Helper function to split shipping fee based on item count
-const splitShippingFee = (
+// Helper function - Each seller gets FULL shipping fee (not split)
+const calculateShippingPerSeller = (
   itemsBySeller: Map<
     string,
     { sellerId: string; sellerName: string; items: any[] }
   >,
-  totalShippingFee: number,
+  baseShippingFee: number,
 ): Map<string, number> => {
-  // Calculate total number of items across all sellers
-  let totalItems = 0;
-  for (const [, sellerData] of itemsBySeller) {
-    totalItems += sellerData.items.length;
-  }
-
-  // Calculate shipping fee per seller based on their item count percentage
   const shippingFeePerSeller = new Map();
-  for (const [sellerId, sellerData] of itemsBySeller) {
-    const itemCount = sellerData.items.length;
-    const percentage = itemCount / totalItems;
-    const sellerShippingFee =
-      Math.round(percentage * totalShippingFee * 100) / 100; // Round to 2 decimals
-    shippingFeePerSeller.set(sellerId, sellerShippingFee);
-  }
 
-  // Adjust for rounding differences (add remaining cents to the first seller)
-  let totalAllocated = 0;
-  for (const fee of shippingFeePerSeller.values()) {
-    totalAllocated += fee;
-  }
-  const difference = totalShippingFee - totalAllocated;
-  if (Math.abs(difference) > 0) {
-    const firstSellerId = itemsBySeller.keys().next().value;
-    shippingFeePerSeller.set(
-      firstSellerId,
-      shippingFeePerSeller.get(firstSellerId) + difference,
-    );
+  // Each seller gets the FULL shipping fee
+  for (const [sellerId] of itemsBySeller) {
+    shippingFeePerSeller.set(sellerId, baseShippingFee);
   }
 
   return shippingFeePerSeller;
+};
+
+// Helper function to check stock for all items with detailed results
+const checkAllItemsStock = async (items: any[]): Promise<{
+  allAvailable: boolean;
+  insufficientItems: { productName: string; requested: number; available: number; sellerName: string }[];
+  totalIssues: number;
+}> => {
+  const insufficientItems: { productName: string; requested: number; available: number; sellerName: string }[] = [];
+
+  for (const item of items) {
+    const productRef = doc(db, "products", item.productId);
+    const productSnap = await getDoc(productRef);
+
+    if (!productSnap.exists()) {
+      insufficientItems.push({
+        productName: item.productName,
+        requested: item.quantity,
+        available: 0,
+        sellerName: item.sellerName || "Unknown Seller",
+      });
+    } else {
+      const currentStock = productSnap.data().stockQuantity || 0;
+      if (currentStock < item.quantity) {
+        insufficientItems.push({
+          productName: item.productName,
+          requested: item.quantity,
+          available: currentStock,
+          sellerName: item.sellerName || "Unknown Seller",
+        });
+      }
+    }
+  }
+
+  return {
+    allAvailable: insufficientItems.length === 0,
+    insufficientItems,
+    totalIssues: insufficientItems.length,
+  };
 };
 
 export default function CheckoutScreen() {
@@ -117,7 +130,10 @@ export default function CheckoutScreen() {
   const [selectedPayment, setSelectedPayment] = useState("Cash on Delivery");
   const [selectedDelivery, setSelectedDelivery] = useState(DELIVERY_OPTIONS[0]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isCheckingStock, setIsCheckingStock] = useState(false);
   const [showOrderSuccess, setShowOrderSuccess] = useState(false);
+  const [showStockWarning, setShowStockWarning] = useState(false);
+  const [stockWarningItems, setStockWarningItems] = useState<{ productName: string; requested: number; available: number; sellerName: string }[]>([]);
   const [orderNumber, setOrderNumber] = useState("");
   const [orderCount, setOrderCount] = useState(1);
   const [isAddressSelectedFromModal, setIsAddressSelectedFromModal] =
@@ -136,11 +152,6 @@ export default function CheckoutScreen() {
   const [cardName, setCardName] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [cvv, setCvv] = useState("");
-
-  // PayMongo states
-  const [showPayMongoWebView, setShowPayMongoWebView] = useState(false);
-  const [checkoutUrl, setCheckoutUrl] = useState("");
-  const [isPayMongoProcessing, setIsPayMongoProcessing] = useState(false);
 
   useEffect(() => {
     loadAddresses();
@@ -200,128 +211,71 @@ export default function CheckoutScreen() {
     );
   };
 
+  // Get unique sellers count
+  const uniqueSellers = new Set(checkoutItems.map((item) => item.sellerId))
+    .size;
+
   const subtotal = calculateSubtotal();
-  const shippingFee = selectedDelivery.price;
-  const total = subtotal + shippingFee;
+  const shippingFeePerSeller = selectedDelivery.price;
+  const totalShippingFee = shippingFeePerSeller * uniqueSellers;
+  const total = subtotal + totalShippingFee;
 
-  const handlePaymentSelection = () => {
+  const handlePaymentSelection = async () => {
     if (!selectedAddress) {
-      Alert.alert("No Address", "Please add a shipping address first");
-      router.push("/checkout/select-address");
-      return;
-    }
-
-    if (checkoutItems.length === 0) {
-      Alert.alert("No Items", "No items selected for checkout");
-      router.push("/(tabs)/cart");
-      return;
-    }
-
-    if (selectedPayment === "Cash on Delivery") {
-      processOrder();
-    } else {
-      handlePayMongoPayment();
-    }
-  };
-
-  // Handle PayMongo payment
-  const handlePayMongoPayment = async () => {
-    if (!selectedAddress) {
-      Alert.alert("No Address", "Please add a shipping address first");
-      router.push("/checkout/select-address");
-      return;
-    }
-
-    if (checkoutItems.length === 0) {
-      Alert.alert("No Items", "No items selected for checkout");
-      router.push("/(tabs)/cart");
-      return;
-    }
-
-    setIsPayMongoProcessing(true);
-
-    try {
-      let paymentMethodTypes: string[] = [];
-      switch (selectedPayment) {
-        case "GCash":
-          paymentMethodTypes = ["gcash"];
-          break;
-        case "Maya":
-          paymentMethodTypes = ["maya"];
-          break;
-        case "Credit Card":
-          paymentMethodTypes = ["card"];
-          break;
-        default:
-          paymentMethodTypes = ["gcash", "maya", "card"];
-      }
-
-      const checkoutItemsList = checkoutItems.map((item) => ({
-        name: item.productName,
-        price: item.productPrice,
-        quantity: item.quantity,
-        id: item.productId,
-      }));
-
-      const user = auth.currentUser;
-
-      const session = await createCheckoutSession({
-        amount: total,
-        description: `Order from MarketMNL`,
-        paymentMethodTypes: paymentMethodTypes,
-        successUrl: "marketmnl://payment-success",
-        failedUrl: "marketmnl://payment-failed",
-        metadata: {
-          userId: user?.uid || "",
-          itemsCount: checkoutItems.length,
-          customerName: selectedAddress.fullName,
-          customerEmail: user?.email || "",
+      Alert.alert("📍 No Address", "Please add a shipping address first", [
+        {
+          text: "Add Address",
+          onPress: () => router.push("/checkout/select-address"),
         },
-        items: checkoutItemsList,
-      });
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+      ]);
+      return;
+    }
 
-      const checkoutUrl = session.attributes.checkout_url;
-      console.log("🔗 CHECKOUT URL:", checkoutUrl);
+    if (checkoutItems.length === 0) {
+      Alert.alert("🛒 No Items", "No items selected for checkout", [
+        {
+          text: "Go to Cart",
+          onPress: () => router.push("/(tabs)/cart"),
+        },
+      ]);
+      return;
+    }
 
-      // For web testing - open in new tab and detect return
-      if (Platform.OS === "web") {
-        // Open PayMongo checkout in a new tab
-        const newWindow = window.open(checkoutUrl, "_blank");
-
-        // Set up a timer to check if the user has returned
-        // This is a workaround for web since we can't directly detect payment completion
-        Alert.alert(
-          "PayMongo Checkout",
-          "Complete your payment in the new tab.\n\nAfter payment is successful, click 'Payment Completed' to confirm your order.",
-          [
-            {
-              text: "Payment Completed",
-              onPress: () => {
-                processOrder({
-                  paymentMethod: selectedPayment,
-                  paymongo: true,
-                });
-              },
-            },
-            {
-              text: "Cancel",
-              style: "cancel",
-            },
-          ],
-        );
-      } else {
-        // For mobile - use WebView
-        setCheckoutUrl(checkoutUrl);
-        setShowPayMongoWebView(true);
+    // Check stock before proceeding to payment
+    setIsCheckingStock(true);
+    try {
+      const stockCheck = await checkAllItemsStock(checkoutItems);
+      
+      if (!stockCheck.allAvailable) {
+        // Show custom stock warning modal
+        setStockWarningItems(stockCheck.insufficientItems);
+        setShowStockWarning(true);
+        setIsCheckingStock(false);
+        return;
       }
-    } catch (error: any) {
-      console.error("PayMongo error:", error);
+      
+      // Stock is sufficient, proceed with payment
+      if (selectedPayment === "Cash on Delivery") {
+        await processOrder();
+      } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
+        setIsCheckingStock(false);
+        setShowPaymentModal(true);
+      } else if (selectedPayment === "Credit Card") {
+        setIsCheckingStock(false);
+        setShowCreditCardModal(true);
+      }
+    } catch (error) {
+      console.error("Stock check error:", error);
       Alert.alert(
-        "Payment Error",
-        error.message || "Failed to initialize payment",
+        "❌ Error",
+        "Failed to check stock availability. Please try again.",
+        [{ text: "OK" }]
       );
-    } finally {
-      setIsPayMongoProcessing(false);
+      setIsCheckingStock(false);
     }
   };
 
@@ -335,6 +289,20 @@ export default function CheckoutScreen() {
         setIsProcessing(false);
         return;
       }
+
+      // DOUBLE CHECK: Verify stock again before processing (in case stock changed during payment)
+      console.log("🔍 Double checking stock before finalizing order...");
+      const stockCheck = await checkAllItemsStock(checkoutItems);
+      
+      if (!stockCheck.allAvailable) {
+        // Show custom stock warning modal
+        setStockWarningItems(stockCheck.insufficientItems);
+        setShowStockWarning(true);
+        setIsProcessing(false);
+        return;
+      }
+      
+      console.log("✅ All items have sufficient stock");
 
       // Group items by seller
       const itemsBySeller = new Map();
@@ -360,35 +328,16 @@ export default function CheckoutScreen() {
         itemsBySeller.get(item.sellerId).items.push(item);
       }
 
-      // First, check if all items have sufficient stock
-      for (const item of checkoutItems) {
-        const productRef = doc(db, "products", item.productId);
-        const productSnap = await getDoc(productRef);
-
-        if (productSnap.exists()) {
-          const currentStock = productSnap.data().stockQuantity || 0;
-          if (currentStock < item.quantity) {
-            Alert.alert(
-              "Insufficient Stock",
-              `${item.productName} only has ${currentStock} items in stock. Please reduce quantity.`,
-            );
-            setIsProcessing(false);
-            return;
-          }
-        } else {
-          Alert.alert("Error", `Product ${item.productName} not found`);
-          setIsProcessing(false);
-          return;
-        }
-      }
-
       console.log(`📦 Processing orders for ${itemsBySeller.size} seller(s)`);
 
-      // Split the shipping fee among sellers based on item count
-      const shippingFeePerSeller = splitShippingFee(itemsBySeller, shippingFee);
+      // Each seller gets the FULL shipping fee (not split)
+      const shippingFeePerSellerMap = calculateShippingPerSeller(
+        itemsBySeller,
+        shippingFeePerSeller,
+      );
       console.log(
-        "💰 Shipping fee split:",
-        Object.fromEntries(shippingFeePerSeller),
+        "💰 Shipping fee per seller (full amount each):",
+        Object.fromEntries(shippingFeePerSellerMap),
       );
 
       const createdOrders = [];
@@ -401,16 +350,15 @@ export default function CheckoutScreen() {
           (sum, item) => sum + item.productPrice * item.quantity,
           0,
         );
-        const sellerShippingFee = shippingFeePerSeller.get(sellerId) || 0;
+        const sellerShippingFee =
+          shippingFeePerSellerMap.get(sellerId) || shippingFeePerSeller;
         const sellerTotal = sellerSubtotal + sellerShippingFee;
 
         // Generate order number with suffix for multiple sellers
         let orderNumberForSeller;
         if (itemsBySeller.size === 1) {
-          // Single seller - no suffix needed
           orderNumberForSeller = generateOrderNumber();
         } else {
-          // Multiple sellers - add suffix (A, B, C, etc.)
           orderNumberForSeller = `${generateOrderNumber()}-${orderSuffix}`;
           orderSuffix = String.fromCharCode(orderSuffix.charCodeAt(0) + 1);
         }
@@ -559,8 +507,9 @@ export default function CheckoutScreen() {
     } catch (error: any) {
       console.error("❌ Order error:", error);
       Alert.alert(
-        "Error",
+        "❌ Order Failed",
         error.message || "Failed to place order. Please try again.",
+        [{ text: "OK" }]
       );
     } finally {
       setIsProcessing(false);
@@ -649,6 +598,7 @@ export default function CheckoutScreen() {
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
+          <Text style={styles.loadingText}>Loading your information...</Text>
         </View>
       </SafeAreaView>
     );
@@ -720,6 +670,27 @@ export default function CheckoutScreen() {
                         </Text>
                       </View>
                     ))}
+                    <View style={styles.sellerShippingRow}>
+                      <Text style={styles.sellerShippingLabel}>
+                        Shipping Fee
+                      </Text>
+                      <Text style={styles.sellerShippingValue}>
+                        ₱{shippingFeePerSeller}
+                      </Text>
+                    </View>
+                    <View style={styles.sellerTotalRow}>
+                      <Text style={styles.sellerTotalLabel}>Seller Total</Text>
+                      <Text style={styles.sellerTotalValue}>
+                        ₱
+                        {(
+                          sellerGroup.items.reduce(
+                            (sum, item) =>
+                              sum + item.productPrice * item.quantity,
+                            0,
+                          ) + shippingFeePerSeller
+                        ).toFixed(2)}
+                      </Text>
+                    </View>
                   </View>
                 ),
               );
@@ -868,12 +839,11 @@ export default function CheckoutScreen() {
               <Text style={styles.priceValue}>₱{subtotal.toFixed(2)}</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Shipping Fee</Text>
-              <Text style={styles.priceValue}>₱{shippingFee.toFixed(2)}</Text>
-            </View>
-            <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Delivery Option</Text>
-              <Text style={styles.priceValue}>{selectedDelivery.name}</Text>
+              <Text style={styles.priceLabel}>Shipping Fee (per seller)</Text>
+              <Text style={styles.priceValue}>
+                ₱{shippingFeePerSeller} x {uniqueSellers} seller
+                {uniqueSellers > 1 ? "s" : ""}
+              </Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.totalRow}>
@@ -891,18 +861,23 @@ export default function CheckoutScreen() {
         <TouchableOpacity
           style={[
             styles.placeOrderButton,
-            (!selectedAddress || isProcessing || checkoutItems.length === 0) &&
+            (!selectedAddress || isProcessing || isCheckingStock || checkoutItems.length === 0) &&
               styles.placeOrderButtonDisabled,
           ]}
           onPress={handlePaymentSelection}
           disabled={
-            !selectedAddress || isProcessing || checkoutItems.length === 0
+            !selectedAddress || isProcessing || isCheckingStock || checkoutItems.length === 0
           }
         >
-          {isProcessing ? (
+          {isCheckingStock ? (
             <View style={styles.processingContainer}>
               <ActivityIndicator size="small" color="#FFF" />
-              <Text style={styles.placeOrderText}>Processing...</Text>
+              <Text style={styles.placeOrderText}>Checking stock...</Text>
+            </View>
+          ) : isProcessing ? (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator size="small" color="#FFF" />
+              <Text style={styles.placeOrderText}>Processing order...</Text>
             </View>
           ) : (
             <Text style={styles.placeOrderText}>
@@ -911,6 +886,65 @@ export default function CheckoutScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Stock Warning Modal - Custom Popup like Order Success Modal */}
+      <Modal visible={showStockWarning} animationType="fade" transparent>
+        <View style={styles.warningOverlay}>
+          <View style={styles.warningContent}>
+            <View style={styles.warningIcon}>
+              <Ionicons name="alert-circle" size={60} color="#FF6B35" />
+            </View>
+            <Text style={styles.warningTitle}>Insufficient Stock</Text>
+            <Text style={styles.warningSubtitle}>
+              The following items have stock issues:
+            </Text>
+            
+            <ScrollView style={styles.warningListContainer}>
+              {stockWarningItems.map((item, index) => (
+                <View key={index} style={styles.warningItem}>
+                  <View style={styles.warningItemHeader}>
+                    <Text style={styles.warningProductName}>{item.productName}</Text>
+                    <Text style={styles.warningSellerName}>{item.sellerName}</Text>
+                  </View>
+                  <View style={styles.warningItemDetails}>
+                    <Text style={styles.warningRequested}>
+                      Requested: {item.requested}
+                    </Text>
+                    <Text style={styles.warningAvailable}>
+                      Available: {item.available}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            
+            <Text style={styles.warningMessage}>
+              Please update your cart and try again.
+            </Text>
+            
+            <TouchableOpacity
+              style={styles.warningButton}
+              onPress={() => {
+                setShowStockWarning(false);
+                setStockWarningItems([]);
+                router.push("/(tabs)/cart");
+              }}
+            >
+              <Text style={styles.warningButtonText}>Go to Cart</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.warningCancelButton}
+              onPress={() => {
+                setShowStockWarning(false);
+                setStockWarningItems([]);
+              }}
+            >
+              <Text style={styles.warningCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* GCash/Maya Modal */}
       <Modal visible={showPaymentModal} animationType="slide" transparent>
@@ -947,8 +981,18 @@ export default function CheckoutScreen() {
 
             <TouchableOpacity
               style={styles.confirmButton}
-              onPress={() => {
+              onPress={async () => {
                 if (validateGCashMaya()) {
+                  // Check stock again before processing
+                  setIsProcessing(true);
+                  const stockCheck = await checkAllItemsStock(checkoutItems);
+                  if (!stockCheck.allAvailable) {
+                    setShowPaymentModal(false);
+                    setStockWarningItems(stockCheck.insufficientItems);
+                    setShowStockWarning(true);
+                    setIsProcessing(false);
+                    return;
+                  }
                   processOrder({ phoneNumber, referenceNumber });
                 }
               }}
@@ -1020,8 +1064,18 @@ export default function CheckoutScreen() {
 
             <TouchableOpacity
               style={styles.confirmButton}
-              onPress={() => {
+              onPress={async () => {
                 if (validateCreditCard()) {
+                  // Check stock again before processing
+                  setIsProcessing(true);
+                  const stockCheck = await checkAllItemsStock(checkoutItems);
+                  if (!stockCheck.allAvailable) {
+                    setShowCreditCardModal(false);
+                    setStockWarningItems(stockCheck.insufficientItems);
+                    setShowStockWarning(true);
+                    setIsProcessing(false);
+                    return;
+                  }
                   processOrder({ cardNumber, cardName, expiryDate, cvv });
                 }
               }}
@@ -1033,22 +1087,6 @@ export default function CheckoutScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* PayMongo WebView Modal */}
-      <PayMongoWebView
-        visible={showPayMongoWebView}
-        checkoutUrl={checkoutUrl}
-        onClose={() => {
-          setShowPayMongoWebView(false);
-          setCheckoutUrl("");
-        }}
-        onSuccess={() => {
-          processOrder({ paymentMethod: selectedPayment, paymongo: true });
-        }}
-        onFailure={(error) => {
-          Alert.alert("Payment Failed", error);
-        }}
-      />
 
       {/* Success Modal */}
       <Modal visible={showOrderSuccess} animationType="fade" transparent>
@@ -1068,7 +1106,8 @@ export default function CheckoutScreen() {
                 : "1 order created"}
             </Text>
             <Text style={styles.deliveryInfoText}>
-              Delivery: {selectedDelivery.name} • ₱{selectedDelivery.price}
+              Delivery: {selectedDelivery.name} • ₱{shippingFeePerSeller} per
+              seller
             </Text>
             <Text style={styles.successMessage}>
               Thank you for shopping with us! Your order(s) have been confirmed.
@@ -1121,6 +1160,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#8F796F",
+  },
   scrollContent: { padding: 16 },
   section: {
     backgroundColor: "#FFF",
@@ -1141,6 +1185,9 @@ const styles = StyleSheet.create({
   },
   sellerGroup: {
     marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E0DAD1",
+    paddingBottom: 12,
   },
   sellerGroupName: {
     fontSize: 14,
@@ -1150,6 +1197,42 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
+  },
+  sellerShippingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+    paddingTop: 8,
+  },
+  sellerShippingLabel: {
+    fontSize: 12,
+    color: "#8F796F",
+  },
+  sellerShippingValue: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#C35822",
+  },
+  sellerTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    marginTop: 4,
+  },
+  sellerTotalLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#32221B",
+  },
+  sellerTotalValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#C35822",
   },
   emptyCartContainer: { alignItems: "center", paddingVertical: 20 },
   emptyCartText: {
@@ -1396,6 +1479,108 @@ const styles = StyleSheet.create({
   placeOrderButtonDisabled: { backgroundColor: "#E0DAD1" },
   placeOrderText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   processingContainer: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+  // Warning Modal Styles (similar to success modal)
+  warningOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  warningContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "85%",
+    maxHeight: "80%",
+    alignItems: "center",
+  },
+  warningIcon: { marginBottom: 16 },
+  warningTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#FF6B35",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  warningSubtitle: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  warningListContainer: {
+    maxHeight: 250,
+    width: "100%",
+    marginBottom: 16,
+  },
+  warningItem: {
+    backgroundColor: "#FFF9F5",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#FFE0D0",
+  },
+  warningItemHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  warningProductName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+    flex: 1,
+  },
+  warningSellerName: {
+    fontSize: 11,
+    color: "#C35822",
+  },
+  warningItemDetails: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  warningRequested: {
+    fontSize: 12,
+    color: "#FF6B35",
+  },
+  warningAvailable: {
+    fontSize: 12,
+    color: "#4CAF50",
+  },
+  warningMessage: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  warningButton: {
+    backgroundColor: "#C35822",
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginBottom: 12,
+    width: "100%",
+  },
+  warningButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  warningCancelButton: {
+    paddingVertical: 12,
+    width: "100%",
+  },
+  warningCancelButtonText: {
+    color: "#8F796F",
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+  },
 
   modalOverlay: {
     flex: 1,

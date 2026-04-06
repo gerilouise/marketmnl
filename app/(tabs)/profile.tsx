@@ -17,6 +17,7 @@ import {
   Alert,
   Image,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -26,12 +27,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+
 interface FollowedShop {
   id: string;
   storeName: string;
   storeImage?: string;
   description?: string;
 }
+
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -43,8 +46,14 @@ export default function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<string>("");
-  const { profile, addresses, loading, fetchProfile, fetchAddresses } =
-    useFirebaseProfile();
+  const [refreshing, setRefreshing] = useState(false);
+  const [profileData, setProfileData] = useState<any>(null);
+  const {
+    addresses,
+    loading: profileLoading,
+    fetchAddresses,
+  } = useFirebaseProfile();
+
 
   // Check if user is logged in (not guest)
   const isLoggedIn = () => {
@@ -52,30 +61,97 @@ export default function ProfileScreen() {
     return user !== null && !user.isAnonymous;
   };
 
+
   // Show login modal for guest users
   const showLoginPrompt = (action: string) => {
     setPendingAction(action);
     setShowLoginModal(true);
   };
 
+
   const closeLoginModal = () => {
     setShowLoginModal(false);
     setPendingAction("");
   };
+
 
   const handleLogin = () => {
     setShowLoginModal(false);
     router.push("/auth/login");
   };
 
+
   const handleSignUp = () => {
     setShowLoginModal(false);
     router.push("/auth/signup-customer");
   };
 
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (isLoggedIn()) {
+      await fetchAddresses();
+    }
+    setRefreshing(false);
+  };
+
+
   useEffect(() => {
-    loadData();
+    if (isLoggedIn()) {
+      fetchAddresses();
+    }
   }, []);
+
+
+  // Set up real-time listener for profile changes
+  useFocusEffect(
+    useCallback(() => {
+      const user = auth.currentUser;
+      if (!user || user.isAnonymous) {
+        setProfileData(null);
+        return;
+      }
+
+
+      // Listen to profile changes in real-time
+      const profileRef = doc(db, "profiles", user.uid);
+      const unsubscribe = onSnapshot(profileRef, (doc) => {
+        if (doc.exists()) {
+          const data = doc.data();
+          console.log("🔄 Profile updated in real-time:", data);
+          setProfileData({
+            id: doc.id,
+            fullName: data.fullName || "",
+            firstName: data.firstName || "",
+            lastName: data.lastName || "",
+            email: data.email || user.email || "",
+            phone: data.phone || "",
+            photoURL: data.photoURL || null,
+            userType: data.userType || "buyer",
+          });
+        } else {
+          // Create profile if it doesn't exist
+          const newProfile = {
+            fullName: user.displayName || "",
+            firstName: (user.displayName || "").split(" ")[0] || "",
+            lastName:
+              (user.displayName || "").split(" ").slice(1).join(" ") || "",
+            email: user.email || "",
+            phone: "",
+            photoURL: null,
+            userType: "buyer",
+            createdAt: new Date(),
+          };
+          setDoc(profileRef, newProfile);
+          setProfileData({ id: user.uid, ...newProfile });
+        }
+      });
+
+
+      return () => unsubscribe();
+    }, []),
+  );
+
 
   // Set up real-time listener for reviews count
   useFocusEffect(
@@ -86,16 +162,20 @@ export default function ProfileScreen() {
         return;
       }
 
+
       const reviewsRef = collection(db, "reviews");
       const q = query(reviewsRef, where("userId", "==", user.uid));
+
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setReviewsCount(snapshot.size);
       });
 
+
       return () => unsubscribe();
     }, []),
   );
+
 
   // Set up real-time listener for wishlist count
   useFocusEffect(
@@ -106,16 +186,20 @@ export default function ProfileScreen() {
         return;
       }
 
+
       const wishlistRef = collection(db, "wishlists");
       const q = query(wishlistRef, where("userId", "==", user.uid));
+
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
         setWishlistCount(snapshot.size);
       });
 
+
       return () => unsubscribe();
     }, []),
   );
+
 
   // Set up real-time listener for followed shops count
   useFocusEffect(
@@ -128,20 +212,26 @@ export default function ProfileScreen() {
         return;
       }
 
+
       setLoadingFollowed(true);
+
 
       const followsRef = collection(db, "follows");
       const q = query(followsRef, where("userId", "==", user.uid));
 
+
       const unsubscribe = onSnapshot(q, async (snapshot) => {
         const shops: FollowedShop[] = [];
+
 
         for (const docSnapshot of snapshot.docs) {
           const followData = docSnapshot.data();
           const shopId = followData.shopId;
 
+
           const sellerRef = doc(db, "sellers", shopId);
           const sellerSnap = await getDoc(sellerRef);
+
 
           if (sellerSnap.exists()) {
             const sellerData = sellerSnap.data();
@@ -154,29 +244,28 @@ export default function ProfileScreen() {
           }
         }
 
+
         setFollowedShops(shops);
         setFollowingCount(shops.length);
         setLoadingFollowed(false);
       });
 
+
       return () => unsubscribe();
     }, []),
   );
 
-  const loadData = async () => {
-    if (isLoggedIn()) {
-      await fetchProfile();
-      await fetchAddresses();
-    }
-  };
 
   const handleLogout = async () => {
     if (loggingOut) return;
 
+
     setLoggingOut(true);
+
 
     try {
       await auth.signOut();
+      setProfileData(null);
       setFollowedShops([]);
       setWishlistCount(0);
       setReviewsCount(0);
@@ -188,6 +277,7 @@ export default function ProfileScreen() {
     }
   };
 
+
   const handleEditProfile = () => {
     if (!isLoggedIn()) {
       showLoginPrompt("edit your profile");
@@ -196,6 +286,7 @@ export default function ProfileScreen() {
     router.push("/(tabs)/edit-profile");
   };
 
+
   const navigateToStore = (storeId: string) => {
     if (!isLoggedIn()) {
       showLoginPrompt("view shop details");
@@ -203,6 +294,7 @@ export default function ProfileScreen() {
     }
     router.push(`/store/${storeId}`);
   };
+
 
   const navigateToAllFollowing = () => {
     if (!isLoggedIn()) {
@@ -215,6 +307,7 @@ export default function ProfileScreen() {
     });
   };
 
+
   const navigateTo = (screen: string) => {
     // Check login for protected screens
     const protectedScreens = [
@@ -224,6 +317,7 @@ export default function ProfileScreen() {
       "wishlist",
       "following",
     ];
+
 
     if (protectedScreens.includes(screen) && !isLoggedIn()) {
       let action = "";
@@ -250,6 +344,7 @@ export default function ProfileScreen() {
       return;
     }
 
+
     switch (screen) {
       case "addresses":
         router.push("/(tabs)/addresses");
@@ -274,6 +369,7 @@ export default function ProfileScreen() {
     }
   };
 
+
   const MenuItem = ({ icon, title, subtitle, onPress, badge }: any) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <View style={styles.menuItemLeft}>
@@ -294,6 +390,7 @@ export default function ProfileScreen() {
       )}
     </TouchableOpacity>
   );
+
 
   // Login Required Modal Component
   const LoginRequiredModal = () => (
@@ -317,6 +414,7 @@ export default function ProfileScreen() {
             favorites, and track your orders!
           </Text>
 
+
           <View style={styles.loginModalButtons}>
             <TouchableOpacity
               style={[styles.loginModalButton, styles.loginButtonModal]}
@@ -332,6 +430,7 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
 
+
           <TouchableOpacity
             style={styles.loginModalClose}
             onPress={closeLoginModal}
@@ -343,7 +442,11 @@ export default function ProfileScreen() {
     </Modal>
   );
 
-  if (loading && isLoggedIn()) {
+
+  const loading = profileLoading && !profileData && isLoggedIn();
+
+
+  if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#C35822" />
@@ -351,13 +454,25 @@ export default function ProfileScreen() {
     );
   }
 
-  const defaultAddress = addresses?.find((addr) => addr.isDefault);
+
   const user = auth.currentUser;
   const loggedIn = isLoggedIn();
+  const profile = profileData;
+
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#C35822"]}
+            tintColor="#C35822"
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Profile</Text>
@@ -365,6 +480,7 @@ export default function ProfileScreen() {
             <Ionicons name="settings-outline" size={24} color="#32221B" />
           </TouchableOpacity>
         </View>
+
 
         {/* Profile Card */}
         <View style={styles.profileCard}>
@@ -389,6 +505,7 @@ export default function ProfileScreen() {
             )}
           </View>
 
+
           <Text style={styles.profileName}>
             {loggedIn ? profile?.fullName || "User" : "Guest User"}
           </Text>
@@ -397,6 +514,7 @@ export default function ProfileScreen() {
               ? profile?.email || user?.email || "No email"
               : "Not logged in"}
           </Text>
+
 
           {loggedIn ? (
             <TouchableOpacity
@@ -415,6 +533,7 @@ export default function ProfileScreen() {
               <Text style={styles.loginButtonText}>Log In / Sign Up</Text>
             </TouchableOpacity>
           )}
+
 
           {/* Stats Row - Reviews, Wishlist, Following */}
           <View style={styles.statsRow}>
@@ -444,6 +563,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+
         {/* My Orders - Quick Action */}
         <TouchableOpacity
           style={styles.myOrdersCard}
@@ -465,9 +585,11 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={20} color="#C0B7AE" />
         </TouchableOpacity>
 
+
         {/* Account Settings Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account Settings</Text>
+
 
           <MenuItem
             icon="location-outline"
@@ -479,6 +601,7 @@ export default function ProfileScreen() {
             }
             onPress={() => navigateTo("addresses")}
           />
+
 
           <MenuItem
             icon="card-outline"
@@ -497,9 +620,11 @@ export default function ProfileScreen() {
           />
         </View>
 
+
         {/* Support Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Support</Text>
+
 
           <MenuItem
             icon="chatbubble-outline"
@@ -507,6 +632,7 @@ export default function ProfileScreen() {
             subtitle="Chat with our support team"
             onPress={() => router.push("/chatbot?from=profile")}
           />
+
 
           <MenuItem
             icon="information-circle-outline"
@@ -518,10 +644,12 @@ export default function ProfileScreen() {
           />
         </View>
 
+
         {/* Preferences - Only show for logged in users */}
         {loggedIn && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Preferences</Text>
+
 
             <View style={styles.preferenceItem}>
               <View style={styles.preferenceLeft}>
@@ -541,6 +669,7 @@ export default function ProfileScreen() {
             </View>
           </View>
         )}
+
 
         {/* Logout Button - Only show for logged in users */}
         {loggedIn ? (
@@ -574,14 +703,17 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
 
+
         <View style={styles.bottomPadding} />
       </ScrollView>
+
 
       {/* Login Required Modal */}
       <LoginRequiredModal />
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {

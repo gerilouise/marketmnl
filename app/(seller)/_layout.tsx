@@ -102,6 +102,20 @@ export default function SellerLayout() {
           href: null, // This hides it from the tab bar
         }}
       />
+
+      <Tabs.Screen
+        name="help-support"
+        options={{
+          href: null, // This hides it from the tab bar
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings"
+        options={{
+          href: null, // This hides it from the tab bar
+        }}
+      />
     </Tabs>
   );
 }
