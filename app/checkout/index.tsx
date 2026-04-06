@@ -18,6 +18,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,6 +27,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import PayMongoWebView from "../components/PayMongoWebView";
+import { createCheckoutSession } from "../services/paymongo";
 
 const PAYMENT_METHODS = ["Cash on Delivery", "GCash", "Maya", "Credit Card"];
 
@@ -134,6 +137,11 @@ export default function CheckoutScreen() {
   const [expiryDate, setExpiryDate] = useState("");
   const [cvv, setCvv] = useState("");
 
+  // PayMongo states
+  const [showPayMongoWebView, setShowPayMongoWebView] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState("");
+  const [isPayMongoProcessing, setIsPayMongoProcessing] = useState(false);
+
   useEffect(() => {
     loadAddresses();
 
@@ -211,10 +219,109 @@ export default function CheckoutScreen() {
 
     if (selectedPayment === "Cash on Delivery") {
       processOrder();
-    } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
-      setShowPaymentModal(true);
-    } else if (selectedPayment === "Credit Card") {
-      setShowCreditCardModal(true);
+    } else {
+      handlePayMongoPayment();
+    }
+  };
+
+  // Handle PayMongo payment
+  const handlePayMongoPayment = async () => {
+    if (!selectedAddress) {
+      Alert.alert("No Address", "Please add a shipping address first");
+      router.push("/checkout/select-address");
+      return;
+    }
+
+    if (checkoutItems.length === 0) {
+      Alert.alert("No Items", "No items selected for checkout");
+      router.push("/(tabs)/cart");
+      return;
+    }
+
+    setIsPayMongoProcessing(true);
+
+    try {
+      let paymentMethodTypes: string[] = [];
+      switch (selectedPayment) {
+        case "GCash":
+          paymentMethodTypes = ["gcash"];
+          break;
+        case "Maya":
+          paymentMethodTypes = ["maya"];
+          break;
+        case "Credit Card":
+          paymentMethodTypes = ["card"];
+          break;
+        default:
+          paymentMethodTypes = ["gcash", "maya", "card"];
+      }
+
+      const checkoutItemsList = checkoutItems.map((item) => ({
+        name: item.productName,
+        price: item.productPrice,
+        quantity: item.quantity,
+        id: item.productId,
+      }));
+
+      const user = auth.currentUser;
+
+      const session = await createCheckoutSession({
+        amount: total,
+        description: `Order from MarketMNL`,
+        paymentMethodTypes: paymentMethodTypes,
+        successUrl: "marketmnl://payment-success",
+        failedUrl: "marketmnl://payment-failed",
+        metadata: {
+          userId: user?.uid || "",
+          itemsCount: checkoutItems.length,
+          customerName: selectedAddress.fullName,
+          customerEmail: user?.email || "",
+        },
+        items: checkoutItemsList,
+      });
+
+      const checkoutUrl = session.attributes.checkout_url;
+      console.log("🔗 CHECKOUT URL:", checkoutUrl);
+
+      // For web testing - open in new tab and detect return
+      if (Platform.OS === "web") {
+        // Open PayMongo checkout in a new tab
+        const newWindow = window.open(checkoutUrl, "_blank");
+
+        // Set up a timer to check if the user has returned
+        // This is a workaround for web since we can't directly detect payment completion
+        Alert.alert(
+          "PayMongo Checkout",
+          "Complete your payment in the new tab.\n\nAfter payment is successful, click 'Payment Completed' to confirm your order.",
+          [
+            {
+              text: "Payment Completed",
+              onPress: () => {
+                processOrder({
+                  paymentMethod: selectedPayment,
+                  paymongo: true,
+                });
+              },
+            },
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+          ],
+        );
+      } else {
+        // For mobile - use WebView
+        setCheckoutUrl(checkoutUrl);
+        setShowPayMongoWebView(true);
+      }
+    } catch (error: any) {
+      console.error("PayMongo error:", error);
+      Alert.alert(
+        "Payment Error",
+        error.message || "Failed to initialize payment",
+      );
+    } finally {
+      setIsPayMongoProcessing(false);
     }
   };
 
@@ -319,7 +426,7 @@ export default function CheckoutScreen() {
             imageUrl: item.imageUrl,
           })),
           subtotal: sellerSubtotal,
-          shippingFee: sellerShippingFee, // Individual shipping fee for this seller
+          shippingFee: sellerShippingFee,
           total: sellerTotal,
           paymentMethod: selectedPayment,
           paymentDetails: paymentDetails || null,
@@ -327,7 +434,7 @@ export default function CheckoutScreen() {
             id: selectedDelivery.id,
             name: selectedDelivery.name,
             description: selectedDelivery.description,
-            price: sellerShippingFee, // Store the actual amount this seller gets
+            price: sellerShippingFee,
           },
           address: {
             fullName: selectedAddress.fullName,
@@ -581,7 +688,6 @@ export default function CheckoutScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            // Group items by seller for display
             (() => {
               const itemsBySellerForDisplay = new Map();
               for (const item of checkoutItems) {
@@ -927,6 +1033,22 @@ export default function CheckoutScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* PayMongo WebView Modal */}
+      <PayMongoWebView
+        visible={showPayMongoWebView}
+        checkoutUrl={checkoutUrl}
+        onClose={() => {
+          setShowPayMongoWebView(false);
+          setCheckoutUrl("");
+        }}
+        onSuccess={() => {
+          processOrder({ paymentMethod: selectedPayment, paymongo: true });
+        }}
+        onFailure={(error) => {
+          Alert.alert("Payment Failed", error);
+        }}
+      />
 
       {/* Success Modal */}
       <Modal visible={showOrderSuccess} animationType="fade" transparent>
