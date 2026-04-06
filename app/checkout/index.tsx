@@ -286,13 +286,12 @@ export default function CheckoutScreen() {
       // For web testing - open in new tab and detect return
       if (Platform.OS === "web") {
         // Open PayMongo checkout in a new tab
-        const newWindow = window.open(checkoutUrl, "_blank");
+        window.open(checkoutUrl, "_blank");
 
-        // Set up a timer to check if the user has returned
-        // This is a workaround for web since we can't directly detect payment completion
+        // For testing purposes, show a button to simulate payment completion
         Alert.alert(
           "PayMongo Checkout",
-          "Complete your payment in the new tab.\n\nAfter payment is successful, click 'Payment Completed' to confirm your order.",
+          "After completing payment in the new tab, click 'Payment Completed' to place your order.",
           [
             {
               text: "Payment Completed",
