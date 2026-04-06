@@ -17,7 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditAddressScreen() {
   const { id } = useLocalSearchParams();
-  const { addresses, updateAddress, loading } = useFirebaseProfile();
+  const { addresses, updateAddress, fetchAddresses, loading } = useFirebaseProfile();
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -75,7 +75,9 @@ export default function EditAddressScreen() {
     const success = await updateAddress(id as string, updates);
 
     if (success) {
-      router.back();
+      // Refresh addresses before navigating back
+      await fetchAddresses();
+      router.replace("/(tabs)/addresses");
     }
 
     setSaving(false);
@@ -85,7 +87,7 @@ export default function EditAddressScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => router.replace("/(tabs)/addresses")}
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={24} color="#32221B" />
@@ -256,7 +258,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#FFF",
+    backgroundColor: "#FBF8F4",
     borderBottomWidth: 1,
     borderBottomColor: "#E0DAD1",
   },
@@ -264,7 +266,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F5F0EB",
     justifyContent: "center",
     alignItems: "center",
   },

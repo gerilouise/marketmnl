@@ -1,6 +1,5 @@
 // app/_layout.tsx
 import { CartProvider } from "@/app/contexts/CartContext";
-import { ChatProvider } from "@/app/contexts/ChatContext";
 import * as Linking from "expo-linking";
 import { router, Stack } from "expo-router";
 import { useEffect } from "react";
@@ -53,37 +52,36 @@ export default function RootLayout() {
 
   return (
     <CartProvider>
-      <ChatProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="auth" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="(seller)" options={{ headerShown: false }} />
-          <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
-          <Stack.Screen name="store/[id]" options={{ headerShown: false }} />
-          <Stack.Screen name="checkout" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="seller/products-add"
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen name="legal" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="(tabs)/chat-list"
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="(tabs)/chat-detail"
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="(seller)/chat-list"
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="(seller)/chat-detail"
-            options={{ headerShown: false }}
-          />
-        </Stack>
-      </ChatProvider>
+      {/* ChatProvider is REMOVED - we're using useFirebaseChat hook directly */}
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="auth" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(seller)" options={{ headerShown: false }} />
+        <Stack.Screen name="product/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="store/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="checkout" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="seller/products-add"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen name="legal" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="(tabs)/chat-list"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="(tabs)/chat-detail"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="(seller)/chat-list"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="(seller)/chat-detail"
+          options={{ headerShown: false }}
+        />
+      </Stack>
     </CartProvider>
   );
 }

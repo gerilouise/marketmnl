@@ -2,9 +2,9 @@
 import { AddressData, useFirebaseProfile } from "@/hooks/useFirebaseProfile";
 import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { deleteDoc, doc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,13 @@ export default function AddressesScreen() {
     useFirebaseProfile();
   const [deletingAddressId, setDeletingAddressId] = useState<string | null>(
     null,
+  );
+
+  // Refresh addresses when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchAddresses();
+    }, [])
   );
 
   // Debug: Log all addresses in state
@@ -57,6 +64,7 @@ export default function AddressesScreen() {
 
   const handleSetDefault = async (id: string) => {
     await setDefaultAddress(id);
+    await fetchAddresses(); // Refresh after setting default
   };
 
   const renderAddress = ({ item }: { item: AddressData }) => {

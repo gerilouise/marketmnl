@@ -1,5 +1,5 @@
-// app/store/[id].tsx - Complete updated version with improved share
-import { useChat } from "@/app/contexts/ChatContext";
+// app/store/[id].tsx - REPLACE the entire file with this
+import { useFirebaseChat } from "@/hooks/useFirebaseChat"; // USE THIS NOT useChat
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
@@ -12,7 +12,7 @@ import {
   query,
   setDoc,
   Timestamp,
-  where
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
@@ -57,7 +57,7 @@ interface Product {
 
 export default function StoreScreen() {
   const { id } = useLocalSearchParams();
-  const { createConversation } = useChat();
+  const { getOrCreateConversation } = useFirebaseChat(); // USING THE RIGHT HOOK
   const [store, setStore] = useState<Store | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
@@ -67,8 +67,8 @@ export default function StoreScreen() {
   const [isOwner, setIsOwner] = useState(false);
   const [wishlist, setWishlist] = useState<Set<string>>(new Set());
   const [followingLoading, setFollowingLoading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
 
-  // Load store data and products
   useEffect(() => {
     loadStoreData();
     loadProducts();
@@ -81,14 +81,11 @@ export default function StoreScreen() {
     if (!id) return;
 
     try {
-      console.log("Loading store data for ID:", id);
-
       const sellerRef = doc(db, "sellers", id as string);
       const sellerSnap = await getDoc(sellerRef);
 
       if (sellerSnap.exists()) {
         const sellerData = sellerSnap.data();
-        console.log("Store found in sellers collection:", sellerData.storeName);
 
         setStore({
           id: id as string,
@@ -121,7 +118,6 @@ export default function StoreScreen() {
           );
         }
       } else {
-        console.log("Store not found in sellers collection");
         Alert.alert("Error", "Store not found");
         router.back();
       }
@@ -135,7 +131,6 @@ export default function StoreScreen() {
     if (!id) return;
 
     try {
-      console.log("Loading products for seller ID:", id);
       const productsRef = collection(db, "products");
       const q = query(productsRef, where("sellerId", "==", id));
       const querySnapshot = await getDocs(q);
@@ -154,7 +149,6 @@ export default function StoreScreen() {
         });
       });
 
-      console.log(`Found ${productsList.length} products`);
       setProducts(productsList);
       setFilteredProducts(productsList);
     } catch (error) {
@@ -186,7 +180,6 @@ export default function StoreScreen() {
     const user = auth.currentUser;
     if (user && user.uid === id) {
       setIsOwner(true);
-      console.log("User is viewing their own store");
     } else {
       setIsOwner(false);
     }
@@ -261,6 +254,8 @@ export default function StoreScreen() {
     }
   };
 
+  // In your store screen, replace the handleChat function and add the navigation with params
+
   const handleChat = async () => {
     const user = auth.currentUser;
 
@@ -282,90 +277,55 @@ export default function StoreScreen() {
       return;
     }
 
-    setFollowingLoading(true);
+    setChatLoading(true);
 
     try {
-      console.log("Starting chat with seller:", store.uid, store.storeName);
-
-      // Make sure we have valid seller info
-      if (!store.uid || !store.storeName) {
-        Alert.alert("Error", "Seller information is incomplete");
-        return;
-      }
-
-      const conversationId = await createConversation(
+      const conversationId = await getOrCreateConversation(
         store.uid,
         store.storeName,
       );
 
-      if (!conversationId) {
-        Alert.alert("Error", "Failed to start conversation. Please try again.");
-        return;
+      if (conversationId) {
+        router.push({
+          pathname: "/(tabs)/chat-detail",
+          params: {
+            id: conversationId,
+            sellerName: store.storeName,
+            buyerName: user.displayName || "Customer",
+          },
+        });
+      } else {
+        Alert.alert(
+          "Error",
+          "Failed to create conversation. Please try again.",
+        );
       }
-
-      console.log("Conversation created/found:", conversationId);
-
-      // Navigate to chat with proper parameters
-      // The chat detail screen should handle both cases:
-      // 1. If conversation exists, it will load messages
-      // 2. If new, it will show empty state
-      router.push({
-        pathname: "/(tabs)/chat-detail",
-        params: {
-          conversationId: conversationId,
-          sellerId: store.uid,
-          sellerName: store.storeName,
-        },
-      });
     } catch (error) {
-      console.error("Error starting chat:", error);
-      Alert.alert("Error", "Failed to start conversation. Please try again.");
+      console.error("CHAT ERROR:", error);
+      Alert.alert("Error", "Something went wrong. Please try again.");
     } finally {
-      setFollowingLoading(false);
+      setChatLoading(false);
     }
   };
 
   const handleShare = async () => {
-    if (!store) {
-      Alert.alert("Error", "Store information not available");
-      return;
-    }
+    if (!store) return;
 
     try {
-      // Create a beautiful share message with store details
       const storeUrl = Platform.select({
         ios: `marketmnl://store/${store.id}`,
         android: `marketmnl://store/${store.id}`,
         default: `https://marketmnl.com/store/${store.id}`,
       });
 
-      const shareMessage =
-        `🏪 *${store.storeName}* 🏪\n\n` +
-        `📍 Location: ${store.location || "Online Store"}\n` +
-        `⭐ Rating: ${store.rating || 4.5} ★ (${store.reviewsCount || 0} reviews)\n` +
-        `📦 Products: ${products.length} items\n\n` +
-        `${store.description ? `📝 ${store.description.substring(0, 100)}${store.description.length > 100 ? "..." : ""}\n\n` : ""}` +
-        `👉 Check out this store on MarketMNL: ${storeUrl}\n\n` +
-        `📱 Download MarketMNL app: https://marketmnl.com/download`;
-
+      const shareMessage = `Check out ${store.storeName} on MarketMNL!`;
       const result = await Share.share({
         message: shareMessage,
         title: store.storeName,
         url: storeUrl,
       });
-
-      if (result.action === Share.sharedAction) {
-        console.log("Store shared successfully");
-      }
     } catch (error: any) {
       console.error("Error sharing store:", error);
-      // Don't show alert for user cancellation
-      if (error.message !== "User canceled share dialog") {
-        Alert.alert(
-          "Share Failed",
-          "Unable to share at this time. Please try again.",
-        );
-      }
     }
   };
 
@@ -392,7 +352,6 @@ export default function StoreScreen() {
           newSet.delete(productId);
           return newSet;
         });
-        Alert.alert("Removed", `${product.name} removed from wishlist`);
       } else {
         await setDoc(docRef, {
           id: itemId,
@@ -406,11 +365,9 @@ export default function StoreScreen() {
           addedAt: Timestamp.now(),
         });
         setWishlist((prev) => new Set(prev).add(productId));
-        Alert.alert("Added", `${product.name} added to wishlist`);
       }
     } catch (error) {
       console.error("Error toggling wishlist:", error);
-      Alert.alert("Error", "Failed to update wishlist");
     }
   };
 
@@ -428,7 +385,6 @@ export default function StoreScreen() {
     }
   };
 
-  // Helper function to format data for 2-column grid
   const formatProductData = () => {
     const formattedData = [...filteredProducts];
     if (formattedData.length % 2 !== 0) {
@@ -495,7 +451,6 @@ export default function StoreScreen() {
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Store</Text>
-          <View style={{ width: 40 }} />
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
@@ -515,7 +470,6 @@ export default function StoreScreen() {
             <Ionicons name="arrow-back" size={24} color="#32221B" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Store</Text>
-          <View style={{ width: 40 }} />
         </View>
         <View style={styles.errorContainer}>
           <Ionicons name="storefront-outline" size={60} color="#C35822" />
@@ -566,26 +520,22 @@ export default function StoreScreen() {
 
           <View style={styles.storeDetails}>
             <Text style={styles.storeName}>{store.storeName}</Text>
-
             {store.location && (
               <View style={styles.infoRow}>
                 <Ionicons name="location-outline" size={14} color="#8F796F" />
                 <Text style={styles.infoText}>{store.location}</Text>
               </View>
             )}
-
             <View style={styles.infoRow}>
               <Ionicons name="star" size={14} color="#FFD700" />
               <Text style={styles.infoText}>
-                {store.rating || 4.5} ({store.reviewsCount || 0} reviews)
+                {store.rating} ({store.reviewsCount} reviews)
               </Text>
             </View>
-
             <View style={styles.infoRow}>
               <Ionicons name="cube-outline" size={14} color="#8F796F" />
               <Text style={styles.infoText}>{products.length} products</Text>
             </View>
-
             {store.description && (
               <Text style={styles.description}>{store.description}</Text>
             )}
@@ -626,9 +576,9 @@ export default function StoreScreen() {
           <TouchableOpacity
             style={styles.chatButton}
             onPress={handleChat}
-            disabled={followingLoading}
+            disabled={chatLoading}
           >
-            {followingLoading ? (
+            {chatLoading ? (
               <ActivityIndicator size="small" color="#FFF" />
             ) : (
               <>
@@ -689,7 +639,6 @@ export default function StoreScreen() {
               Products ({filteredProducts.length})
             </Text>
           </View>
-
           <FlatList
             data={formattedProducts}
             renderItem={renderProductItem}
@@ -705,7 +654,6 @@ export default function StoreScreen() {
             }
           />
         </View>
-
         <View style={styles.bottomPadding} />
       </ScrollView>
     </SafeAreaView>
@@ -713,15 +661,8 @@ export default function StoreScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FBF8F4",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  container: { flex: 1, backgroundColor: "#FBF8F4" },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
@@ -740,11 +681,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 25,
   },
-  goBackButtonText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+  goBackButtonText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -764,11 +701,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#32221B",
-  },
+  headerTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
   shareButton: {
     width: 40,
     height: 40,
@@ -791,9 +724,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  avatarContainer: {
-    marginRight: 16,
-  },
+  avatarContainer: { marginRight: 16 },
   avatarImage: {
     width: 80,
     height: 80,
@@ -812,26 +743,15 @@ const styles = StyleSheet.create({
     borderColor: "#E0DAD1",
     borderStyle: "dashed",
   },
-  storeDetails: {
-    flex: 1,
-    justifyContent: "center",
-  },
+  storeDetails: { flex: 1, justifyContent: "center" },
   storeName: {
     fontSize: 18,
     fontWeight: "bold",
     color: "#32221B",
     marginBottom: 6,
   },
-  infoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 12,
-    color: "#8F796F",
-    marginLeft: 4,
-  },
+  infoRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
+  infoText: { fontSize: 12, color: "#8F796F", marginLeft: 4 },
   description: {
     fontSize: 13,
     color: "#666",
@@ -839,12 +759,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
   },
-  categoriesScroll: {
-    marginBottom: 12,
-  },
-  categoriesScrollContent: {
-    paddingHorizontal: 16,
-  },
+  categoriesScroll: { marginBottom: 12 },
+  categoriesScrollContent: { paddingHorizontal: 16 },
   categoryChip: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -852,17 +768,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginRight: 8,
   },
-  categoryChipActive: {
-    backgroundColor: "#C35822",
-  },
-  categoryChipText: {
-    fontSize: 13,
-    color: "#666",
-    fontWeight: "500",
-  },
-  categoryChipTextActive: {
-    color: "#FFF",
-  },
+  categoryChipActive: { backgroundColor: "#C35822" },
+  categoryChipText: { fontSize: 13, color: "#666", fontWeight: "500" },
+  categoryChipTextActive: { color: "#FFF" },
   actionButtons: {
     flexDirection: "row",
     gap: 12,
@@ -880,11 +788,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
-  chatButtonText: {
-    color: "#FFF",
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  chatButtonText: { color: "#FFF", fontSize: 14, fontWeight: "600" },
   followButton: {
     flex: 1,
     flexDirection: "row",
@@ -898,39 +802,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#C35822",
   },
-  followingButton: {
-    backgroundColor: "#C35822",
-    borderColor: "#C35822",
-  },
-  editStoreButton: {
-    backgroundColor: "#C35822",
-    borderColor: "#C35822",
-  },
-  followButtonText: {
-    color: "#C35822",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  followingButtonText: {
-    color: "#FFF",
-  },
-  editButtonText: {
-    color: "#FFF",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  productsSection: {
-    padding: 16,
-  },
-  productsHeader: {
-    marginBottom: 12,
-    paddingHorizontal: 8,
-  },
-  productsTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#32221B",
-  },
+  followingButton: { backgroundColor: "#C35822", borderColor: "#C35822" },
+  editStoreButton: { backgroundColor: "#C35822", borderColor: "#C35822" },
+  followButtonText: { color: "#C35822", fontSize: 14, fontWeight: "600" },
+  followingButtonText: { color: "#FFF" },
+  editButtonText: { color: "#FFF", fontSize: 14, fontWeight: "600" },
+  productsSection: { padding: 16 },
+  productsHeader: { marginBottom: 12, paddingHorizontal: 8 },
+  productsTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
   productsGrid: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -999,31 +878,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  productPrice: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#C35822",
-  },
-  productRating: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  ratingText: {
-    fontSize: 12,
-    color: "#666",
-  },
+  productPrice: { fontSize: 14, fontWeight: "600", color: "#C35822" },
+  productRating: { flexDirection: "row", alignItems: "center", gap: 2 },
+  ratingText: { fontSize: 12, color: "#666" },
   emptyProducts: {
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 40,
   },
-  emptyProductsText: {
-    fontSize: 14,
-    color: "#8F796F",
-    marginTop: 8,
-  },
-  bottomPadding: {
-    height: 20,
-  },
+  emptyProductsText: { fontSize: 14, color: "#8F796F", marginTop: 8 },
+  bottomPadding: { height: 20 },
 });

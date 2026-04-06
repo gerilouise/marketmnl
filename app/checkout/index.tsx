@@ -82,6 +82,45 @@ const calculateShippingPerSeller = (
   return shippingFeePerSeller;
 };
 
+// Helper function to check stock for all items with detailed results
+const checkAllItemsStock = async (items: any[]): Promise<{
+  allAvailable: boolean;
+  insufficientItems: { productName: string; requested: number; available: number; sellerName: string }[];
+  totalIssues: number;
+}> => {
+  const insufficientItems: { productName: string; requested: number; available: number; sellerName: string }[] = [];
+
+  for (const item of items) {
+    const productRef = doc(db, "products", item.productId);
+    const productSnap = await getDoc(productRef);
+
+    if (!productSnap.exists()) {
+      insufficientItems.push({
+        productName: item.productName,
+        requested: item.quantity,
+        available: 0,
+        sellerName: item.sellerName || "Unknown Seller",
+      });
+    } else {
+      const currentStock = productSnap.data().stockQuantity || 0;
+      if (currentStock < item.quantity) {
+        insufficientItems.push({
+          productName: item.productName,
+          requested: item.quantity,
+          available: currentStock,
+          sellerName: item.sellerName || "Unknown Seller",
+        });
+      }
+    }
+  }
+
+  return {
+    allAvailable: insufficientItems.length === 0,
+    insufficientItems,
+    totalIssues: insufficientItems.length,
+  };
+};
+
 export default function CheckoutScreen() {
   const { selectedItems, setSelectedItems, loadCart, removeSelectedItems } =
     useCart();
@@ -91,7 +130,10 @@ export default function CheckoutScreen() {
   const [selectedPayment, setSelectedPayment] = useState("Cash on Delivery");
   const [selectedDelivery, setSelectedDelivery] = useState(DELIVERY_OPTIONS[0]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isCheckingStock, setIsCheckingStock] = useState(false);
   const [showOrderSuccess, setShowOrderSuccess] = useState(false);
+  const [showStockWarning, setShowStockWarning] = useState(false);
+  const [stockWarningItems, setStockWarningItems] = useState<{ productName: string; requested: number; available: number; sellerName: string }[]>([]);
   const [orderNumber, setOrderNumber] = useState("");
   const [orderCount, setOrderCount] = useState(1);
   const [isAddressSelectedFromModal, setIsAddressSelectedFromModal] =
@@ -178,25 +220,62 @@ export default function CheckoutScreen() {
   const totalShippingFee = shippingFeePerSeller * uniqueSellers;
   const total = subtotal + totalShippingFee;
 
-  const handlePaymentSelection = () => {
+  const handlePaymentSelection = async () => {
     if (!selectedAddress) {
-      Alert.alert("No Address", "Please add a shipping address first");
-      router.push("/checkout/select-address");
+      Alert.alert("📍 No Address", "Please add a shipping address first", [
+        {
+          text: "Add Address",
+          onPress: () => router.push("/checkout/select-address"),
+        },
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+      ]);
       return;
     }
 
     if (checkoutItems.length === 0) {
-      Alert.alert("No Items", "No items selected for checkout");
-      router.push("/(tabs)/cart");
+      Alert.alert("🛒 No Items", "No items selected for checkout", [
+        {
+          text: "Go to Cart",
+          onPress: () => router.push("/(tabs)/cart"),
+        },
+      ]);
       return;
     }
 
-    if (selectedPayment === "Cash on Delivery") {
-      processOrder();
-    } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
-      setShowPaymentModal(true);
-    } else if (selectedPayment === "Credit Card") {
-      setShowCreditCardModal(true);
+    // Check stock before proceeding to payment
+    setIsCheckingStock(true);
+    try {
+      const stockCheck = await checkAllItemsStock(checkoutItems);
+      
+      if (!stockCheck.allAvailable) {
+        // Show custom stock warning modal
+        setStockWarningItems(stockCheck.insufficientItems);
+        setShowStockWarning(true);
+        setIsCheckingStock(false);
+        return;
+      }
+      
+      // Stock is sufficient, proceed with payment
+      if (selectedPayment === "Cash on Delivery") {
+        await processOrder();
+      } else if (selectedPayment === "GCash" || selectedPayment === "Maya") {
+        setIsCheckingStock(false);
+        setShowPaymentModal(true);
+      } else if (selectedPayment === "Credit Card") {
+        setIsCheckingStock(false);
+        setShowCreditCardModal(true);
+      }
+    } catch (error) {
+      console.error("Stock check error:", error);
+      Alert.alert(
+        "❌ Error",
+        "Failed to check stock availability. Please try again.",
+        [{ text: "OK" }]
+      );
+      setIsCheckingStock(false);
     }
   };
 
@@ -210,6 +289,20 @@ export default function CheckoutScreen() {
         setIsProcessing(false);
         return;
       }
+
+      // DOUBLE CHECK: Verify stock again before processing (in case stock changed during payment)
+      console.log("🔍 Double checking stock before finalizing order...");
+      const stockCheck = await checkAllItemsStock(checkoutItems);
+      
+      if (!stockCheck.allAvailable) {
+        // Show custom stock warning modal
+        setStockWarningItems(stockCheck.insufficientItems);
+        setShowStockWarning(true);
+        setIsProcessing(false);
+        return;
+      }
+      
+      console.log("✅ All items have sufficient stock");
 
       // Group items by seller
       const itemsBySeller = new Map();
@@ -233,28 +326,6 @@ export default function CheckoutScreen() {
           });
         }
         itemsBySeller.get(item.sellerId).items.push(item);
-      }
-
-      // First, check if all items have sufficient stock
-      for (const item of checkoutItems) {
-        const productRef = doc(db, "products", item.productId);
-        const productSnap = await getDoc(productRef);
-
-        if (productSnap.exists()) {
-          const currentStock = productSnap.data().stockQuantity || 0;
-          if (currentStock < item.quantity) {
-            Alert.alert(
-              "Insufficient Stock",
-              `${item.productName} only has ${currentStock} items in stock. Please reduce quantity.`,
-            );
-            setIsProcessing(false);
-            return;
-          }
-        } else {
-          Alert.alert("Error", `Product ${item.productName} not found`);
-          setIsProcessing(false);
-          return;
-        }
       }
 
       console.log(`📦 Processing orders for ${itemsBySeller.size} seller(s)`);
@@ -286,10 +357,8 @@ export default function CheckoutScreen() {
         // Generate order number with suffix for multiple sellers
         let orderNumberForSeller;
         if (itemsBySeller.size === 1) {
-          // Single seller - no suffix needed
           orderNumberForSeller = generateOrderNumber();
         } else {
-          // Multiple sellers - add suffix (A, B, C, etc.)
           orderNumberForSeller = `${generateOrderNumber()}-${orderSuffix}`;
           orderSuffix = String.fromCharCode(orderSuffix.charCodeAt(0) + 1);
         }
@@ -438,8 +507,9 @@ export default function CheckoutScreen() {
     } catch (error: any) {
       console.error("❌ Order error:", error);
       Alert.alert(
-        "Error",
+        "❌ Order Failed",
         error.message || "Failed to place order. Please try again.",
+        [{ text: "OK" }]
       );
     } finally {
       setIsProcessing(false);
@@ -528,6 +598,7 @@ export default function CheckoutScreen() {
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#C35822" />
+          <Text style={styles.loadingText}>Loading your information...</Text>
         </View>
       </SafeAreaView>
     );
@@ -567,7 +638,6 @@ export default function CheckoutScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            // Group items by seller for display
             (() => {
               const itemsBySellerForDisplay = new Map();
               for (const item of checkoutItems) {
@@ -600,7 +670,6 @@ export default function CheckoutScreen() {
                         </Text>
                       </View>
                     ))}
-                    {/* Show shipping fee for this seller */}
                     <View style={styles.sellerShippingRow}>
                       <Text style={styles.sellerShippingLabel}>
                         Shipping Fee
@@ -792,18 +861,23 @@ export default function CheckoutScreen() {
         <TouchableOpacity
           style={[
             styles.placeOrderButton,
-            (!selectedAddress || isProcessing || checkoutItems.length === 0) &&
+            (!selectedAddress || isProcessing || isCheckingStock || checkoutItems.length === 0) &&
               styles.placeOrderButtonDisabled,
           ]}
           onPress={handlePaymentSelection}
           disabled={
-            !selectedAddress || isProcessing || checkoutItems.length === 0
+            !selectedAddress || isProcessing || isCheckingStock || checkoutItems.length === 0
           }
         >
-          {isProcessing ? (
+          {isCheckingStock ? (
             <View style={styles.processingContainer}>
               <ActivityIndicator size="small" color="#FFF" />
-              <Text style={styles.placeOrderText}>Processing...</Text>
+              <Text style={styles.placeOrderText}>Checking stock...</Text>
+            </View>
+          ) : isProcessing ? (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator size="small" color="#FFF" />
+              <Text style={styles.placeOrderText}>Processing order...</Text>
             </View>
           ) : (
             <Text style={styles.placeOrderText}>
@@ -812,6 +886,65 @@ export default function CheckoutScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Stock Warning Modal - Custom Popup like Order Success Modal */}
+      <Modal visible={showStockWarning} animationType="fade" transparent>
+        <View style={styles.warningOverlay}>
+          <View style={styles.warningContent}>
+            <View style={styles.warningIcon}>
+              <Ionicons name="alert-circle" size={60} color="#FF6B35" />
+            </View>
+            <Text style={styles.warningTitle}>Insufficient Stock</Text>
+            <Text style={styles.warningSubtitle}>
+              The following items have stock issues:
+            </Text>
+            
+            <ScrollView style={styles.warningListContainer}>
+              {stockWarningItems.map((item, index) => (
+                <View key={index} style={styles.warningItem}>
+                  <View style={styles.warningItemHeader}>
+                    <Text style={styles.warningProductName}>{item.productName}</Text>
+                    <Text style={styles.warningSellerName}>{item.sellerName}</Text>
+                  </View>
+                  <View style={styles.warningItemDetails}>
+                    <Text style={styles.warningRequested}>
+                      Requested: {item.requested}
+                    </Text>
+                    <Text style={styles.warningAvailable}>
+                      Available: {item.available}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            
+            <Text style={styles.warningMessage}>
+              Please update your cart and try again.
+            </Text>
+            
+            <TouchableOpacity
+              style={styles.warningButton}
+              onPress={() => {
+                setShowStockWarning(false);
+                setStockWarningItems([]);
+                router.push("/(tabs)/cart");
+              }}
+            >
+              <Text style={styles.warningButtonText}>Go to Cart</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.warningCancelButton}
+              onPress={() => {
+                setShowStockWarning(false);
+                setStockWarningItems([]);
+              }}
+            >
+              <Text style={styles.warningCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* GCash/Maya Modal */}
       <Modal visible={showPaymentModal} animationType="slide" transparent>
@@ -848,8 +981,18 @@ export default function CheckoutScreen() {
 
             <TouchableOpacity
               style={styles.confirmButton}
-              onPress={() => {
+              onPress={async () => {
                 if (validateGCashMaya()) {
+                  // Check stock again before processing
+                  setIsProcessing(true);
+                  const stockCheck = await checkAllItemsStock(checkoutItems);
+                  if (!stockCheck.allAvailable) {
+                    setShowPaymentModal(false);
+                    setStockWarningItems(stockCheck.insufficientItems);
+                    setShowStockWarning(true);
+                    setIsProcessing(false);
+                    return;
+                  }
                   processOrder({ phoneNumber, referenceNumber });
                 }
               }}
@@ -921,8 +1064,18 @@ export default function CheckoutScreen() {
 
             <TouchableOpacity
               style={styles.confirmButton}
-              onPress={() => {
+              onPress={async () => {
                 if (validateCreditCard()) {
+                  // Check stock again before processing
+                  setIsProcessing(true);
+                  const stockCheck = await checkAllItemsStock(checkoutItems);
+                  if (!stockCheck.allAvailable) {
+                    setShowCreditCardModal(false);
+                    setStockWarningItems(stockCheck.insufficientItems);
+                    setShowStockWarning(true);
+                    setIsProcessing(false);
+                    return;
+                  }
                   processOrder({ cardNumber, cardName, expiryDate, cvv });
                 }
               }}
@@ -1007,6 +1160,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "600", color: "#32221B" },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#8F796F",
+  },
   scrollContent: { padding: 16 },
   section: {
     backgroundColor: "#FFF",
@@ -1321,6 +1479,108 @@ const styles = StyleSheet.create({
   placeOrderButtonDisabled: { backgroundColor: "#E0DAD1" },
   placeOrderText: { color: "#FFF", fontSize: 16, fontWeight: "600" },
   processingContainer: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+  // Warning Modal Styles (similar to success modal)
+  warningOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  warningContent: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "85%",
+    maxHeight: "80%",
+    alignItems: "center",
+  },
+  warningIcon: { marginBottom: 16 },
+  warningTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#FF6B35",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  warningSubtitle: {
+    fontSize: 14,
+    color: "#8F796F",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  warningListContainer: {
+    maxHeight: 250,
+    width: "100%",
+    marginBottom: 16,
+  },
+  warningItem: {
+    backgroundColor: "#FFF9F5",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#FFE0D0",
+  },
+  warningItemHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  warningProductName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#32221B",
+    flex: 1,
+  },
+  warningSellerName: {
+    fontSize: 11,
+    color: "#C35822",
+  },
+  warningItemDetails: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  warningRequested: {
+    fontSize: 12,
+    color: "#FF6B35",
+  },
+  warningAvailable: {
+    fontSize: 12,
+    color: "#4CAF50",
+  },
+  warningMessage: {
+    fontSize: 14,
+    color: "#8F796F",
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  warningButton: {
+    backgroundColor: "#C35822",
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginBottom: 12,
+    width: "100%",
+  },
+  warningButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  warningCancelButton: {
+    paddingVertical: 12,
+    width: "100%",
+  },
+  warningCancelButtonText: {
+    color: "#8F796F",
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+  },
 
   modalOverlay: {
     flex: 1,

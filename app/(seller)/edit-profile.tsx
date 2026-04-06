@@ -91,7 +91,7 @@ export default function EditProfileScreen() {
 
       if (success) {
         Alert.alert("Success", "Profile updated successfully!");
-        router.back();
+        router.replace("/(seller)/profile");
       } else {
         Alert.alert("Error", "Failed to update profile");
       }
@@ -141,7 +141,7 @@ export default function EditProfileScreen() {
   };
 
   const handleGoBack = () => {
-    router.back();
+    router.replace("/(seller)/profile");
   };
 
   if (loading) {

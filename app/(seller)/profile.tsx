@@ -269,7 +269,7 @@ export default function SellerProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
           
-          {/* Notifications Toggle */}
+          {/* Notifications Toggle - Only preference */}
           <View style={styles.menuItem}>
             <View style={styles.menuItemLeft}>
               <View style={styles.iconContainer}>
@@ -285,17 +285,20 @@ export default function SellerProfileScreen() {
             />
           </View>
 
+          {/* Settings Menu Item - Opens Settings Page */}
           <MenuItem
             icon="settings-outline"
             title="Settings"
             subtitle="App preferences"
-            onPress={() => Alert.alert("Settings", "Coming soon!")}
+            onPress={() => router.push("/(seller)/settings")}
           />
 
+          {/* Help & Support Menu Item - Opens Help & Support Page */}
           <MenuItem
             icon="help-circle-outline"
             title="Help & Support"
-            onPress={() => Alert.alert("Help", "Contact support@marketmnl.com")}
+            subtitle="FAQs and support"
+            onPress={() => router.push("/(seller)/help-support")}
           />
         </View>
 

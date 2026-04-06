@@ -1,88 +1,44 @@
 // app/(seller)/chat-list.tsx
-import { useChat } from "@/app/contexts/ChatContext";
-import { auth } from "@/lib/firebase";
+import { Conversation, useFirebaseChat } from "@/hooks/useFirebaseChat";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SellerChatListScreen() {
-  const { conversations, selectConversation, loading, refreshConversations } =
-    useChat();
-  const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const { loadConversations, loading } = useFirebaseChat();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+
+  const loadData = useCallback(async () => {
+    const data = await loadConversations();
+    setConversations(data);
+  }, [loadConversations]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshConversations();
-      setRefreshing(false);
-    }, []),
+      loadData();
+
+      // Auto-refresh every 5 seconds
+      const interval = setInterval(() => {
+        loadData();
+      }, 5000);
+
+      return () => clearInterval(interval);
+    }, [loadData]),
   );
 
-  const navigateToChat = (conversation: any) => {
-    selectConversation(conversation);
-    router.push({
-      pathname: "/(seller)/chat-detail",
-      params: { conversationId: conversation.id },
-    });
-  };
-
-  const formatTime = (timestamp: any) => {
-    if (!timestamp) return "";
-    const date = timestamp.toDate();
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const hours = diff / (1000 * 60 * 60);
-
-    if (hours < 24) {
-      return date.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } else if (hours < 48) {
-      return "Yesterday";
-    } else {
-      return date.toLocaleDateString([], { month: "short", day: "numeric" });
-    }
-  };
-
-  const getUnreadCount = (conversation: any) => {
-    const user = auth.currentUser;
-    if (!user) return 0;
-    return conversation.unreadCount?.[user.uid] || 0;
-  };
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    refreshConversations();
-    setTimeout(() => setRefreshing(false), 500);
-  }, []);
-
-  const filteredConversations = conversations.filter((conversation) => {
-    const isSeller = conversation.sellerId === auth.currentUser?.uid;
-    const otherName = isSeller
-      ? conversation.buyerName
-      : conversation.sellerName;
-    return otherName?.toLowerCase().includes(searchQuery.toLowerCase());
-  });
-
-  if (loading) {
+  if (loading && conversations.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Messages</Text>
-        </View>
-        <View style={styles.loadingContainer}>
+        <View style={styles.center}>
           <ActivityIndicator size="large" color="#C35822" />
         </View>
       </SafeAreaView>
@@ -92,84 +48,44 @@ export default function SellerChatListScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
-      </View>
-
-      <View style={styles.searchContainer}>
-        <Ionicons
-          name="search-outline"
-          size={20}
-          color="#8F796F"
-          style={styles.searchIcon}
-        />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search conversations..."
-          placeholderTextColor="#8F796F"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
+        <Text style={styles.headerTitle}>Customer Messages</Text>
       </View>
 
       <FlatList
-        data={filteredConversations}
+        data={conversations}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => {
-          const unreadCount = getUnreadCount(item);
-          const isSeller = item.sellerId === auth.currentUser?.uid;
-          const otherName = isSeller ? item.buyerName : item.sellerName;
-
-          return (
-            <TouchableOpacity
-              style={styles.chatItem}
-              onPress={() => navigateToChat(item)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.avatarContainer}>
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarText}>
-                    {otherName?.substring(0, 2).toUpperCase() || "??"}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.chatInfo}>
-                <View style={styles.chatHeader}>
-                  <Text style={styles.sellerName}>{otherName}</Text>
-                  <Text style={styles.timeText}>
-                    {formatTime(item.lastMessageTime)}
-                  </Text>
-                </View>
-                <View style={styles.messageContainer}>
-                  <Text
-                    style={[
-                      styles.lastMessage,
-                      unreadCount > 0 && styles.unreadMessage,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {item.lastMessage || "No messages yet"}
-                  </Text>
-                  {unreadCount > 0 && <View style={styles.unreadBadge} />}
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={["#C35822"]}
-          />
-        }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.chatItem}
+            onPress={() => {
+              router.push({
+                pathname: "/(seller)/chat-detail",
+                params: {
+                  id: item.id,
+                  buyerName: item.buyerName,
+                  sellerName: item.sellerName,
+                },
+              });
+            }}
+          >
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {(item.buyerName || "CU").substring(0, 2).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.chatInfo}>
+              <Text style={styles.name}>{item.buyerName || "Customer"}</Text>
+              <Text style={styles.lastMessage} numberOfLines={1}>
+                {item.lastMessage || "No messages yet"}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="chatbubbles-outline" size={60} color="#E0DAD1" />
-            <Text style={styles.emptyText}>No messages yet</Text>
-            <Text style={styles.emptySubtext}>
-              When customers message you, they'll appear here
-            </Text>
+          <View style={styles.empty}>
+            <Ionicons name="chatbubbles-outline" size={60} color="#CCC" />
+            <Text style={styles.emptyText}>No conversations yet</Text>
+            <Text style={styles.emptySub}>Customers will appear here</Text>
           </View>
         }
       />
@@ -178,132 +94,48 @@ export default function SellerChatListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FBF8F4",
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 15,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#32221B",
-  },
-  searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFF",
-    marginHorizontal: 20,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "#E0DAD1",
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: "#32221B",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  container: { flex: 1, backgroundColor: "#FBF8F4" },
+  header: { padding: 20, paddingBottom: 10 },
+  headerTitle: { fontSize: 28, fontWeight: "bold", color: "#32221B" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
   chatItem: {
     flexDirection: "row",
-    padding: 16,
-    marginHorizontal: 20,
-    marginBottom: 8,
+    padding: 15,
+    marginHorizontal: 15,
+    marginBottom: 10,
     backgroundColor: "#FFF",
-    borderRadius: 16,
+    borderRadius: 12,
+    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
-    elevation: 2,
-    alignItems: "center",
+    elevation: 1,
   },
-  avatarContainer: {
-    position: "relative",
-    marginRight: 12,
-  },
-  avatarPlaceholder: {
+  avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
     backgroundColor: "#C35822",
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 12,
   },
-  avatarText: {
-    color: "#FFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  chatInfo: {
-    flex: 1,
-  },
-  chatHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  sellerName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#32221B",
-  },
-  timeText: {
-    fontSize: 12,
-    color: "#8F796F",
-  },
-  messageContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  lastMessage: {
-    flex: 1,
-    fontSize: 14,
-    color: "#8F796F",
-    marginRight: 8,
-  },
-  unreadMessage: {
-    color: "#32221B",
-    fontWeight: "500",
-  },
-  unreadBadge: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#C35822",
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 100,
-  },
+  avatarText: { color: "#FFF", fontSize: 16, fontWeight: "bold" },
+  chatInfo: { flex: 1 },
+  name: { fontSize: 16, fontWeight: "600", color: "#32221B", marginBottom: 4 },
+  lastMessage: { fontSize: 14, color: "#8F796F" },
+  empty: { alignItems: "center", paddingTop: 100 },
   emptyText: {
     fontSize: 16,
+    fontWeight: "500",
     color: "#32221B",
     marginTop: 12,
-    fontWeight: "500",
   },
-  emptySubtext: {
+  emptySub: {
     fontSize: 14,
     color: "#8F796F",
     marginTop: 8,
     textAlign: "center",
-    paddingHorizontal: 40,
   },
 });

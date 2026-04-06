@@ -41,6 +41,7 @@ export default function EditProfileScreen() {
       setLastName(profile.lastName || "");
       setPhone(profile.phone || "");
       setProfileImage(profile.photoURL || null);
+      setNewImageUri(null); // Reset new image when profile loads
     }
   }, [profile]);
 
@@ -59,6 +60,8 @@ export default function EditProfileScreen() {
         const uploadedUrl = await uploadProfilePicture(newImageUri);
         if (uploadedUrl) {
           finalPhotoURL = uploadedUrl;
+          // Clear newImageUri after successful upload
+          setNewImageUri(null);
         } else {
           Alert.alert("Error", "Failed to upload profile picture");
           setSaving(false);
@@ -90,7 +93,9 @@ export default function EditProfileScreen() {
       const imageUri = await pickImage();
       if (imageUri) {
         setUploadingImage(true);
+        // Set the new image URI immediately for preview
         setNewImageUri(imageUri);
+        // Also update profileImage to show the new image immediately
         setProfileImage(imageUri);
         setUploadingImage(false);
       }
